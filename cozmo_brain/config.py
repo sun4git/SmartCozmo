@@ -43,6 +43,16 @@ class Settings:
     record_seconds: int = field(default_factory=lambda: _env_int("RECORD_SECONDS", 5))
     record_device: str = field(default_factory=lambda: _env_str("RECORD_DEVICE", "pipewire"))
 
+    # --- Audio output routing ---
+    # "cozmo" (default) plays through Cozmo's own speaker only. "system"
+    # plays through this machine's own audio output instead (e.g. the same
+    # Bluetooth speaker used for the mic) - useful in a noisy room where
+    # Cozmo's tiny speaker isn't loud/clear enough even with TTS_GAIN.
+    # "both" plays through both at once, so Cozmo still "performs" the line
+    # while it's also actually intelligible. See cozmo_brain/audio/player.py.
+    audio_output: str = field(default_factory=lambda: _env_str("AUDIO_OUTPUT", "cozmo"))
+    playback_device: str = field(default_factory=lambda: _env_str("PLAYBACK_DEVICE", "pipewire"))
+
     # --- Groq STT ---
     stt_model: str = field(default_factory=lambda: _env_str("STT_MODEL", "whisper-large-v3-turbo"))
 

@@ -213,8 +213,14 @@ class PyCozmoRobot(RobotBackend):
             result["image"] = image
             captured.set()
 
-        cli.add_handler(pycozmo.event.EvtNewRawCameraImage, on_image, one_shot=True)
         cli.enable_camera(enable=True, color=True)
+        # The first frame(s) off a freshly-enabled stream come back torn/
+        # glitchy (caught mid-transition before the sensor/encoder settle) -
+        # pycozmo's own camera.py example sleeps here for the same reason
+        # before ever registering a capture handler. Skipping this was
+        # exactly why say()/who_is_this()'s photos looked corrupted.
+        time.sleep(2.0)
+        cli.add_handler(pycozmo.event.EvtNewRawCameraImage, on_image, one_shot=True)
         if not captured.wait(timeout=10):
             raise TimeoutError("Timed out waiting for a camera frame.")
         result["image"].save(path)

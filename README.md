@@ -100,7 +100,8 @@ See [Roadmap](#roadmap--open-work) for what's still open.
     ├── audio/
     │   ├── recorder.py        # fixed-length arecord capture (push-to-talk)
     │   ├── vad.py              # webrtcvad-based hands-free capture
-    │   └── wakeword.py         # openWakeWord-based wake word, gates --mode vad
+    │   ├── wakeword.py         # openWakeWord-based wake word, gates --mode vad
+    │   └── player.py           # optional system-speaker audio output (AUDIO_OUTPUT)
     ├── robot/
     │   ├── __init__.py         # create_robot() factory (real vs. simulated)
     │   ├── base.py             # RobotBackend interface + shared mood/gesture playback
@@ -436,7 +437,7 @@ pass `--fresh` to start clean instead.
 
 | Tool | Does |
 |---|---|
-| `say(text, mood)` | Speaks via Groq TTS, striking a matching facial expression + backpack light color first. |
+| `say(text, mood)` | Speaks via Groq TTS (routed per `AUDIO_OUTPUT`), striking a matching facial expression + backpack light color first. |
 | `gesture(name)` | Plays a curated multi-step choreography (face + lights + head/arm + wheels). |
 | `play_animation(name)` | Plays a **real** Anki animation clip or group by exact name. |
 | `list_animations()` | Lists the real animation/group names actually loaded on this robot. |
@@ -451,6 +452,10 @@ pass `--fresh` to start clean instead.
 `confused`, `annoyed`, `angry`, `suspicious`, `embarrassed`, `smug` — each is
 a real `pycozmo.expressions` procedural face paired with a backpack light
 color and an optional head/lift pose (`cozmo_brain/robot/moods.py`).
+`neutral` (the default `say` mood) deliberately resets head/lift to level
+— several moods and gestures raise the lift arm, which physically covers
+the face screen, and without a real reset the arm was staying up almost
+permanently on real hardware.
 
 **Gestures** (multi-step choreography, `cozmo_brain/robot/gestures.py`):
 `nod_yes`, `shake_no`, `wake_up`, `sleep`, `cheer`, `dance`, `spin`,
@@ -514,6 +519,38 @@ own default doesn't match its own hardware constraint. Fixed in
 face geometry scales by width/height, so this renders correctly proportioned
 for the real screen rather than a squashed crop. Verified against all 25
 expression classes.
+
+**Also only found on real hardware:** photos from `look()`/`remember_person()`/
+`who_is_this()` came back visibly torn/glitchy (interleaved garbage across
+part of the frame) — bad enough that face comparison couldn't work at all.
+`capture_photo()` was registering the capture handler and grabbing
+whichever frame arrived first, immediately after `enable_camera()`.
+PyCozmo's own `camera.py` example does the same `enable_camera()` call but
+then explicitly **sleeps 2 seconds "to let the image stabilize"** before
+ever registering a handler — the first frame(s) off a just-started stream
+come back mid-transition, torn. Added the same 2-second wait. This adds a
+real, noticeable delay to every photo now, which is the deliberate
+trade-off for a usable image.
+
+### Routing speech to a real speaker (noisy environments)
+
+Cozmo's own speaker is small and quiet even with the `TTS_GAIN` fix — in a
+noisy room, it may just not be audible. `AUDIO_OUTPUT` in `.env` controls
+where `say()`'s speech actually goes:
+
+- `cozmo` (default) — through Cozmo's own speaker only, as before.
+- `system` — through this machine's own audio output instead (e.g. the same
+  Bluetooth speaker already paired for the mic), via `aplay`.
+- `both` — through both **simultaneously**, not one after the other (a
+  background thread drives system audio while the main thread drives
+  Cozmo's speaker, then both are waited on) — so Cozmo still visibly
+  "performs" the line while it's also actually intelligible.
+
+This is a tool-level decision (`handle_say` in `tools/registry.py`), not
+part of the `RobotBackend` interface — playing a WAV file on this machine
+isn't a robot capability, so it doesn't belong behind that abstraction.
+`PLAYBACK_DEVICE` (default `pipewire`) is the ALSA/PipeWire device name for
+the `system`/`both` cases; run `aplay -L` to list options.
 
 ### Making the voice sound less generic
 
@@ -712,6 +749,7 @@ annotated list (it's the source of truth). The essentials:
 | `OLLAMA_BASE_URL` | Ollama endpoint chat/tool-calling requests go to. |
 | `OLLAMA_MODEL` | Model name; must support `tools` (and ideally `vision` for `look`). |
 | `RECORD_SECONDS` / `RECORD_DEVICE` | Push-to-talk recording length and ALSA/PipeWire device. |
+| `AUDIO_OUTPUT` / `PLAYBACK_DEVICE` | Route speech to `cozmo` (default), `system` speaker, or `both` at once. |
 | `STT_MODEL` / `TTS_MODEL` / `TTS_VOICE` | Groq model/voice choices. |
 | `TTS_GAIN` | Max volume boost for TTS output, peak-normalized to avoid clipping (Cozmo's speaker is quiet). |
 | `TTS_PITCH_SHIFT` | Pitch+tempo shift for a smaller/more childlike/robotic voice. 1.0 = off. |
@@ -765,6 +803,10 @@ annotated list (it's the source of truth). The essentials:
   128x64 default** — confirmed on real hardware (`say`/`gesture`/moods all
   failed until fixed). See [Real bugs this uncovered](#real-bugs-this-uncovered)
   above.
+- **Camera captures need a 2s stabilization wait after `enable_camera()`**
+  before grabbing a frame, or the photo comes back torn/glitchy — also only
+  showed up on real hardware. See [Real bugs this uncovered](#real-bugs-this-uncovered)
+  above.
 - **Orpheus TTS needs one-time model terms acceptance** in the Groq console
   per account/org (see Groq setup above).
 
@@ -806,6 +848,21 @@ Still open, roughly in priority order:
    assets are available, consider hand-picking a "greatest hits" subset of
    real clip names to seed into the `gesture` tool's enum, instead of
    requiring the model to call `list_animations` first every time.
+5. **React to physical sensors — picked up, touched, shaken, cliff-detected,
+   placed on the charger.** Nothing in `cozmo_brain` currently *listens* to
+   Cozmo at all; everything so far is one-way (we send commands, we never
+   read anything back). PyCozmo genuinely supports this — confirmed in
+   `protocol_encoder.RobotState` (already used for the connection-health
+   heartbeat): real accelerometer/gyroscope data, a raw backpack touch
+   sensor value and 4 raw cliff sensors (not exposed as convenient
+   attributes, but present on the packet), and discrete events already
+   wired up for `IS_PICKED_UP`, `IS_FALLING`, `CLIFF_DETECTED`,
+   `IS_ON_CHARGER`, `IS_CHARGING`, `IS_MOVING`, `IS_CARRYING_BLOCK`. No
+   literal "fist bump detected" event exists (that was a scripted Anki app
+   behavior, not a discrete hardware signal), but a real reactive-behavior
+   feature — a background listener feeding physical events into the
+   conversation loop, with touch/accel thresholds tuned on real hardware —
+   is genuinely buildable on top of this.
 
 ---
 

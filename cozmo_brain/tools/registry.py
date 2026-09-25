@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 
+from cozmo_brain.audio.player import play_wav
 from cozmo_brain.config import Settings
 from cozmo_brain.imaging import encode_image_b64
 from cozmo_brain.llm.groq_client import GroqClient
@@ -42,10 +44,27 @@ def _sanitize_name(name: str) -> str:
 
 def build_tools(robot: RobotBackend, groq: GroqClient, ollama: OllamaClient, settings: Settings) -> list[Tool]:
     def handle_say(text: str, mood: str = "neutral") -> ToolResult:
-        if mood and mood.lower() != "neutral":
+        # "neutral" now resets pose (see moods.py) rather than being a
+        # no-op, so it must actually run, not be skipped like other moods
+        # used to be for efficiency.
+        if mood:
             robot.apply_mood(mood)
         wav_path = groq.synthesize(text, settings.tts_output_wav)
-        robot.say_wav(wav_path)
+
+        output = settings.audio_output.lower()
+        if output == "system":
+            play_wav(wav_path, settings.playback_device)
+        elif output == "both":
+            # Simultaneous, not sequential — a background thread for system
+            # audio while the main thread drives Cozmo's own speaker, then
+            # wait for both so this call still blocks until speech is done.
+            system_thread = threading.Thread(target=play_wav, args=(wav_path, settings.playback_device))
+            system_thread.start()
+            robot.say_wav(wav_path)
+            system_thread.join()
+        else:
+            robot.say_wav(wav_path)
+
         return ToolResult(True, f"Said (mood={mood}): {text}")
 
     def handle_gesture(name: str) -> ToolResult:

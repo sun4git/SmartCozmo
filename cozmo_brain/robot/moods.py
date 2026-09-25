@@ -22,7 +22,10 @@ class Mood:
 
 
 MOODS: dict[str, Mood] = {
-    "neutral": Mood("Neutral", "off"),
+    # head_deg=0/lift_mm=32 make this a real reset, not a no-op — most other
+    # moods raise the lift arm (which covers the face screen) and there's no
+    # other reliable way back down between turns otherwise.
+    "neutral": Mood("Neutral", "off", head_deg=0, lift_mm=32),
     "happy": Mood("Happiness", "green", head_deg=15, lift_mm=70),
     "excited": Mood("Excitement", "blue", head_deg=30, lift_mm=90),
     "curious": Mood("Amazement", "white", head_deg=20),
