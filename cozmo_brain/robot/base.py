@@ -65,7 +65,7 @@ class RobotBackend(abc.ABC):
         """color is one of: green, red, blue, white, off."""
 
     @abc.abstractmethod
-    def show_expression(self, name: str, duration: float = 2.0) -> None:
+    def show_expression(self, name: str, duration: float | None = None) -> None:
         """name is a pycozmo.expressions.expressions class name, e.g. 'Happiness'."""
 
     @abc.abstractmethod

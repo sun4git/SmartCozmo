@@ -96,7 +96,10 @@ See [Roadmap](#roadmap--open-work) for what's still open.
     ├── imaging.py             # shared base64 image helper (vision attach, who_is_this)
     ├── llm/
     │   ├── ollama_client.py   # /api/chat wrapper with tool-calling
-    │   └── groq_client.py     # Whisper STT + Orpheus TTS (voice character + gain boost)
+    │   ├── speech_client.py    # SpeechClient interface shared by every provider
+    │   ├── groq_client.py       # Groq Whisper STT + Orpheus TTS
+    │   ├── openai_client.py     # OpenAI Whisper STT + TTS (AUDIO_PROVIDER=openai)
+    │   └── tts_postprocess.py    # shared voice character + gain, used by both providers
     ├── audio/
     │   ├── recorder.py        # fixed-length arecord capture (push-to-talk)
     │   ├── vad.py              # webrtcvad-based hands-free capture
@@ -532,6 +535,23 @@ come back mid-transition, torn. Added the same 2-second wait. This adds a
 real, noticeable delay to every photo now, which is the deliberate
 trade-off for a usable image.
 
+**A latency bug, not a hardware quirk:** `cozmo_brain` felt noticeably
+slower per response than `orchestrator.py`, even though both do the same
+STT → LLM → TTS round trip. Traced to `show_expression()`'s default
+`duration=2.0`, passed straight through to PyCozmo's own
+`cli.display_image(im, duration=2.0)` — which does `time.sleep(duration)`
+whenever `duration is not None`. Since `apply_mood()` (now called on every
+`say()`, including the default "neutral" mood — see above) never
+overrode that default, **every single response was blocking for 2 full
+seconds just to show the face**, on top of ~0.4s each for any head/lift
+movement the mood also sets — before the TTS audio even played.
+`orchestrator.py` has no mood/face system at all, so none of this existed
+there. Fixed by defaulting `show_expression()`'s duration to `None`
+instead: the face is set and persists until the next mood change, rather
+than being held for a fixed 2s and auto-cleared — which was never actually
+the intended behavior for routine mood-setting, only for a deliberately
+timed gesture beat (no gesture currently uses this path directly).
+
 ### Routing speech to a real speaker (noisy environments)
 
 Cozmo's own speaker is small and quiet even with the `TTS_GAIN` fix — in a
@@ -577,6 +597,39 @@ harsh crackle, not the intended "louder" effect — because Orpheus's raw
 output already peaks around 60% of full scale. It's now peak-normalizing:
 `TTS_GAIN` is a ceiling, automatically backed off to land just under
 clipping (~95% of full scale) instead of blowing past it.
+
+### Switching speech providers
+
+Groq's free-tier rate limits are real — this happened during actual use,
+not just as a theoretical risk. `AUDIO_PROVIDER` in `.env` switches both
+STT and TTS together, `groq` (default) or `openai`:
+
+```env
+AUDIO_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+```
+
+Both providers implement the same `SpeechClient` interface
+(`transcribe()`/`synthesize()`), so nothing else in the app — `tools/registry.py`,
+every mode — needs to know which one is actually active;
+`create_speech_client()` in `cozmo_brain/llm/__init__.py` picks the right
+one from config.
+
+Model and voice names are **not interchangeable between providers** —
+Groq's Orpheus voices (`austin`, `troy`, ...) don't exist on OpenAI, and
+vice versa (`alloy`, `nova`, ...); see `.env.example` for both lists.
+
+One real difference this surfaced: **Groq's Orpheus endpoint accepts a
+`sample_rate` parameter directly in the request; OpenAI's TTS endpoint has
+no such parameter at all** (confirmed against OpenAI's own Python SDK
+source, not guessed). Since Cozmo's `play_audio()` only accepts 22050 or
+48000 Hz, `tts_postprocess.py` (shared by both providers, extracted from
+what used to be Groq-only code) now reads whatever rate a provider's
+response actually declares and resamples to `TTS_SAMPLE_RATE` — the same
+`audioop.ratecv()` trick already used for the pitch-shift effect, just
+used here for a plain format conversion. This makes the rate correct
+regardless of provider, without needing to know OpenAI's exact native
+output rate in advance.
 
 ### Detecting and recovering from a dropped connection
 
@@ -745,12 +798,15 @@ annotated list (it's the source of truth). The essentials:
 
 | Variable | Purpose |
 |---|---|
-| `GROQ_API_KEY` | Required. Auth for Groq STT + TTS. |
+| `GROQ_API_KEY` | Required unless `AUDIO_PROVIDER=openai`. Auth for Groq STT + TTS. |
+| `OPENAI_API_KEY` | Required only if `AUDIO_PROVIDER=openai`. |
+| `AUDIO_PROVIDER` | `groq` (default) or `openai` — which one actually does STT/TTS. |
 | `OLLAMA_BASE_URL` | Ollama endpoint chat/tool-calling requests go to. |
 | `OLLAMA_MODEL` | Model name; must support `tools` (and ideally `vision` for `look`). |
 | `RECORD_SECONDS` / `RECORD_DEVICE` | Push-to-talk recording length and ALSA/PipeWire device. |
 | `AUDIO_OUTPUT` / `PLAYBACK_DEVICE` | Route speech to `cozmo` (default), `system` speaker, or `both` at once. |
-| `STT_MODEL` / `TTS_MODEL` / `TTS_VOICE` | Groq model/voice choices. |
+| `STT_MODEL` / `TTS_MODEL` / `TTS_VOICE` | Groq model/voice choices (used when `AUDIO_PROVIDER=groq`). |
+| `OPENAI_STT_MODEL` / `OPENAI_TTS_MODEL` / `OPENAI_TTS_VOICE` | OpenAI model/voice choices (used when `AUDIO_PROVIDER=openai`). |
 | `TTS_GAIN` | Max volume boost for TTS output, peak-normalized to avoid clipping (Cozmo's speaker is quiet). |
 | `TTS_PITCH_SHIFT` | Pitch+tempo shift for a smaller/more childlike/robotic voice. 1.0 = off. |
 | `TTS_ROBOT_MOD_DEPTH` / `TTS_ROBOT_MOD_HZ` | Optional ring-modulation robotic timbre. Depth 0.0 = off. |
@@ -807,6 +863,11 @@ annotated list (it's the source of truth). The essentials:
   before grabbing a frame, or the photo comes back torn/glitchy — also only
   showed up on real hardware. See [Real bugs this uncovered](#real-bugs-this-uncovered)
   above.
+- **`display_image(..., duration=...)` sleeps for that long before clearing
+  the screen** — `show_expression()` used to default to `duration=2.0`,
+  adding a real 2s delay to every mood application (i.e. every `say()`).
+  Now defaults to `None` (persist, no sleep). See
+  [Real bugs this uncovered](#real-bugs-this-uncovered) above.
 - **Orpheus TTS needs one-time model terms acceptance** in the Groq console
   per account/org (see Groq setup above).
 
@@ -833,6 +894,9 @@ Done, via `cozmo_brain/`:
   and auto-reconnected, which also re-runs Wi-Fi auto-connect if
   `COZMO_WIFI_SSID` is set. **Untested against a real hardware drop** — this
   environment has no Cozmo to disconnect.
+- ✅ **STT/TTS provider flexibility** — `AUDIO_PROVIDER=groq`/`openai` in
+  `.env`, for when Groq's free-tier rate limits get hit (which they did,
+  during actual use). See [Switching speech providers](#switching-speech-providers).
 
 Still open, roughly in priority order:
 
@@ -841,14 +905,11 @@ Still open, roughly in priority order:
    token context window better on long sessions.
 2. **Systemd service** for headless/boot-time operation, now that reconnect
    logic makes a long-running session more viable.
-3. **STT backend flexibility** — make the STT backend swappable via config
-   if Groq's free tier limits become a problem (Open WebUI's Whisper endpoint
-   was identified as a fallback but never wired in).
-4. **More real animations, curated.** Once `pycozmo_resources.py download`
+3. **More real animations, curated.** Once `pycozmo_resources.py download`
    assets are available, consider hand-picking a "greatest hits" subset of
    real clip names to seed into the `gesture` tool's enum, instead of
    requiring the model to call `list_animations` first every time.
-5. **React to physical sensors — picked up, touched, shaken, cliff-detected,
+4. **React to physical sensors — picked up, touched, shaken, cliff-detected,
    placed on the charger.** Nothing in `cozmo_brain` currently *listens* to
    Cozmo at all; everything so far is one-way (we send commands, we never
    read anything back). PyCozmo genuinely supports this — confirmed in
@@ -863,6 +924,29 @@ Still open, roughly in priority order:
    feature — a background listener feeding physical events into the
    conversation loop, with touch/accel thresholds tuned on real hardware —
    is genuinely buildable on top of this.
+5. **A fully key-free STT+TTS provider**, on top of the existing Groq/OpenAI
+   split — for running with literally no API account at all, not just as a
+   Groq-rate-limit fallback. Two different properties are easy to conflate
+   here, worth being precise about when this gets built:
+   - **No key, but still needs the internet** — `edge-tts` (confirmed real,
+     maintained package): uses Microsoft Edge's own cloud TTS over an
+     unofficial, reverse-engineered API (no account, but it's not a
+     published/supported Microsoft product — it has periodically broken
+     when Microsoft changes something internally, historically fixed
+     upstream but not guaranteed). Good natural-sounding voices for free,
+     at the cost of that reliability risk and still needing a network.
+   - **No key AND no network** — genuinely local models, run on the Pi
+     itself: `faster-whisper` (CTranslate2, real CPU speedups over plain
+     Whisper) or `whisper.cpp` for STT; **Piper** for TTS — confirmed real
+     and specifically built/validated for Raspberry Pi-class hardware
+     (used throughout the Home Assistant/Rhasspy voice-assistant
+     ecosystem), and already ONNX-based like `openwakeword`, so it'd fit
+     the existing dependency pattern. The real cost is latency: local
+     Whisper inference on a Pi 5's CPU (no GPU) will be slower than Groq's
+     cloud Whisper running on dedicated hardware — untested here how much
+     slower, since there's no Pi to benchmark on.
+   Either fits the existing `SpeechClient` interface as a third provider,
+   same shape as `GroqClient`/`OpenAIClient`.
 
 ---
 

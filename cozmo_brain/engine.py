@@ -13,8 +13,8 @@ import requests
 from cozmo_brain.config import Settings
 from cozmo_brain.conversation import Conversation
 from cozmo_brain.imaging import encode_image_b64
-from cozmo_brain.llm.groq_client import GroqClient
 from cozmo_brain.llm.ollama_client import OllamaClient
+from cozmo_brain.llm.speech_client import SpeechClient
 from cozmo_brain.robot.base import RobotBackend
 from cozmo_brain.tools.base import Tool, ToolResult
 
@@ -27,14 +27,14 @@ class CozmoEngine:
         settings: Settings,
         robot: RobotBackend,
         ollama: OllamaClient,
-        groq: GroqClient,
+        speech: SpeechClient,
         tools: list[Tool],
         conversation: Conversation,
     ):
         self._settings = settings
         self._robot = robot
         self._ollama = ollama
-        self._groq = groq
+        self._speech = speech
         self._tools = tools
         self._tools_by_name = {t.name: t for t in tools}
         self.conversation = conversation

@@ -21,7 +21,7 @@ from cozmo_brain.audio.vad import record_until_silence
 from cozmo_brain.audio.wakeword import wait_for_wake_word
 from cozmo_brain.config import Settings
 from cozmo_brain.engine import CozmoEngine
-from cozmo_brain.llm.groq_client import GroqClient
+from cozmo_brain.llm.speech_client import SpeechClient
 from cozmo_brain.robot.base import RobotBackend
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ def _apply_mood_safely(robot: RobotBackend, mood: str) -> None:
         logger.warning("Could not show '%s' mood: %s", mood, e)
 
 
-def run(engine: CozmoEngine, robot: RobotBackend, groq: GroqClient, settings: Settings) -> None:
+def run(engine: CozmoEngine, robot: RobotBackend, speech: SpeechClient, settings: Settings) -> None:
     print(f"Listening for the wake word ('{settings.wake_word_model}'). Press Ctrl+C to exit.\n")
     while True:
         wait_for_wake_word(settings.record_device, settings.wake_word_model, settings.wake_word_threshold)
@@ -60,7 +60,7 @@ def run(engine: CozmoEngine, robot: RobotBackend, groq: GroqClient, settings: Se
                 _apply_mood_safely(robot, "neutral")
                 break
 
-            text = groq.transcribe(settings.raw_input_wav)
+            text = speech.transcribe(settings.raw_input_wav)
             if not text:
                 continue  # heard something, but nothing transcribable - keep the conversation open
             print(f"You said: {text}")

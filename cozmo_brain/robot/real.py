@@ -189,7 +189,7 @@ class PyCozmoRobot(RobotBackend):
             raise ValueError(f"Unknown light color '{color}'. Known colors: {', '.join(_LIGHTS)}")
         self._client.set_all_backpack_lights(light)
 
-    def show_expression(self, name: str, duration: float = 2.0) -> None:
+    def show_expression(self, name: str, duration: float | None = None) -> None:
         import pycozmo.expressions.expressions as expr_module
 
         cls = getattr(expr_module, name, None)

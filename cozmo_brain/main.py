@@ -10,7 +10,7 @@ import sys
 from cozmo_brain.config import settings
 from cozmo_brain.conversation import Conversation
 from cozmo_brain.engine import CozmoEngine
-from cozmo_brain.llm.groq_client import GroqClient
+from cozmo_brain.llm import create_speech_client
 from cozmo_brain.llm.ollama_client import OllamaClient
 from cozmo_brain.personality import SYSTEM_PROMPT
 from cozmo_brain.robot import create_robot
@@ -44,6 +44,12 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     logging.basicConfig(level=args.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
+    if args.log_level.upper() != "DEBUG":
+        # PyCozmo logs periodic byte/packet counters on this logger every
+        # few seconds (Connection.log_stats()) - distracting noise in normal
+        # use, especially in --mode text. --log-level DEBUG opts back in.
+        logging.getLogger("pycozmo.protocol").setLevel(logging.WARNING)
+
     robot = create_robot(settings, force_simulated=args.simulate)
 
     with robot:
@@ -53,9 +59,9 @@ def main(argv: list[str] | None = None) -> int:
             calibrate_mode.run(robot, settings)
             return 0
 
-        groq = GroqClient(settings)
+        speech = create_speech_client(settings)
         ollama = OllamaClient(settings)
-        tools = build_tools(robot, groq, ollama, settings)
+        tools = build_tools(robot, speech, ollama, settings)
 
         conversation = Conversation(
             SYSTEM_PROMPT,
@@ -65,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
         if not args.fresh:
             conversation.load()
 
-        engine = CozmoEngine(settings, robot, ollama, groq, tools, conversation)
+        engine = CozmoEngine(settings, robot, ollama, speech, tools, conversation)
 
         if args.mode == "text":
             from cozmo_brain.modes import text_mode
@@ -74,11 +80,11 @@ def main(argv: list[str] | None = None) -> int:
         elif args.mode == "vad":
             from cozmo_brain.modes import vad_mode
 
-            vad_mode.run(engine, robot, groq, settings)
+            vad_mode.run(engine, robot, speech, settings)
         else:
             from cozmo_brain.modes import interactive
 
-            interactive.run(engine, groq, settings)
+            interactive.run(engine, speech, settings)
 
     return 0
 

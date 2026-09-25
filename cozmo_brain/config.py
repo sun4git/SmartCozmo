@@ -33,6 +33,12 @@ def _env_bool(name: str, default: bool) -> bool:
 class Settings:
     # --- Secrets ---
     groq_api_key: str = field(default_factory=lambda: os.environ.get("GROQ_API_KEY", ""))
+    openai_api_key: str = field(default_factory=lambda: os.environ.get("OPENAI_API_KEY", ""))
+
+    # Which provider actually does STT+TTS. "groq" (default) or "openai" —
+    # e.g. switch to "openai" if Groq's free-tier rate limits get hit.
+    # See cozmo_brain/llm/__init__.py's create_speech_client().
+    audio_provider: str = field(default_factory=lambda: _env_str("AUDIO_PROVIDER", "groq"))
 
     # --- Ollama (tool-calling LLM) ---
     ollama_base_url: str = field(default_factory=lambda: _env_str("OLLAMA_BASE_URL", "http://192.168.1.200:41438"))
@@ -53,12 +59,22 @@ class Settings:
     audio_output: str = field(default_factory=lambda: _env_str("AUDIO_OUTPUT", "cozmo"))
     playback_device: str = field(default_factory=lambda: _env_str("PLAYBACK_DEVICE", "pipewire"))
 
-    # --- Groq STT ---
+    # --- Groq STT/TTS (used when AUDIO_PROVIDER=groq) ---
     stt_model: str = field(default_factory=lambda: _env_str("STT_MODEL", "whisper-large-v3-turbo"))
-
-    # --- Groq TTS ---
     tts_model: str = field(default_factory=lambda: _env_str("TTS_MODEL", "canopylabs/orpheus-v1-english"))
     tts_voice: str = field(default_factory=lambda: _env_str("TTS_VOICE", "austin"))
+
+    # --- OpenAI STT/TTS (used when AUDIO_PROVIDER=openai) ---
+    # Model/voice names are OpenAI's own, not interchangeable with Groq's.
+    openai_stt_model: str = field(default_factory=lambda: _env_str("OPENAI_STT_MODEL", "whisper-1"))
+    openai_tts_model: str = field(default_factory=lambda: _env_str("OPENAI_TTS_MODEL", "tts-1"))
+    openai_tts_voice: str = field(default_factory=lambda: _env_str("OPENAI_TTS_VOICE", "alloy"))
+
+    # --- TTS output shape (applies regardless of provider) ---
+    # TTS_SAMPLE_RATE: Cozmo's play_audio() only accepts 22050/48000Hz. Groq's
+    # Orpheus can be asked for this rate directly; OpenAI's TTS cannot (no
+    # such parameter exists) - tts_postprocess.py resamples to this rate from
+    # whatever the provider's response actually declares, either way.
     tts_sample_rate: int = field(default_factory=lambda: _env_int("TTS_SAMPLE_RATE", 22050))
     tts_gain: float = field(default_factory=lambda: _env_float("TTS_GAIN", 3.0))
 
@@ -136,6 +152,14 @@ class Settings:
                 "GROQ_API_KEY is not set. Copy .env.example to .env and fill it in."
             )
         return self.groq_api_key
+
+    def require_openai_key(self) -> str:
+        if not self.openai_api_key:
+            raise RuntimeError(
+                "OPENAI_API_KEY is not set (needed because AUDIO_PROVIDER=openai). "
+                "Add it to .env."
+            )
+        return self.openai_api_key
 
 
 settings = Settings()

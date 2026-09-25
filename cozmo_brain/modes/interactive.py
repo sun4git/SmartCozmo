@@ -8,12 +8,12 @@ import logging
 from cozmo_brain.audio.recorder import record_fixed
 from cozmo_brain.config import Settings
 from cozmo_brain.engine import CozmoEngine
-from cozmo_brain.llm.groq_client import GroqClient
+from cozmo_brain.llm.speech_client import SpeechClient
 
 logger = logging.getLogger(__name__)
 
 
-def run(engine: CozmoEngine, groq: GroqClient, settings: Settings) -> None:
+def run(engine: CozmoEngine, speech: SpeechClient, settings: Settings) -> None:
     print("Press Enter to talk, or type 'quit' to exit.\n")
     while True:
         cmd = input("[Enter=talk, quit=exit] > ").strip().lower()
@@ -21,7 +21,7 @@ def run(engine: CozmoEngine, groq: GroqClient, settings: Settings) -> None:
             break
 
         record_fixed(settings.raw_input_wav, settings.record_seconds, settings.record_device)
-        text = groq.transcribe(settings.raw_input_wav)
+        text = speech.transcribe(settings.raw_input_wav)
         print(f"You said: {text}")
         if not text:
             print("(heard nothing, try again)\n")

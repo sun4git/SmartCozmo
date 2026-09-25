@@ -1,4 +1,5 @@
-"""The concrete tool set exposed to the LLM, bound to a robot backend + Groq TTS.
+"""The concrete tool set exposed to the LLM, bound to a robot backend + a
+speech (STT/TTS) client — whichever provider AUDIO_PROVIDER selects.
 
 Handlers raise plain exceptions (ValueError, RuntimeError, TimeoutError, ...)
 on failure; the orchestrator's dispatch loop catches those and turns them
@@ -15,8 +16,8 @@ import threading
 from cozmo_brain.audio.player import play_wav
 from cozmo_brain.config import Settings
 from cozmo_brain.imaging import encode_image_b64
-from cozmo_brain.llm.groq_client import GroqClient
 from cozmo_brain.llm.ollama_client import OllamaClient
+from cozmo_brain.llm.speech_client import SpeechClient
 from cozmo_brain.robot.base import RobotBackend
 from cozmo_brain.robot.gestures import GESTURES
 from cozmo_brain.robot.moods import MOODS
@@ -42,14 +43,14 @@ def _sanitize_name(name: str) -> str:
     return cleaned.lower() or "unnamed"
 
 
-def build_tools(robot: RobotBackend, groq: GroqClient, ollama: OllamaClient, settings: Settings) -> list[Tool]:
+def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: OllamaClient, settings: Settings) -> list[Tool]:
     def handle_say(text: str, mood: str = "neutral") -> ToolResult:
         # "neutral" now resets pose (see moods.py) rather than being a
         # no-op, so it must actually run, not be skipped like other moods
         # used to be for efficiency.
         if mood:
             robot.apply_mood(mood)
-        wav_path = groq.synthesize(text, settings.tts_output_wav)
+        wav_path = speech.synthesize(text, settings.tts_output_wav)
 
         output = settings.audio_output.lower()
         if output == "system":
