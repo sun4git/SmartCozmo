@@ -82,13 +82,29 @@ def record_until_silence(
         with contextlib.suppress(Exception):
             proc.wait(timeout=2)
 
+    if frame_count == 0:
+        logger.warning(
+            "arecord on device '%s' produced no audio at all (exit code %s) - it likely "
+            "couldn't open the device. Check for an arecord error printed just above this.",
+            device,
+            proc.poll(),
+        )
+        return False
+
     if not voiced_frames:
+        logger.debug(
+            "Listened for %.1fs, webrtcvad never classified any of it as speech (aggressiveness=%d).",
+            frame_count * _FRAME_MS / 1000.0,
+            aggressiveness,
+        )
         return False
 
     if speech_frame_count < min_speech_frames:
-        logger.debug(
-            "Discarding capture: only %dms of actual voiced audio (need %dms) - likely noise, not speech.",
+        logger.info(
+            "Discarding capture: only %dms of actual voiced audio out of %.1fs listened "
+            "(need %dms) - treated as noise/too-short, not real speech.",
             speech_frame_count * _FRAME_MS,
+            frame_count * _FRAME_MS / 1000.0,
             min_speech_ms,
         )
         return False
