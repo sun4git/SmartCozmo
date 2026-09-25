@@ -28,13 +28,15 @@ import unicodedata
 # incomplete - it's a pragmatic backstop for known repeat offenders, not a
 # general hallucination detector. Extend it as new recurring phrases show up.
 #
-# The bare "thank you"/"thanks" entries are a known, deliberate trade-off:
-# confirmed recurring on real hardware as the dominant hallucinated text on
-# Groq specifically (shorter than the full "...for watching" phrase), but
-# unlike the other entries here, a real user might genuinely say this to
-# Cozmo. Accepted the small risk of an occasional real "thank you" being
-# silently ignored (low stakes - not a real command) over the alternative
-# of this being the single most common false activation in practice.
+# The bare "thank you"/"thanks"/"you" entries are a known, deliberate
+# trade-off: confirmed recurring on real hardware as the dominant
+# hallucinated text on Groq specifically (shorter than the full "...for
+# watching" phrase), but unlike the other entries here, a real user might
+# genuinely say one of these to Cozmo (in isolation, as a full utterance -
+# not as part of a longer real sentence, since matching is exact). Accepted
+# the small risk of an occasional real one-word reply being silently
+# ignored (low stakes - not a real command) over the alternative of these
+# being the most common false activations in practice.
 _KNOWN_HALLUCINATIONS_RAW = {
     "thank you for watching",
     "thanks for watching",
@@ -42,6 +44,7 @@ _KNOWN_HALLUCINATIONS_RAW = {
     "thanks",
     "thank you so much",
     "thank you very much",
+    "you",
     "please subscribe",
     "please subscribe to my channel",
     "don't forget to subscribe",
