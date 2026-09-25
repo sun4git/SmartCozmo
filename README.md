@@ -654,9 +654,31 @@ variants actually seen) plus real sentences from the same session,
 confirming zero false positives on the latter. **This list is necessarily
 incomplete** — it's a pragmatic backstop for known repeat offenders, not a
 general hallucination detector; new recurring phrases will need adding as
-they show up. If false activations persist, also worth trying
-`VAD_AGGRESSIVENESS=3` (stricter noise rejection) — untested against this
-specific environment.
+they show up. **Important limitation, raised directly on real hardware:**
+this filter runs *after* the (rate-limited) STT API call already happened —
+it hides the wrong reply, but doesn't save any quota. Confirmed on real
+hardware that in a genuinely noisy room, noise cleared the onset debounce
+often enough to burn through a free-tier STT quota on nothing but ambient
+noise.
+
+The actual quota-saving fix has to happen *before* the STT call, at the
+capture gate itself: `webrtcvad` only looks at spectral shape, not
+loudness, so it can't distinguish quiet background noise that happens to
+look speech-shaped from someone actually talking into the mic. `VAD_MIN_RMS`
+adds an independent loudness floor a frame must *also* clear (16-bit PCM
+RMS scale, 0–32767) before counting as speech — quiet ambient noise
+essentially never reaches typical near-mic speech volume. **Unverified
+default (150)** — there was no real audio available here to calibrate it;
+`cozmo_brain/audio/vad.py` now logs the actual peak RMS seen on both
+accepted and rejected captures specifically so this can be tuned from real
+data instead of guessed again (compare a rejected-noise log line's peak RMS
+against an accepted-speech one to pick a number that sits between them).
+Verified the gating logic itself with a scripted test using synthetic PCM
+frames at controlled amplitudes (quiet-but-webrtcvad-flagged noise →
+rejected; loud real speech → accepted; loud audio webrtcvad doesn't
+classify as speech → still rejected). If noise still gets through after
+tuning `VAD_MIN_RMS`, also worth trying `VAD_AGGRESSIVENESS=3` (stricter
+webrtcvad noise rejection) — untested against this specific environment.
 
 ### Routing speech to a real speaker (noisy environments)
 
@@ -989,6 +1011,7 @@ annotated list (it's the source of truth). The essentials:
 | `VAD_AGGRESSIVENESS` / `VAD_SILENCE_MS` / `VAD_MAX_UTTERANCE_S` | Hands-free listening tuning. |
 | `VAD_FOLLOWUP_TIMEOUT_S` | How long a conversation stays open after a reply before the wake word is needed again. |
 | `VAD_MIN_SPEECH_MS` | Onset debounce (consecutive ms of speech needed to start recording, not a minimum utterance length) — filters out noise-triggered hallucinated transcriptions. |
+| `VAD_MIN_RMS` | Loudness floor a frame must also clear (in addition to webrtcvad) to count as speech — the actual quota-saving filter, rejects noise before it ever reaches the STT API. |
 | `WAKE_WORD_MODEL` / `WAKE_WORD_THRESHOLD` | Wake word gating `--mode vad` — stock name or path to a custom `.onnx`. |
 | `VISION_ENABLED` | Whether `look()`'s photo gets attached to the next LLM turn. |
 | `KNOWN_PEOPLE_DIR` | Where `remember_person`'s reference photos are stored (experimental). |

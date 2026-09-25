@@ -7,6 +7,7 @@ actually used, so it isn't a hard dependency for push-to-talk/text modes).
 
 from __future__ import annotations
 
+import audioop
 import contextlib
 import logging
 import subprocess
@@ -26,10 +27,25 @@ def record_until_silence(
     silence_ms: int,
     max_seconds: int,
     min_speech_ms: int = 60,
+    min_rms: int = 150,
 ) -> bool:
     """Record from `device` until `silence_ms` of silence follows detected speech,
     or `max_seconds` is reached. Returns True if any speech was captured, and
     writes the captured audio to `path` in that case.
+
+    A frame only counts as "speech" if BOTH `webrtcvad` classifies it as
+    speech AND its RMS loudness clears `min_rms` — webrtcvad only looks at
+    spectral shape, not loudness, so it can't distinguish faint background
+    noise that happens to look speech-shaped from someone actually talking
+    into the mic; a loudness floor is an independent, complementary signal
+    that quiet ambient noise essentially never clears. This exists because
+    the onset debounce below (`min_speech_ms`) isn't always enough on its
+    own in a genuinely noisy real room — confirmed on real hardware: it
+    kept clearing a 60ms/2-frame debounce reliably enough to burn through a
+    free-tier STT quota. `min_rms` is untested against real hardware for
+    its exact value — tune it from what real background-noise vs. real
+    speech RMS values actually look like in your environment (nothing logs
+    these yet; ask if you want that added for tuning).
 
     `min_speech_ms` is an onset debounce, not a minimum utterance length: a
     single false-positive frame from background noise used to be enough to
@@ -67,6 +83,8 @@ def record_until_silence(
     silence_run = 0
     speech_started = False
     frame_count = 0
+    peak_rms_seen = 0
+    webrtcvad_only_hits = 0  # frames webrtcvad liked but the RMS floor rejected - tuning signal
 
     try:
         while frame_count < max_frames:
@@ -74,7 +92,12 @@ def record_until_silence(
             if len(frame) < _FRAME_BYTES:
                 break
             frame_count += 1
-            is_speech = vad.is_speech(frame, _SAMPLE_RATE)
+            frame_rms = audioop.rms(frame, 2)
+            peak_rms_seen = max(peak_rms_seen, frame_rms)
+            webrtcvad_says_speech = vad.is_speech(frame, _SAMPLE_RATE)
+            if webrtcvad_says_speech and frame_rms < min_rms:
+                webrtcvad_only_hits += 1
+            is_speech = webrtcvad_says_speech and frame_rms >= min_rms
 
             if not speech_started:
                 if is_speech:
@@ -110,15 +133,38 @@ def record_until_silence(
         return False
 
     if not speech_started:
-        logger.debug(
-            "Listened for %.1fs, never got %d consecutive speech frames from webrtcvad "
-            "(aggressiveness=%d) - discarding as noise/nothing said.",
-            frame_count * _FRAME_MS / 1000.0,
-            onset_frames_needed,
-            aggressiveness,
-        )
+        if webrtcvad_only_hits > 0:
+            # webrtcvad classified some frames as speech, but none cleared
+            # the RMS floor - exactly the "quiet noise looks speech-shaped"
+            # case min_rms exists for. Logged at INFO (not DEBUG) since this
+            # is the number to look at when tuning VAD_MIN_RMS: if peak_rms
+            # here is suspiciously close to what a real utterance measures,
+            # min_rms is set too high and will start rejecting real speech.
+            logger.info(
+                "Listened for %.1fs: webrtcvad flagged %d frame(s) as speech but none reached "
+                "min_rms=%d (peak RMS seen: %d) - discarded as noise, not real speech.",
+                frame_count * _FRAME_MS / 1000.0,
+                webrtcvad_only_hits,
+                min_rms,
+                peak_rms_seen,
+            )
+        else:
+            logger.debug(
+                "Listened for %.1fs, never got %d consecutive speech frames from webrtcvad "
+                "(aggressiveness=%d, peak RMS seen: %d) - discarding as noise/nothing said.",
+                frame_count * _FRAME_MS / 1000.0,
+                onset_frames_needed,
+                aggressiveness,
+                peak_rms_seen,
+            )
         return False
 
+    logger.debug(
+        "Accepted capture: %.1fs, peak RMS %d (min_rms=%d) - for reference if tuning VAD_MIN_RMS.",
+        frame_count * _FRAME_MS / 1000.0,
+        peak_rms_seen,
+        min_rms,
+    )
     with wave.open(path, "wb") as wf:
         wf.setnchannels(1)
         wf.setsampwidth(2)

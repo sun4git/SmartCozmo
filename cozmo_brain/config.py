@@ -175,6 +175,21 @@ class Settings:
     # discarded genuinely short real replies as readily as actual noise).
     vad_min_speech_ms: int = field(default_factory=lambda: _env_int("VAD_MIN_SPEECH_MS", 60))
 
+    # Loudness (RMS, 16-bit PCM scale 0-32767) floor a frame must clear,
+    # IN ADDITION to webrtcvad classifying it as speech, to count as real
+    # speech at all. webrtcvad only looks at spectral shape, not loudness,
+    # so it can't tell quiet background noise that happens to look
+    # speech-shaped from someone actually talking into the mic — this is an
+    # independent second signal for exactly that gap. Confirmed on real
+    # hardware to matter: the onset debounce above wasn't sufficient on its
+    # own in a genuinely noisy room, reliably clearing a 2-frame debounce
+    # and burning through free-tier STT quota on noise. UNVERIFIED default —
+    # no real audio was available to calibrate this number; cozmo_brain/
+    # audio/vad.py logs the actual peak RMS seen on both accepted and
+    # rejected captures specifically so this can be tuned from real data
+    # instead of guessed again.
+    vad_min_rms: int = field(default_factory=lambda: _env_int("VAD_MIN_RMS", 150))
+
     # How long to keep listening for a follow-up utterance after Cozmo
     # replies, without needing the wake word again. Resets on every turn;
     # once nothing is heard within this window, the wake word is required
