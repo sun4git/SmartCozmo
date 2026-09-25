@@ -6,3 +6,7 @@ pycozmo
 # Only required on the deployment machine (Raspberry Pi) for --mode vad.
 # Push-to-talk (--mode voice), text (--mode text), and --simulate work without it.
 # webrtcvad
+#
+# Also for --mode vad: wake-word detection. NOT a plain `pip install
+# openwakeword` — see cozmo_brain/audio/wakeword.py for the exact install
+# command (it has a broken dependency on Python 3.12/Linux otherwise).

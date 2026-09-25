@@ -104,6 +104,19 @@ class Settings:
     vad_silence_ms: int = field(default_factory=lambda: _env_int("VAD_SILENCE_MS", 800))
     vad_max_utterance_s: int = field(default_factory=lambda: _env_int("VAD_MAX_UTTERANCE_S", 15))
 
+    # How long to keep listening for a follow-up utterance after Cozmo
+    # replies, without needing the wake word again. Resets on every turn;
+    # once nothing is heard within this window, the wake word is required
+    # again. See modes/vad_mode.py.
+    vad_followup_timeout_s: int = field(default_factory=lambda: _env_int("VAD_FOLLOWUP_TIMEOUT_S", 15))
+
+    # --- Wake word (--mode vad) ---
+    # A stock openWakeWord model name (hey_jarvis, alexa, hey_mycroft,
+    # hey_rhasspy, timer, weather) or a path to a custom-trained .onnx model.
+    # See cozmo_brain/audio/wakeword.py — untested against real hardware.
+    wake_word_model: str = field(default_factory=lambda: _env_str("WAKE_WORD_MODEL", "hey_jarvis"))
+    wake_word_threshold: float = field(default_factory=lambda: _env_float("WAKE_WORD_THRESHOLD", 0.5))
+
     # --- Vision ---
     vision_enabled: bool = field(default_factory=lambda: _env_bool("VISION_ENABLED", True))
 

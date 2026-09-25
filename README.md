@@ -82,8 +82,9 @@ See [Roadmap](#roadmap--open-work) for what's still open.
 ```
 .
 ├── orchestrator.py         # lightweight single-file test script (unchanged, no memory/tools/gestures)
-├── requirements.txt        # pip install -r requirements.txt
-├── .env.example             # template for required config — copy to .env
+├── run.sh                   # activates cozmo-env + runs cozmo_brain in one step (chmod +x once)
+├── requirements.txt        # pip install -r requirements.txt (core deps only — see setup step 1 for extras)
+├── .env.example             # template for every config variable, annotated — copy to .env
 ├── .env                      # your real config (gitignored, not in repo)
 ├── README.md
 └── cozmo_brain/              # the full application
@@ -92,24 +93,28 @@ See [Roadmap](#roadmap--open-work) for what's still open.
     ├── conversation.py       # chat history with trimming + save/load to disk
     ├── engine.py             # the agentic tool-calling loop (CozmoEngine)
     ├── personality.py        # Cozmo's system prompt / persona
+    ├── imaging.py             # shared base64 image helper (vision attach, who_is_this)
     ├── llm/
     │   ├── ollama_client.py   # /api/chat wrapper with tool-calling
-    │   └── groq_client.py     # Whisper STT + Orpheus TTS (with gain boost)
+    │   └── groq_client.py     # Whisper STT + Orpheus TTS (voice character + gain boost)
     ├── audio/
     │   ├── recorder.py        # fixed-length arecord capture (push-to-talk)
-    │   └── vad.py              # webrtcvad-based hands-free capture
+    │   ├── vad.py              # webrtcvad-based hands-free capture
+    │   └── wakeword.py         # openWakeWord-based wake word, gates --mode vad
     ├── robot/
+    │   ├── __init__.py         # create_robot() factory (real vs. simulated)
     │   ├── base.py             # RobotBackend interface + shared mood/gesture playback
-    │   ├── real.py             # PyCozmo-backed implementation
+    │   ├── real.py             # PyCozmo-backed implementation (+ health/reconnect)
     │   ├── simulated.py        # console-logging implementation, no hardware needed
+    │   ├── wifi.py             # optional nmcli-based Wi-Fi auto-connect
     │   ├── moods.py            # curated expression+light+pose presets
     │   └── gestures.py         # curated multi-step gesture choreography
     ├── tools/
     │   ├── base.py             # Tool/ToolResult contract
-    │   └── registry.py         # the 7 tools exposed to the LLM
+    │   └── registry.py         # the 9 tools exposed to the LLM
     └── modes/
         ├── interactive.py       # --mode voice  (push-to-talk)
-        ├── vad_mode.py           # --mode vad    (hands-free)
+        ├── vad_mode.py           # --mode vad    (hands-free, wake word + follow-up)
         ├── text_mode.py          # --mode text   (typed input, dev-friendly)
         └── calibrate_mode.py     # --mode calibrate (measure turn() accuracy)
 ```
@@ -130,6 +135,13 @@ pip install -r requirements.txt
 pip install webrtcvad   # only needed for cozmo_brain's --mode vad
 pycozmo_resources.py download   # downloads Cozmo's animation/audio resource files — needed for play_animation()
 ```
+
+**Only if you plan to use `--mode vad`** (hands-free): it also needs
+wake-word detection, which is **not** a plain `pip install openwakeword` —
+see [Wake word detection](#wake-word-detection-zero-network) below for the
+exact install command and why. `--mode voice`, `--mode text`, and
+`--simulate` don't need this at all — skip it for now if you just want to
+get something running first.
 
 ### 2. Configure `.env`
 
@@ -204,11 +216,13 @@ Two things to know:
   profile was created, this falls back to logging exactly what to run
   manually, instead of guessing.
 
-#### Passwordless nmcli access (for Wi-Fi auto-connect)
+#### Passwordless nmcli access (optional, for Wi-Fi auto-connect)
 
-`nmcli` needing `sudo` on this machine (per the gotcha below) means plain,
-unprivileged `nmcli connection up ...` calls from `wifi.py` will fail unless
-you grant passwordless access one of two ways.
+Skip this whole subsection if you're not using `COZMO_WIFI_SSID` — it only
+matters for the optional auto-connect above. `nmcli` needing `sudo` on this
+machine (per the gotcha below) means plain, unprivileged `nmcli connection
+up ...` calls from `wifi.py` will fail unless you grant passwordless access
+one of two ways.
 
 **Option A: polkit rule (recommended)** — grants your user direct,
 unprivileged `nmcli` access, which is what `wifi.py` already calls (no code
@@ -332,18 +346,40 @@ aplay -D pipewire test.wav
 
 ### 7. Run it
 
+One-time, before the first `./run.sh` call below (git on this repo doesn't
+preserve the executable bit — it was committed from a Windows checkout):
+
+```bash
+chmod +x run.sh
+```
+
+**Recommended first run — sanity-check `.env`/Groq/Ollama before touching
+the robot at all.** This isolates config problems (bad API key, unreachable
+Ollama) from hardware problems (Wi-Fi, Bluetooth) — if this doesn't work,
+nothing past this point will either, so fix it here first:
+
+```bash
+./run.sh --simulate --mode text
+```
+
+Type something and press Enter. If you get a reply back (even a weird one),
+your `.env` is good and it's time to try the real robot. If it hangs or
+errors, re-check step 2 (`GROQ_API_KEY`, `OLLAMA_BASE_URL`) before going
+any further.
+
+**Then, for real:**
+
 ```bash
 # Quick test script:
 python3 orchestrator.py
 
-# Full application — activate cozmo-env first, then:
-python3 -m cozmo_brain --mode voice
-
-# ...or skip the manual activate step with the wrapper script (one-time: chmod +x run.sh):
-./run.sh --mode voice
+# Full application:
+./run.sh --mode voice          # push-to-talk — press Enter, speak, 'quit' to exit
+./run.sh --mode vad             # hands-free — needs the wake-word setup from step 1
 ```
 
-Press Enter to record and speak, or type `quit` to exit.
+(See [Modes](#modes) below if you'd rather activate `cozmo-env` and call
+`python3 -m cozmo_brain` directly instead of using `run.sh`.)
 
 ---
 
@@ -380,7 +416,7 @@ doing exactly one thing per user utterance.
 
 ```bash
 python3 -m cozmo_brain --mode voice       # push-to-talk (default) — press Enter, speak
-python3 -m cozmo_brain --mode vad         # hands-free, listens continuously (needs webrtcvad)
+python3 -m cozmo_brain --mode vad         # hands-free — say the wake word, then talk (needs webrtcvad + openwakeword)
 python3 -m cozmo_brain --mode text        # type instead of speak — great for dev/testing
 python3 -m cozmo_brain --mode calibrate   # measure real turn() degrees-per-second
 python3 -m cozmo_brain --simulate         # force the console-logging robot backend (any mode)
@@ -518,6 +554,62 @@ mid-session and watch it recover. Worth deliberately testing (power-cycle
 Cozmo mid-conversation, or walk him out of Wi-Fi range) before trusting it
 for an unattended long-running session.
 
+### Wake word detection (zero-network)
+
+`--mode vad` originally reacted to *any* detected speech — no wake word, so
+it would respond to ambient conversation, a TV, anything near the mic. Fixed
+with on-device wake-word detection gating VAD, using
+[openWakeWord](https://github.com/dscripka/openWakeWord) — chosen over
+Porcupine (Picovoice) specifically because it needs no account and has no
+unverified network behavior at runtime; the tradeoff is no "Hey Cozmo" out
+of the box (see below).
+
+The wake word only gates the *start* of a conversation, not every turn:
+after it fires, `vad_mode.py` keeps listening for follow-ups for
+`VAD_FOLLOWUP_TIMEOUT_S` (resetting on every reply) without repeating it —
+once nothing is heard within that window, the wake word is required again.
+
+**Physical "I heard you" cue:** this mode is hands-free, so a terminal print
+alone isn't a real indicator of anything — you're not meant to be watching a
+screen. Detecting the wake word switches Cozmo to the `curious` mood (face,
+white light, head up) so there's an actual visible/physical signal that he's
+listening; going quiet past the follow-up window switches him back to
+`neutral`. If the conversation continues instead, the model's own next
+`say`/`gesture` naturally takes over the face/lights as part of its normal
+response — no separate reset needed there.
+
+**Don't `pip install openwakeword` directly** — on Linux it unconditionally
+declares a dependency on `tflite-runtime`, which has **no build for Python
+3.12 anywhere** (checked both PyPI and piwheels.org — the Raspberry Pi
+Foundation's own ARM wheel builder — every version is listed "binary only"
+with zero files). Install it this way instead, which sidesteps that
+dependency entirely:
+
+```bash
+pip install --no-deps openwakeword
+pip install onnxruntime scipy scikit-learn requests tqdm
+python3 -c "from openwakeword.utils import download_models; download_models(['hey_jarvis_v0.1'])"
+```
+
+That last line is a required one-time step separate from the pip installs —
+the package ships no model files at all. It needs internet once, during
+setup; the actual wake-word detection at runtime never touches the network.
+
+`WAKE_WORD_MODEL` in `.env` is either a stock model name (`hey_jarvis`,
+`alexa`, `hey_mycroft`, `hey_rhasspy`, `timer`, `weather` — openWakeWord's
+free built-in models) or a path to a custom-trained `.onnx` model. Swapping
+later — e.g. once you've trained an actual "Hey Cozmo" via openWakeWord's
+training notebook — is just changing this one value: its `Model` class
+resolves a bare name and a file path through the identical code path
+(confirmed by reading its source), so nothing else needs to change.
+
+**What's actually verified vs. not:** installed this exact way, downloaded
+`hey_jarvis`, loaded it with `inference_framework="onnx"` (never touching
+`tflite_runtime`), and confirmed real predictions come back correctly keyed
+— all on a dev machine, not a Pi. **Not verified:** the real aarch64/Pi
+install (only PyPI's wheel listings were checked, not an actual install),
+or real microphone audio — there's no Pi or mic in this environment.
+
 ---
 
 ## Example conversations
@@ -618,6 +710,8 @@ annotated list (it's the source of truth). The essentials:
 | `MAX_TOOL_ITERATIONS` | Cap on LLM↔tool round-trips per user turn. |
 | `CONVERSATION_MAX_MESSAGES` / `CONVERSATION_HISTORY_PATH` | Memory size and persistence path. |
 | `VAD_AGGRESSIVENESS` / `VAD_SILENCE_MS` / `VAD_MAX_UTTERANCE_S` | Hands-free listening tuning. |
+| `VAD_FOLLOWUP_TIMEOUT_S` | How long a conversation stays open after a reply before the wake word is needed again. |
+| `WAKE_WORD_MODEL` / `WAKE_WORD_THRESHOLD` | Wake word gating `--mode vad` — stock name or path to a custom `.onnx`. |
 | `VISION_ENABLED` | Whether `look()`'s photo gets attached to the next LLM turn. |
 | `KNOWN_PEOPLE_DIR` | Where `remember_person`'s reference photos are stored (experimental). |
 
@@ -665,7 +759,9 @@ Done, via `cozmo_brain/`:
 - ✅ **Conversation memory** — `Conversation` class, trimmed + persisted to disk.
 - ✅ **Real animation API** — `play_animation`/`list_animations` tools.
 - ✅ **`turn()` calibration** — `--mode calibrate`.
-- ✅ **Voice activity detection** — `--mode vad` (`webrtcvad`).
+- ✅ **Voice activity detection** — `--mode vad` (`webrtcvad`), gated by a
+  zero-network on-device wake word (`openwakeword`, see [Wake word
+  detection](#wake-word-detection-zero-network) below).
 - ✅ **Camera-in-the-loop** — `look()` tool attaches the photo for vision.
 - ✅ **TTS gain boost** — `TTS_GAIN` in config, now clipping-safe (peak-normalizing).
 - ✅ **TTS voice/tone polish** — `TTS_PITCH_SHIFT` + `TTS_ROBOT_MOD_DEPTH`, picked by

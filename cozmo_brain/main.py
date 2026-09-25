@@ -74,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.mode == "vad":
             from cozmo_brain.modes import vad_mode
 
-            vad_mode.run(engine, groq, settings)
+            vad_mode.run(engine, robot, groq, settings)
         else:
             from cozmo_brain.modes import interactive
 
