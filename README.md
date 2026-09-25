@@ -535,6 +535,22 @@ come back mid-transition, torn. Added the same 2-second wait. This adds a
 real, noticeable delay to every photo now, which is the deliberate
 trade-off for a usable image.
 
+**Likely the same class of issue, this time on audio output:** the first
+word of `say()`'s speech was often inaudible while the rest of the
+sentence played fine. Traced through `anim_controller.py`'s actual
+playback loop (a background thread polling a queue at a fixed frame rate,
+sending either real audio or silence) — nothing there structurally drops
+the first packets, which points at Cozmo's own audio hardware needing a
+brief moment to actually start outputting sound after a run of silence,
+not a software queueing bug. `TTS_LEADIN_MS` (default 200ms) prepends
+silence before the real speech so the warm-up eats that instead of the
+first word — verified precisely that the prepended block is genuinely
+silent and the real audio starts exactly at the configured mark, and that
+a real STT round-trip still transcribes the first word correctly with the
+lead-in present. **Not verified: whether 200ms is actually the right
+amount on real hardware** — there's no Cozmo here to confirm the audible
+result, only that the mechanism itself works exactly as intended.
+
 **A latency bug, not a hardware quirk:** `cozmo_brain` felt noticeably
 slower per response than `orchestrator.py`, even though both do the same
 STT → LLM → TTS round trip. Traced to `show_expression()`'s default
@@ -590,13 +606,29 @@ far. Adjust further in `.env` to taste:
   fixed-frequency carrier tone (`TTS_ROBOT_MOD_HZ`, default 35Hz) for a
   metallic timbre, the classic cheap sci-fi robot-voice effect. `0.0` disables it.
 
-While in here, `TTS_GAIN` (Cozmo's speaker is quiet even at max hardware
-volume) also got a real fix: it used to be a blind fixed multiplier, which
-at its default of `3.0` was clipping about 0.5% of samples — audible as
-harsh crackle, not the intended "louder" effect — because Orpheus's raw
-output already peaks around 60% of full scale. It's now peak-normalizing:
-`TTS_GAIN` is a ceiling, automatically backed off to land just under
+`TTS_GAIN` (Cozmo's speaker is quiet even at max hardware volume) has gone
+through two real fixes so far. First: it used to be a blind fixed
+multiplier, which at its default of `3.0` was clipping about 0.5% of
+samples — audible as harsh crackle, not the intended "louder" effect —
+because Orpheus's raw output already peaks around 60% of full scale. Made
+peak-normalizing: a ceiling, automatically backed off to land just under
 clipping (~95% of full scale) instead of blowing past it.
+
+**Second fix, found by comparing OpenAI's output to Groq's directly**:
+peak-normalizing two voices to the *same peak* doesn't make them *equally
+loud*. Measured directly: OpenAI's default voice sits around an 8:1
+peak-to-RMS ratio (crest factor) — peakier, mostly quiet with occasional
+spikes — clearly higher than Groq's Orpheus, so matching their peaks left
+OpenAI sounding quieter overall despite an identical peak. RMS (average
+loudness), not the single loudest instant, is what's actually perceived as
+volume, and a linear gain can't fix a crest-factor mismatch by itself — it
+scales peak and RMS by the same factor. `_normalize_gain` now targets RMS
+directly, with a `tanh` soft limiter (compresses samples smoothly as they
+approach full scale, rather than a hard peak ceiling) protecting against
+overflow instead. This made a higher `TTS_GAIN` ceiling safe where it
+wasn't before — verified directly: even at `TTS_GAIN=4.0` (the new
+default, up from `3.0`), zero samples come within 90% of full scale on
+real OpenAI output.
 
 ### Switching speech providers
 
@@ -630,6 +662,22 @@ response actually declares and resamples to `TTS_SAMPLE_RATE` — the same
 used here for a plain format conversion. This makes the rate correct
 regardless of provider, without needing to know OpenAI's exact native
 output rate in advance.
+
+**OpenAI's speech sounds noticeably faster than Groq's** — measured
+directly, not assumed: same sentence, both providers, raw output before
+any of our own processing. Groq's Orpheus ("austin") took 5.14s; OpenAI's
+default voice ("alloy") took 4.41s for identical text — **OpenAI's voice
+genuinely speaks about 14% faster on its own**, which is an inherent
+difference between the two voices/engines, not a bug. There was also a
+smaller, real one: resampling OpenAI's 24000Hz output down to 22050Hz
+introduced an *extra* ~4-5% speedup beyond the intended `TTS_PITCH_SHIFT`
+effect — likely `audioop.ratecv()`'s known imprecision as a simple
+resampler, especially on a non-round rate ratio (24000:22050). Small
+enough not to chase further for now. For the dominant (voice-pace) effect,
+`OPENAI_TTS_SPEED` uses OpenAI's own native `speed` parameter to
+compensate — confirmed it actually changes output duration (tested
+`0.87` vs `1.0` directly) — rather than fighting a whole-engine pacing
+difference via our own pitch-shift math.
 
 ### Detecting and recovering from a dropped connection
 
@@ -807,7 +855,9 @@ annotated list (it's the source of truth). The essentials:
 | `AUDIO_OUTPUT` / `PLAYBACK_DEVICE` | Route speech to `cozmo` (default), `system` speaker, or `both` at once. |
 | `STT_MODEL` / `TTS_MODEL` / `TTS_VOICE` | Groq model/voice choices (used when `AUDIO_PROVIDER=groq`). |
 | `OPENAI_STT_MODEL` / `OPENAI_TTS_MODEL` / `OPENAI_TTS_VOICE` | OpenAI model/voice choices (used when `AUDIO_PROVIDER=openai`). |
-| `TTS_GAIN` | Max volume boost for TTS output, peak-normalized to avoid clipping (Cozmo's speaker is quiet). |
+| `OPENAI_TTS_SPEED` | OpenAI's native speed control — try ~0.85-0.90 to roughly match Groq's pacing. |
+| `TTS_GAIN` | Max volume boost for TTS output, RMS-targeted with a soft limiter (Cozmo's speaker is quiet). |
+| `TTS_LEADIN_MS` | Silent lead-in before speech, works around the first word often being inaudible. |
 | `TTS_PITCH_SHIFT` | Pitch+tempo shift for a smaller/more childlike/robotic voice. 1.0 = off. |
 | `TTS_ROBOT_MOD_DEPTH` / `TTS_ROBOT_MOD_HZ` | Optional ring-modulation robotic timbre. Depth 0.0 = off. |
 | `ROBOT_BACKEND` | `real` or `simulated` (cozmo_brain/ only; `--simulate` overrides it). |
@@ -863,6 +913,10 @@ annotated list (it's the source of truth). The essentials:
   before grabbing a frame, or the photo comes back torn/glitchy — also only
   showed up on real hardware. See [Real bugs this uncovered](#real-bugs-this-uncovered)
   above.
+- **The first word of speech is often inaudible** unless a silent lead-in
+  (`TTS_LEADIN_MS`, default 200ms) is prepended first — likely a hardware
+  audio warm-up, same class of issue as the camera one above. See
+  [Real bugs this uncovered](#real-bugs-this-uncovered) above.
 - **`display_image(..., duration=...)` sleeps for that long before clearing
   the screen** — `show_expression()` used to default to `duration=2.0`,
   adding a real 2s delay to every mood application (i.e. every `say()`).

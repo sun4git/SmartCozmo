@@ -12,6 +12,13 @@ TTS_SAMPLE_RATE, so this doesn't depend on knowing that number in advance.
 
 Voice/model names are OpenAI's own and differ from Groq/Orpheus's (see
 OPENAI_TTS_VOICE / OPENAI_TTS_MODEL / OPENAI_STT_MODEL in .env.example).
+
+Measured directly (same sentence, both providers, raw output before any of
+our own post-processing): OpenAI's "alloy" voice speaks about 14% faster
+than Groq's Orpheus "austin" voice for identical text — a real difference
+between the two voices/engines, not a bug. OPENAI_TTS_SPEED uses the API's
+own native `speed` parameter to compensate, rather than fighting it via our
+own pitch-shift.
 """
 
 from __future__ import annotations
@@ -53,6 +60,7 @@ class OpenAIClient:
                 "voice": voice or self._settings.openai_tts_voice,
                 "input": text,
                 "response_format": "wav",
+                "speed": self._settings.openai_tts_speed,
             },
             timeout=30,
         )

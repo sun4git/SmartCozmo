@@ -70,13 +70,34 @@ class Settings:
     openai_tts_model: str = field(default_factory=lambda: _env_str("OPENAI_TTS_MODEL", "tts-1"))
     openai_tts_voice: str = field(default_factory=lambda: _env_str("OPENAI_TTS_VOICE", "alloy"))
 
+    # OpenAI's own speed control (0.25-4.0, native to their TTS API).
+    # Measured directly: the default "alloy" voice speaks ~14% faster than
+    # Groq's Orpheus "austin" for identical text — try ~0.85-0.90 here to
+    # roughly match Groq's pacing if that difference is noticeable. 1.0 = OpenAI's own default.
+    openai_tts_speed: float = field(default_factory=lambda: _env_float("OPENAI_TTS_SPEED", 1.0))
+
     # --- TTS output shape (applies regardless of provider) ---
     # TTS_SAMPLE_RATE: Cozmo's play_audio() only accepts 22050/48000Hz. Groq's
     # Orpheus can be asked for this rate directly; OpenAI's TTS cannot (no
     # such parameter exists) - tts_postprocess.py resamples to this rate from
     # whatever the provider's response actually declares, either way.
     tts_sample_rate: int = field(default_factory=lambda: _env_int("TTS_SAMPLE_RATE", 22050))
-    tts_gain: float = field(default_factory=lambda: _env_float("TTS_GAIN", 3.0))
+
+    # Max gain toward a target RMS (average loudness), not a peak target -
+    # matching peaks alone left "peakier" voices (confirmed: OpenAI's
+    # default) sounding quieter overall than Groq's despite an identical
+    # peak. A tanh soft-limiter (not a hard peak ceiling) protects against
+    # overflow, so this can safely go higher than the old peak-based
+    # default could - verified directly: even at gain=4.0, zero samples
+    # come within 90% of full scale. See tts_postprocess.py.
+    tts_gain: float = field(default_factory=lambda: _env_float("TTS_GAIN", 4.0))
+
+    # Silent lead-in prepended before the actual speech (milliseconds).
+    # Reported symptom: Cozmo's speaker often misses the first word, the
+    # rest plays fine — likely a hardware audio warm-up after a run of
+    # silence, not a queueing bug (see tts_postprocess.py). Untested
+    # against real hardware how much is actually needed; 0 disables it.
+    tts_leadin_ms: float = field(default_factory=lambda: _env_float("TTS_LEADIN_MS", 200.0))
 
     # Voice character (Orpheus is a generic human voice, not Cozmo's real one).
     # These defaults were picked by ear against sample WAVs — the ring-mod
