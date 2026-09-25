@@ -490,7 +490,7 @@ theoretical caveat. Treat any match as Cozmo's fun guess, not a fact, and
 say so — the persona prompt already leans into this ("his eyesight isn't
 great") rather than hiding it.
 
-### A real bug this uncovered
+### Real bugs this uncovered
 
 While wiring up `drive()`/`turn()`, we found that this version of PyCozmo's
 `Client.drive_wheels(..., duration=...)` accepts a `duration` keyword but
@@ -500,6 +500,20 @@ to auto-stop the robot, which does not happen. `cozmo_brain/robot/real.py`
 works around this properly: it sleeps for the computed duration itself, then
 calls `cli.stop_all_motors()` explicitly. Worth keeping in mind if you write
 any other timed movement — always stop the robot explicitly.
+
+**Found on real hardware** (this one only showed up once actually running
+against a physical Cozmo, not in any offline testing): `say`/`gesture`/every
+mood failed with `Invalid image dimensions. Only 128x32 images are
+supported. 128x64 given.` PyCozmo's own `procedural_face.DEFAULT_WIDTH` /
+`DEFAULT_HEIGHT` are `128x64`, but `image_encoder.ImageEncoder` — what
+actually talks to Cozmo's real screen — hard-requires exactly `128x32`
+(Cozmo's real face display is a short, wide strip, not square). PyCozmo's
+own default doesn't match its own hardware constraint. Fixed in
+`show_expression()` by constructing the expression class with
+`width=128, height=32` explicitly instead of the library's default — the
+face geometry scales by width/height, so this renders correctly proportioned
+for the real screen rather than a squashed crop. Verified against all 25
+expression classes.
 
 ### Making the voice sound less generic
 
@@ -745,8 +759,12 @@ annotated list (it's the source of truth). The essentials:
   `cozmo_brain/`'s equivalent is the same formula but centralized in config
   and measurable with `python -m cozmo_brain --mode calibrate`.
 - **`cli.drive_wheels(..., duration=...)` silently ignores `duration`** in
-  this PyCozmo version — see [A real bug this uncovered](#a-real-bug-this-uncovered)
+  this PyCozmo version — see [Real bugs this uncovered](#real-bugs-this-uncovered)
   above. Any new timed movement needs to sleep + `stop_all_motors()` itself.
+- **Face/expression images must be rendered at 128x32, not PyCozmo's own
+  128x64 default** — confirmed on real hardware (`say`/`gesture`/moods all
+  failed until fixed). See [Real bugs this uncovered](#real-bugs-this-uncovered)
+  above.
 - **Orpheus TTS needs one-time model terms acceptance** in the Groq console
   per account/org (see Groq setup above).
 

@@ -41,6 +41,7 @@ class SimulatedRobot(RobotBackend):
     def connect(self) -> None:
         self._connected = True
         logger.info("[sim] Connected to simulated Cozmo.")
+        self.run_gesture("wake_up")
 
     def disconnect(self) -> None:
         self._connected = False

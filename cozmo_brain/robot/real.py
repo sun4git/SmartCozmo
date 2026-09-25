@@ -97,6 +97,14 @@ class PyCozmoRobot(RobotBackend):
                 "will be unavailable. Run 'pycozmo_resources.py download' to fix (see README)."
             )
 
+        # Cozmo's head is wherever it physically was before connecting (often
+        # face-down from sitting on the charger) — this is the only signal a
+        # human gets that the connection actually succeeded, so make it obvious.
+        try:
+            self.run_gesture("wake_up")
+        except Exception as e:  # noqa: BLE001 - a cosmetic startup gesture shouldn't block connect()
+            logger.warning("Could not play wake-up gesture: %s", e)
+
     def disconnect(self) -> None:
         if self._cli is None:
             return
@@ -187,7 +195,13 @@ class PyCozmoRobot(RobotBackend):
         cls = getattr(expr_module, name, None)
         if cls is None:
             raise ValueError(f"Unknown expression '{name}'. Known: {', '.join(expr_module.__all__)}")
-        face = cls()
+        # pycozmo.procedural_face.DEFAULT_WIDTH/HEIGHT (128x64) don't actually
+        # match Cozmo's real face display — his screen is 128x32, and
+        # image_encoder.ImageEncoder rejects anything else. Render at the
+        # real screen size directly (the geometry scales by width/height, so
+        # this isn't a squashed 64->32 crop, it's a correctly-proportioned
+        # render for the real hardware).
+        face = cls(width=128, height=32)
         self._client.display_image(face.render(), duration=duration)
 
     def capture_photo(self, path: str) -> str:
