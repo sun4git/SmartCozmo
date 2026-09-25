@@ -90,6 +90,14 @@ class SimulatedRobot(RobotBackend):
         logger.info("[sim] \U0001f4f7 captured a placeholder photo -> %s", path)
         return path
 
+    def display_custom_image(self, image, duration: float | None = None) -> None:
+        logger.info("[sim] \U0001f5bc displaying a custom %dx%d image", *image.size)
+
+    def get_battery_voltage(self) -> float | None:
+        # No real battery to read — a plausible healthy constant is enough
+        # to exercise the battery-monitor code path without hardware.
+        return 4.0
+
     def list_animations(self) -> list[str]:
         return list(_FAKE_ANIMATIONS)
 

@@ -126,6 +126,16 @@ class Settings:
     # Inferred from the protocol, not tuned against a real disconnect.
     robot_stale_after_s: float = field(default_factory=lambda: _env_float("ROBOT_STALE_AFTER_S", 5.0))
 
+    # --- Battery monitor (real backend only) ---
+    # Voltage thresholds sourced from real-world Cozmo community usage: 3.7V
+    # is used as a "seek charger" threshold in a working autonomy script,
+    # 3.5V is reported as the official SDK's own low-battery warning level.
+    # Below CRITICAL, a face icon + warning light are shown periodically
+    # until the robot is on the charger or disconnects.
+    battery_low_voltage: float = field(default_factory=lambda: _env_float("BATTERY_LOW_VOLTAGE", 3.7))
+    battery_critical_voltage: float = field(default_factory=lambda: _env_float("BATTERY_CRITICAL_VOLTAGE", 3.5))
+    battery_check_interval_s: float = field(default_factory=lambda: _env_float("BATTERY_CHECK_INTERVAL_S", 30.0))
+
     # --- Wi-Fi auto-connect (optional, Linux/nmcli only — see robot/wifi.py) ---
     # Leave COZMO_WIFI_SSID empty to disable and keep connecting manually (nmcli
     # dev wifi connect ...) as before. Cozmo's SSID/password can regenerate on
@@ -150,6 +160,16 @@ class Settings:
     vad_aggressiveness: int = field(default_factory=lambda: _env_int("VAD_AGGRESSIVENESS", 2))
     vad_silence_ms: int = field(default_factory=lambda: _env_int("VAD_SILENCE_MS", 800))
     vad_max_utterance_s: int = field(default_factory=lambda: _env_int("VAD_MAX_UTTERANCE_S", 15))
+
+    # Minimum total voiced (webrtcvad-positive) audio required before a
+    # capture is sent to Whisper at all. A single false-positive frame from
+    # background noise used to be enough to trigger a whole recording —
+    # Whisper doesn't reliably return "empty" on a noise-only clip, it
+    # hallucinates a plausible-sounding sentence instead (a well-documented
+    # Whisper failure mode). Discarding tiny voiced-frame counts as noise,
+    # the same as "no speech heard", stops those clips before they're
+    # transcribed at all.
+    vad_min_speech_ms: int = field(default_factory=lambda: _env_int("VAD_MIN_SPEECH_MS", 300))
 
     # How long to keep listening for a follow-up utterance after Cozmo
     # replies, without needing the wake word again. Resets on every turn;

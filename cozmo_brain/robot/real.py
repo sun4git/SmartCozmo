@@ -226,6 +226,16 @@ class PyCozmoRobot(RobotBackend):
         result["image"].save(path)
         return path
 
+    def display_custom_image(self, image, duration: float | None = None) -> None:
+        self._client.display_image(image, duration=duration)
+
+    def get_battery_voltage(self) -> float | None:
+        # pycozmo.Client initializes battery_voltage to 0.0 before the first
+        # RobotState packet arrives — treat that as "not yet known" rather
+        # than a real (impossible) reading.
+        voltage = self._client.battery_voltage
+        return voltage if voltage > 0.0 else None
+
     def list_animations(self) -> list[str]:
         if not self._animations_loaded:
             return []

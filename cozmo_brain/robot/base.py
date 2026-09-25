@@ -80,6 +80,16 @@ class RobotBackend(abc.ABC):
     def play_animation(self, name: str) -> None:
         """Play a real animation clip or group by exact name."""
 
+    @abc.abstractmethod
+    def display_custom_image(self, image, duration: float | None = None) -> None:
+        """Display an arbitrary 128x32 PIL image (e.g. the battery icon),
+        as opposed to show_expression()'s named procedural faces."""
+
+    @abc.abstractmethod
+    def get_battery_voltage(self) -> float | None:
+        """Cozmo's current battery voltage, or None if unknown/unavailable
+        (e.g. not connected yet, or a backend with no real battery)."""
+
     # --- connection health (default: always healthy — overridden by real.py) ---
     def is_healthy(self) -> bool:
         """Whether the connection looks alive. Backends with no real

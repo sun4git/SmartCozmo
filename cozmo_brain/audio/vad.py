@@ -25,10 +25,18 @@ def record_until_silence(
     aggressiveness: int,
     silence_ms: int,
     max_seconds: int,
+    min_speech_ms: int = 300,
 ) -> bool:
     """Record from `device` until `silence_ms` of silence follows detected speech,
     or `max_seconds` is reached. Returns True if any speech was captured, and
-    writes the captured audio to `path` in that case."""
+    writes the captured audio to `path` in that case.
+
+    A capture is discarded (treated the same as "no speech heard") unless at
+    least `min_speech_ms` of it was actually classified as speech by
+    webrtcvad — a single false-positive frame from background noise used to
+    be enough to trigger a full recording and get sent to Whisper, which
+    hallucinates a plausible sentence rather than returning empty text on a
+    noise-only clip."""
     try:
         import webrtcvad
     except ImportError as e:
@@ -39,6 +47,7 @@ def record_until_silence(
     vad = webrtcvad.Vad(aggressiveness)
     silence_frames_needed = max(1, silence_ms // _FRAME_MS)
     max_frames = max(1, int(max_seconds * 1000 / _FRAME_MS))
+    min_speech_frames = max(1, min_speech_ms // _FRAME_MS)
 
     proc = subprocess.Popen(
         ["arecord", "-D", device, "-f", "S16_LE", "-r", str(_SAMPLE_RATE), "-c", "1", "-t", "raw"],
@@ -48,6 +57,7 @@ def record_until_silence(
     voiced_frames: list[bytes] = []
     silence_run = 0
     speech_started = False
+    speech_frame_count = 0
     frame_count = 0
 
     try:
@@ -59,6 +69,7 @@ def record_until_silence(
 
             if vad.is_speech(frame, _SAMPLE_RATE):
                 speech_started = True
+                speech_frame_count += 1
                 silence_run = 0
                 voiced_frames.append(frame)
             elif speech_started:
@@ -72,6 +83,14 @@ def record_until_silence(
             proc.wait(timeout=2)
 
     if not voiced_frames:
+        return False
+
+    if speech_frame_count < min_speech_frames:
+        logger.debug(
+            "Discarding capture: only %dms of actual voiced audio (need %dms) - likely noise, not speech.",
+            speech_frame_count * _FRAME_MS,
+            min_speech_ms,
+        )
         return False
 
     with wave.open(path, "wb") as wf:

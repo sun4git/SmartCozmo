@@ -54,6 +54,7 @@ def run(engine: CozmoEngine, robot: RobotBackend, speech: SpeechClient, settings
                 settings.vad_aggressiveness,
                 settings.vad_silence_ms,
                 listen_timeout,
+                settings.vad_min_speech_ms,
             )
             if not got_speech:
                 print("(no follow-up heard - wake word needed again)\n")

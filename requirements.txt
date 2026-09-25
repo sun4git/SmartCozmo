@@ -7,6 +7,16 @@ pycozmo
 # Push-to-talk (--mode voice), text (--mode text), and --simulate work without it.
 # webrtcvad
 #
+# webrtcvad (abandoned since 2020) does a module-level `import pkg_resources`
+# for its version check. pkg_resources was removed from setuptools itself in
+# a recent release (confirmed: gone by 80.10.2) — a fresh venv's default
+# (latest) setuptools breaks webrtcvad's import with
+# `ModuleNotFoundError: No module named 'pkg_resources'` even after
+# webrtcvad installs successfully. Pinning setuptools below the removal is
+# the only fix short of replacing webrtcvad itself; old releases stay on
+# PyPI, so this pin should keep working indefinitely.
+# setuptools<81
+#
 # Also for --mode vad: wake-word detection. NOT a plain `pip install
 # openwakeword` — see cozmo_brain/audio/wakeword.py for the exact install
 # command (it has a broken dependency on Python 3.12/Linux otherwise).

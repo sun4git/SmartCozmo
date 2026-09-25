@@ -14,6 +14,7 @@ from cozmo_brain.llm import create_speech_client
 from cozmo_brain.llm.ollama_client import OllamaClient
 from cozmo_brain.personality import SYSTEM_PROMPT
 from cozmo_brain.robot import create_robot
+from cozmo_brain.robot.battery_monitor import BatteryMonitor
 from cozmo_brain.tools import build_tools
 
 
@@ -59,6 +60,9 @@ def main(argv: list[str] | None = None) -> int:
             calibrate_mode.run(robot, settings)
             return 0
 
+        battery_monitor = BatteryMonitor(robot, settings)
+        battery_monitor.start()
+
         speech = create_speech_client(settings)
         ollama = OllamaClient(settings)
         tools = build_tools(robot, speech, ollama, settings)
@@ -73,18 +77,21 @@ def main(argv: list[str] | None = None) -> int:
 
         engine = CozmoEngine(settings, robot, ollama, speech, tools, conversation)
 
-        if args.mode == "text":
-            from cozmo_brain.modes import text_mode
+        try:
+            if args.mode == "text":
+                from cozmo_brain.modes import text_mode
 
-            text_mode.run(engine)
-        elif args.mode == "vad":
-            from cozmo_brain.modes import vad_mode
+                text_mode.run(engine)
+            elif args.mode == "vad":
+                from cozmo_brain.modes import vad_mode
 
-            vad_mode.run(engine, robot, speech, settings)
-        else:
-            from cozmo_brain.modes import interactive
+                vad_mode.run(engine, robot, speech, settings)
+            else:
+                from cozmo_brain.modes import interactive
 
-            interactive.run(engine, speech, settings)
+                interactive.run(engine, speech, settings)
+        finally:
+            battery_monitor.stop()
 
     return 0
 

@@ -112,7 +112,9 @@ See [Roadmap](#roadmap--open-work) for what's still open.
     │   ├── simulated.py        # console-logging implementation, no hardware needed
     │   ├── wifi.py             # optional nmcli-based Wi-Fi auto-connect
     │   ├── moods.py            # curated expression+light+pose presets
-    │   └── gestures.py         # curated multi-step gesture choreography
+    │   ├── gestures.py         # curated multi-step gesture choreography
+    │   ├── battery_face.py     # renders the low-battery face icon
+    │   └── battery_monitor.py  # background thread: checks voltage, shows the icon
     ├── tools/
     │   ├── base.py             # Tool/ToolResult contract
     │   └── registry.py         # the 9 tools exposed to the LLM
@@ -136,15 +138,37 @@ python3 -m venv cozmo-env
 source cozmo-env/bin/activate
 pip install --upgrade pip
 pip install -r requirements.txt
-pip install webrtcvad   # only needed for cozmo_brain's --mode vad
 pycozmo_resources.py download   # downloads Cozmo's animation/audio resource files — needed for play_animation()
 ```
 
-**Only if you plan to use `--mode vad`** (hands-free): it also needs
-wake-word detection, which is **not** a plain `pip install openwakeword` —
-see [Wake word detection](#wake-word-detection-zero-network) below for the
-exact install command and why. `--mode voice`, `--mode text`, and
-`--simulate` don't need this at all — skip it for now if you just want to
+**Only if you plan to use `--mode vad`** (hands-free), two more installs, both
+with real gotchas:
+
+1. **webrtcvad** needs a C compiler + Python headers to build (it has no
+   prebuilt wheel for aarch64/Python 3.12):
+
+   ```bash
+   sudo apt install -y build-essential python3-dev
+   pip install webrtcvad
+   pip install "setuptools<81"   # required — see below
+   ```
+
+   `setuptools<81` is a **required pin, not optional** (order relative to
+   `pip install webrtcvad` doesn't matter — this fixes an *import-time*
+   failure, not a build-time one): webrtcvad (abandoned since 2020) does a
+   module-level `import pkg_resources` for its version check, and
+   pkg_resources was removed from setuptools itself in a recent release — a
+   fresh venv's default (latest) setuptools installs webrtcvad fine but then
+   breaks *importing* it with `ModuleNotFoundError: No module named
+   'pkg_resources'`. Later running `pip install --upgrade setuptools` in
+   this venv reintroduces the same failure — reinstall the pin if that
+   happens.
+2. **Wake-word detection**, which is **not** a plain `pip install
+   openwakeword` — see [Wake word detection](#wake-word-detection-zero-network)
+   below for the exact install command and why.
+
+`--mode voice`, `--mode text`, and `--simulate` don't need either of these —
+skip them for now if you just want to
 get something running first.
 
 ### 2. Configure `.env`
@@ -568,6 +592,30 @@ than being held for a fixed 2s and auto-cleared — which was never actually
 the intended behavior for routine mood-setting, only for a deliberately
 timed gesture beat (no gesture currently uses this path directly).
 
+**Found in `--mode vad` use:** Cozmo would occasionally "hear" and act on
+entire sentences that were never said — reported symptoms included fully
+formed sentences in other languages (e.g. Korean) out of what should have
+been silence. Root cause: `record_until_silence()` (`cozmo_brain/audio/vad.py`)
+started a full recording the moment **a single** 30ms frame was classified
+as speech by `webrtcvad` — cheap Bluetooth mics + background noise trip this
+easily. That mostly-silent clip still got sent to Whisper, and Whisper
+doesn't reliably return empty text on a noise-only clip — it hallucinates a
+plausible-sounding sentence from its training data instead (a well-known,
+widely-reported Whisper failure mode; confirmed neither Groq's nor OpenAI's
+hosted Whisper endpoint expose a documented way to suppress this — Groq's
+`verbose_json` does expose `no_speech_prob`/`avg_logprob` for post-hoc
+filtering, but OpenAI's `whisper-1` API doesn't reliably surface those
+fields despite them existing in the underlying model). Fixed at the capture
+layer instead, so it works regardless of provider: `VAD_MIN_SPEECH_MS`
+(default 300ms) now requires that much total *voiced* audio — frames
+webrtcvad actually classified as speech, not just total recording length —
+before a capture is accepted; anything shorter is discarded exactly like "no
+speech heard," never reaching the STT call. Verified with a scripted
+fake-mic test (single false-positive frame → discarded; a real multi-frame
+utterance → accepted); **not yet verified against a real recurrence on
+hardware** — worth confirming the hallucinated transcriptions stop showing
+up in practice.
+
 ### Routing speech to a real speaker (noisy environments)
 
 Cozmo's own speaker is small and quiet even with the `TTS_GAIN` fix — in a
@@ -705,6 +753,33 @@ against an actual disconnect** — there's no real Cozmo here to power off
 mid-session and watch it recover. Worth deliberately testing (power-cycle
 Cozmo mid-conversation, or walk him out of Wi-Fi range) before trusting it
 for an unattended long-running session.
+
+### Battery monitor
+
+Cozmo streams his own `battery_voltage` (a real field on PyCozmo's
+`RobotState` telemetry packet) continuously while connected, but there's no
+discrete "low battery" status flag — just the raw voltage. `BatteryMonitor`
+(`cozmo_brain/robot/battery_monitor.py`) runs on a background thread from
+`main.py`, polling `robot.get_battery_voltage()` every
+`BATTERY_CHECK_INTERVAL_S` (default 30s). Below `BATTERY_LOW_VOLTAGE`
+(default 3.7V) it shows a battery icon on Cozmo's face plus a red backpack
+light for a few seconds; below `BATTERY_CRITICAL_VOLTAGE` (default 3.5V) the
+icon switches from a shrinking fill level to a solid warning mark, since a
+proportional fill isn't legible as "urgent" at 128x32. The icon itself is
+drawn by `cozmo_brain/robot/battery_face.py` as a plain PIL image, sent via
+a new backend-agnostic `display_custom_image()` primitive (alongside the
+existing `show_expression()`, which only knows named procedural faces).
+
+The two threshold voltages aren't invented: 3.7V matches a "seek charger"
+check used in a real community Cozmo autonomy script, and 3.5V is reported
+as the official Cozmo SDK's own low-battery warning level. Neither has been
+verified against this specific robot's actual discharge curve — if the
+warning fires too early/late in practice, adjust the two `.env` values
+rather than assuming the thresholds are wrong in general.
+
+`SimulatedRobot.get_battery_voltage()` always returns a constant healthy
+value, so the monitor is effectively a no-op with `--simulate` — there's no
+fake battery to drain.
 
 ### Wake word detection (zero-network)
 
@@ -862,6 +937,8 @@ annotated list (it's the source of truth). The essentials:
 | `TTS_ROBOT_MOD_DEPTH` / `TTS_ROBOT_MOD_HZ` | Optional ring-modulation robotic timbre. Depth 0.0 = off. |
 | `ROBOT_BACKEND` | `real` or `simulated` (cozmo_brain/ only; `--simulate` overrides it). |
 | `ROBOT_STALE_AFTER_S` | Seconds without robot telemetry before auto-reconnect kicks in. |
+| `BATTERY_LOW_VOLTAGE` / `BATTERY_CRITICAL_VOLTAGE` | Voltage thresholds for the face battery-warning icon (real backend only). |
+| `BATTERY_CHECK_INTERVAL_S` | How often the battery monitor polls voltage. |
 | `COZMO_WIFI_SSID` / `COZMO_WIFI_PASSWORD` | Optional Wi-Fi auto-connect (Linux/nmcli only). Password only needed for the first connect. |
 | `TURN_SPEED_MMPS` / `TURN_SECONDS_PER_DEGREE` | `turn()` calibration — tune with `--mode calibrate`. |
 | `MAX_DRIVE_SPEED_MMPS` / `MAX_DRIVE_DISTANCE_MM` | Safety clamps on the `drive` tool. |
@@ -869,6 +946,7 @@ annotated list (it's the source of truth). The essentials:
 | `CONVERSATION_MAX_MESSAGES` / `CONVERSATION_HISTORY_PATH` | Memory size and persistence path. |
 | `VAD_AGGRESSIVENESS` / `VAD_SILENCE_MS` / `VAD_MAX_UTTERANCE_S` | Hands-free listening tuning. |
 | `VAD_FOLLOWUP_TIMEOUT_S` | How long a conversation stays open after a reply before the wake word is needed again. |
+| `VAD_MIN_SPEECH_MS` | Minimum voiced audio required before a capture is sent to Whisper — filters out noise-triggered hallucinated transcriptions. |
 | `WAKE_WORD_MODEL` / `WAKE_WORD_THRESHOLD` | Wake word gating `--mode vad` — stock name or path to a custom `.onnx`. |
 | `VISION_ENABLED` | Whether `look()`'s photo gets attached to the next LLM turn. |
 | `KNOWN_PEOPLE_DIR` | Where `remember_person`'s reference photos are stored (experimental). |
@@ -877,12 +955,20 @@ annotated list (it's the source of truth). The essentials:
 
 ## Known gotchas
 
+- **`webrtcvad` needs `setuptools<81` pinned in the venv, permanently**, not
+  just at install time — see [step 1](#1-python-environment-on-the-deployment-machine)
+  above. If `--mode vad` ever starts throwing `ModuleNotFoundError: No
+  module named 'pkg_resources'` again after working before, something
+  upgraded setuptools past that pin — reinstall it.
 - **Cozmo's AP is flaky to scan.** If `nmcli dev wifi list` doesn't show him
   even though his face shows credentials, rescan and try again before
   assuming anything is broken.
 - **Cozmo auto-powers-off** fairly quickly off the charger (small/aged
   battery). Development goes smoother with him on the charger — PyCozmo can
-  fully control him while charging.
+  fully control him while charging. `BatteryMonitor` (see
+  [Battery monitor](#battery-monitor)) shows a face warning a few seconds
+  before this happens instead of him just going dark unannounced, but the
+  underlying power-off itself isn't something this app can prevent.
 - **Wi-Fi and Bluetooth typically share radio hardware** on small boards like
   a Pi. Running Cozmo's Wi-Fi link and a Bluetooth mic simultaneously is a
   plausible source of audio glitches if you see flakiness — not confirmed as
@@ -951,6 +1037,9 @@ Done, via `cozmo_brain/`:
 - ✅ **STT/TTS provider flexibility** — `AUDIO_PROVIDER=groq`/`openai` in
   `.env`, for when Groq's free-tier rate limits get hit (which they did,
   during actual use). See [Switching speech providers](#switching-speech-providers).
+- ✅ **Battery indicator** — `BatteryMonitor` shows a face icon + red backpack
+  light a few seconds before Cozmo auto-powers-off. See [Battery
+  monitor](#battery-monitor).
 
 Still open, roughly in priority order:
 
