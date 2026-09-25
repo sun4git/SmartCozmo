@@ -25,18 +25,25 @@ def record_until_silence(
     aggressiveness: int,
     silence_ms: int,
     max_seconds: int,
-    min_speech_ms: int = 300,
+    min_speech_ms: int = 60,
 ) -> bool:
     """Record from `device` until `silence_ms` of silence follows detected speech,
     or `max_seconds` is reached. Returns True if any speech was captured, and
     writes the captured audio to `path` in that case.
 
-    A capture is discarded (treated the same as "no speech heard") unless at
-    least `min_speech_ms` of it was actually classified as speech by
-    webrtcvad — a single false-positive frame from background noise used to
-    be enough to trigger a full recording and get sent to Whisper, which
+    `min_speech_ms` is an onset debounce, not a minimum utterance length: a
+    single false-positive frame from background noise used to be enough to
+    flip straight into "recording" and get sent to Whisper, which
     hallucinates a plausible sentence rather than returning empty text on a
-    noise-only clip."""
+    noise-only clip. Requiring a couple of *consecutive* speech frames before
+    committing filters that out. A first attempt at this instead required a
+    minimum *total* accumulated speech-frame count across the whole capture —
+    that's the wrong metric: it discarded genuinely short real utterances
+    (confirmed on real hardware: a real short reply logged only 90ms of
+    accumulated speech frames out of a 900ms capture) exactly as readily as
+    the single-frame noise case it was meant to catch. Once the onset
+    debounce is satisfied there's no further minimum on total length — real
+    words can be legitimately brief."""
     try:
         import webrtcvad
     except ImportError as e:
@@ -47,7 +54,7 @@ def record_until_silence(
     vad = webrtcvad.Vad(aggressiveness)
     silence_frames_needed = max(1, silence_ms // _FRAME_MS)
     max_frames = max(1, int(max_seconds * 1000 / _FRAME_MS))
-    min_speech_frames = max(1, min_speech_ms // _FRAME_MS)
+    onset_frames_needed = max(1, min_speech_ms // _FRAME_MS)
 
     proc = subprocess.Popen(
         ["arecord", "-D", device, "-f", "S16_LE", "-r", str(_SAMPLE_RATE), "-c", "1", "-t", "raw"],
@@ -55,9 +62,10 @@ def record_until_silence(
     )
 
     voiced_frames: list[bytes] = []
+    pending_frames: list[bytes] = []
+    consecutive_speech = 0
     silence_run = 0
     speech_started = False
-    speech_frame_count = 0
     frame_count = 0
 
     try:
@@ -66,17 +74,27 @@ def record_until_silence(
             if len(frame) < _FRAME_BYTES:
                 break
             frame_count += 1
+            is_speech = vad.is_speech(frame, _SAMPLE_RATE)
 
-            if vad.is_speech(frame, _SAMPLE_RATE):
-                speech_started = True
-                speech_frame_count += 1
-                silence_run = 0
+            if not speech_started:
+                if is_speech:
+                    consecutive_speech += 1
+                    pending_frames.append(frame)
+                    if consecutive_speech >= onset_frames_needed:
+                        speech_started = True
+                        voiced_frames.extend(pending_frames)
+                        pending_frames = []
+                else:
+                    consecutive_speech = 0
+                    pending_frames = []
+            else:
                 voiced_frames.append(frame)
-            elif speech_started:
-                silence_run += 1
-                voiced_frames.append(frame)
-                if silence_run >= silence_frames_needed:
-                    break
+                if is_speech:
+                    silence_run = 0
+                else:
+                    silence_run += 1
+                    if silence_run >= silence_frames_needed:
+                        break
     finally:
         proc.terminate()
         with contextlib.suppress(Exception):
@@ -91,21 +109,13 @@ def record_until_silence(
         )
         return False
 
-    if not voiced_frames:
+    if not speech_started:
         logger.debug(
-            "Listened for %.1fs, webrtcvad never classified any of it as speech (aggressiveness=%d).",
+            "Listened for %.1fs, never got %d consecutive speech frames from webrtcvad "
+            "(aggressiveness=%d) - discarding as noise/nothing said.",
             frame_count * _FRAME_MS / 1000.0,
+            onset_frames_needed,
             aggressiveness,
-        )
-        return False
-
-    if speech_frame_count < min_speech_frames:
-        logger.info(
-            "Discarding capture: only %dms of actual voiced audio out of %.1fs listened "
-            "(need %dms) - treated as noise/too-short, not real speech.",
-            speech_frame_count * _FRAME_MS,
-            frame_count * _FRAME_MS / 1000.0,
-            min_speech_ms,
         )
         return False
 

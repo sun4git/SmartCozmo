@@ -161,15 +161,19 @@ class Settings:
     vad_silence_ms: int = field(default_factory=lambda: _env_int("VAD_SILENCE_MS", 800))
     vad_max_utterance_s: int = field(default_factory=lambda: _env_int("VAD_MAX_UTTERANCE_S", 15))
 
-    # Minimum total voiced (webrtcvad-positive) audio required before a
-    # capture is sent to Whisper at all. A single false-positive frame from
-    # background noise used to be enough to trigger a whole recording —
-    # Whisper doesn't reliably return "empty" on a noise-only clip, it
-    # hallucinates a plausible-sounding sentence instead (a well-documented
-    # Whisper failure mode). Discarding tiny voiced-frame counts as noise,
-    # the same as "no speech heard", stops those clips before they're
-    # transcribed at all.
-    vad_min_speech_ms: int = field(default_factory=lambda: _env_int("VAD_MIN_SPEECH_MS", 300))
+    # Onset debounce (not a minimum utterance length): how many consecutive
+    # milliseconds of webrtcvad-positive audio are required before a capture
+    # is committed to recording at all, vs. a single false-positive frame
+    # from background noise flipping straight into "recording" and getting
+    # sent to Whisper — which doesn't reliably return "empty" on a
+    # noise-only clip, it hallucinates a plausible-sounding sentence instead
+    # (a well-documented Whisper failure mode). Once this debounce is
+    # satisfied there's no further minimum on total utterance length — real
+    # words can be legitimately short (confirmed on real hardware: an
+    # earlier version of this setting required a minimum *total* speech-frame
+    # count across the whole capture instead of just at onset, and that
+    # discarded genuinely short real replies as readily as actual noise).
+    vad_min_speech_ms: int = field(default_factory=lambda: _env_int("VAD_MIN_SPEECH_MS", 60))
 
     # How long to keep listening for a follow-up utterance after Cozmo
     # replies, without needing the wake word again. Resets on every turn;

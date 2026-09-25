@@ -606,15 +606,30 @@ hosted Whisper endpoint expose a documented way to suppress this — Groq's
 `verbose_json` does expose `no_speech_prob`/`avg_logprob` for post-hoc
 filtering, but OpenAI's `whisper-1` API doesn't reliably surface those
 fields despite them existing in the underlying model). Fixed at the capture
-layer instead, so it works regardless of provider: `VAD_MIN_SPEECH_MS`
-(default 300ms) now requires that much total *voiced* audio — frames
-webrtcvad actually classified as speech, not just total recording length —
-before a capture is accepted; anything shorter is discarded exactly like "no
-speech heard," never reaching the STT call. Verified with a scripted
-fake-mic test (single false-positive frame → discarded; a real multi-frame
-utterance → accepted); **not yet verified against a real recurrence on
-hardware** — worth confirming the hallucinated transcriptions stop showing
-up in practice.
+layer instead, so it works regardless of provider — but it took two tries:
+
+The **first attempt** required `VAD_MIN_SPEECH_MS` (300ms) of total
+*accumulated* voiced audio — summed across the whole capture — before
+accepting it. **Found on real hardware to be the wrong metric**: a real,
+short reply logged only 90ms of accumulated speech frames out of a 900ms
+capture and got silently discarded exactly like the noise case it was meant
+to catch, breaking real hands-free conversation (a pause before speaking
+made this much more likely to hit, since `webrtcvad`'s per-frame
+classification is genuinely conservative/noisy on a real Bluetooth mic, not
+just on noise).
+
+The **corrected version** treats `VAD_MIN_SPEECH_MS` as an onset debounce
+instead: it requires that many *consecutive* milliseconds of speech before
+committing to a recording at all (default now 60ms, i.e. 2 frames) — still
+enough to reject a single isolated 30ms false-positive frame, but with no
+further minimum once that debounce is satisfied, since real words can be
+legitimately brief. Verified with a scripted fake-mic test covering all four
+shapes: a single noise frame (rejected), the exact 90ms real-utterance shape
+that was wrongly rejected before (now accepted), a normal longer utterance
+(accepted), and total silence (rejected, unchanged). **Still not verified
+against a live recurrence of the original hallucination bug on hardware** —
+only that this version no longer rejects the specific real utterance shape
+that the first attempt broke.
 
 ### Routing speech to a real speaker (noisy environments)
 
@@ -946,7 +961,7 @@ annotated list (it's the source of truth). The essentials:
 | `CONVERSATION_MAX_MESSAGES` / `CONVERSATION_HISTORY_PATH` | Memory size and persistence path. |
 | `VAD_AGGRESSIVENESS` / `VAD_SILENCE_MS` / `VAD_MAX_UTTERANCE_S` | Hands-free listening tuning. |
 | `VAD_FOLLOWUP_TIMEOUT_S` | How long a conversation stays open after a reply before the wake word is needed again. |
-| `VAD_MIN_SPEECH_MS` | Minimum voiced audio required before a capture is sent to Whisper — filters out noise-triggered hallucinated transcriptions. |
+| `VAD_MIN_SPEECH_MS` | Onset debounce (consecutive ms of speech needed to start recording, not a minimum utterance length) — filters out noise-triggered hallucinated transcriptions. |
 | `WAKE_WORD_MODEL` / `WAKE_WORD_THRESHOLD` | Wake word gating `--mode vad` — stock name or path to a custom `.onnx`. |
 | `VISION_ENABLED` | Whether `look()`'s photo gets attached to the next LLM turn. |
 | `KNOWN_PEOPLE_DIR` | Where `remember_person`'s reference photos are stored (experimental). |
