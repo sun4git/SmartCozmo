@@ -21,6 +21,7 @@ intended speech that happens to contain similar words.
 from __future__ import annotations
 
 import re
+import unicodedata
 
 # Sourced from widely-reported Whisper hallucination behavior, plus what was
 # actually observed recurring on real hardware. This list is necessarily
@@ -55,6 +56,12 @@ _STRIP_RE = re.compile(r"[!.?,~\s]+")
 
 
 def _normalize(text: str) -> str:
+    # NFKC first: Hangul (and other combining-mark scripts) can come back
+    # precomposed or decomposed depending on the API/library layer - visually
+    # identical text otherwise fails a plain string comparison (confirmed:
+    # decomposed "MBC 뉴스 이덕영입니다" has nearly double the codepoints of
+    # the precomposed form typed directly into this file's source).
+    text = unicodedata.normalize("NFKC", text)
     return _STRIP_RE.sub("", text.strip().lower())
 
 
