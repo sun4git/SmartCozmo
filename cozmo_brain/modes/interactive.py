@@ -9,6 +9,7 @@ from cozmo_brain.audio.recorder import record_fixed
 from cozmo_brain.config import Settings
 from cozmo_brain.engine import CozmoEngine
 from cozmo_brain.llm.speech_client import SpeechClient
+from cozmo_brain.llm.stt_postprocess import is_likely_hallucination
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,9 @@ def run(engine: CozmoEngine, speech: SpeechClient, settings: Settings) -> None:
         print(f"You said: {text}")
         if not text:
             print("(heard nothing, try again)\n")
+            continue
+        if is_likely_hallucination(text):
+            print("(that's a known Whisper artifact from background noise, not real speech - try again)\n")
             continue
 
         summary = engine.handle_turn(text)

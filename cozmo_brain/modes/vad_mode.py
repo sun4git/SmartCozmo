@@ -22,6 +22,7 @@ from cozmo_brain.audio.wakeword import wait_for_wake_word
 from cozmo_brain.config import Settings
 from cozmo_brain.engine import CozmoEngine
 from cozmo_brain.llm.speech_client import SpeechClient
+from cozmo_brain.llm.stt_postprocess import is_likely_hallucination
 from cozmo_brain.robot.base import RobotBackend
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,9 @@ def run(engine: CozmoEngine, robot: RobotBackend, speech: SpeechClient, settings
             if not text:
                 continue  # heard something, but nothing transcribable - keep the conversation open
             print(f"You said: {text}")
+            if is_likely_hallucination(text):
+                print("(that's a known Whisper artifact from background noise, not real speech - ignoring)\n")
+                continue
 
             summary = engine.handle_turn(text)
             print(summary, "\n")

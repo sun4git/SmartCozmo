@@ -99,7 +99,8 @@ See [Roadmap](#roadmap--open-work) for what's still open.
     │   ├── speech_client.py    # SpeechClient interface shared by every provider
     │   ├── groq_client.py       # Groq Whisper STT + Orpheus TTS
     │   ├── openai_client.py     # OpenAI Whisper STT + TTS (AUDIO_PROVIDER=openai)
-    │   └── tts_postprocess.py    # shared voice character + gain, used by both providers
+    │   ├── tts_postprocess.py    # shared voice character + gain, used by both providers
+    │   └── stt_postprocess.py    # filters known Whisper hallucination phrases
     ├── audio/
     │   ├── recorder.py        # fixed-length arecord capture (push-to-talk)
     │   ├── vad.py              # webrtcvad-based hands-free capture
@@ -626,10 +627,36 @@ further minimum once that debounce is satisfied, since real words can be
 legitimately brief. Verified with a scripted fake-mic test covering all four
 shapes: a single noise frame (rejected), the exact 90ms real-utterance shape
 that was wrongly rejected before (now accepted), a normal longer utterance
-(accepted), and total silence (rejected, unchanged). **Still not verified
-against a live recurrence of the original hallucination bug on hardware** —
-only that this version no longer rejects the specific real utterance shape
-that the first attempt broke.
+(accepted), and total silence (rejected, unchanged).
+
+**Confirmed on real hardware that the VAD-side fix alone isn't sufficient**
+in a genuinely noisy environment: the corrected onset debounce fixed the
+false-rejection of real short replies, but background noise in a real room
+can still reliably clear even a 60ms/2-frame bar, and the resulting
+noise-only clips kept hallucinating — with the *same exact* phrases
+recurring verbatim across many separate capture windows in a quiet room
+with nothing actually said or playing (`"Thank you for watching"` and a
+real MBC news anchor's sign-off, both among the most widely-reported
+Whisper hallucination phrases). That repetition is itself informative:
+these hosted Whisper endpoints decode close to greedily, so a similar
+noise/silence profile tends to reproduce the same memorized caption each
+time rather than a random one.
+
+Added a second, independent layer as a backstop:
+`cozmo_brain/llm/stt_postprocess.py`'s `is_likely_hallucination()` checks
+transcribed text against a known-phrase list (both modes call it right
+after `speech.transcribe()`, treating a match the same as "heard nothing").
+Matching is exact after normalizing case/punctuation/whitespace, not fuzzy
+or substring-based — deliberately, so it can never misfire on real speech
+that happens to share words with a listed phrase. Verified against the
+exact strings reported on real hardware (including the trailing-punctuation
+variants actually seen) plus real sentences from the same session,
+confirming zero false positives on the latter. **This list is necessarily
+incomplete** — it's a pragmatic backstop for known repeat offenders, not a
+general hallucination detector; new recurring phrases will need adding as
+they show up. If false activations persist, also worth trying
+`VAD_AGGRESSIVENESS=3` (stricter noise rejection) — untested against this
+specific environment.
 
 ### Routing speech to a real speaker (noisy environments)
 
