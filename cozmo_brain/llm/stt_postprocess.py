@@ -26,9 +26,21 @@ import re
 # actually observed recurring on real hardware. This list is necessarily
 # incomplete - it's a pragmatic backstop for known repeat offenders, not a
 # general hallucination detector. Extend it as new recurring phrases show up.
+#
+# The bare "thank you"/"thanks" entries are a known, deliberate trade-off:
+# confirmed recurring on real hardware as the dominant hallucinated text on
+# Groq specifically (shorter than the full "...for watching" phrase), but
+# unlike the other entries here, a real user might genuinely say this to
+# Cozmo. Accepted the small risk of an occasional real "thank you" being
+# silently ignored (low stakes - not a real command) over the alternative
+# of this being the single most common false activation in practice.
 _KNOWN_HALLUCINATIONS_RAW = {
     "thank you for watching",
     "thanks for watching",
+    "thank you",
+    "thanks",
+    "thank you so much",
+    "thank you very much",
     "please subscribe",
     "please subscribe to my channel",
     "don't forget to subscribe",
