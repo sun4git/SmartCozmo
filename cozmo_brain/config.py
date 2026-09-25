@@ -1,0 +1,118 @@
+"""Central configuration, loaded from environment variables (.env)."""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass, field
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+def _env_str(name: str, default: str) -> str:
+    return os.environ.get(name, default)
+
+
+def _env_int(name: str, default: int) -> int:
+    return int(os.environ.get(name, str(default)))
+
+
+def _env_float(name: str, default: float) -> float:
+    return float(os.environ.get(name, str(default)))
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+@dataclass
+class Settings:
+    # --- Secrets ---
+    groq_api_key: str = field(default_factory=lambda: os.environ.get("GROQ_API_KEY", ""))
+
+    # --- Ollama (tool-calling LLM) ---
+    ollama_base_url: str = field(default_factory=lambda: _env_str("OLLAMA_BASE_URL", "http://192.168.1.200:41438"))
+    ollama_model: str = field(default_factory=lambda: _env_str("OLLAMA_MODEL", "gemma4:31b-cloud"))
+    ollama_timeout_s: int = field(default_factory=lambda: _env_int("OLLAMA_TIMEOUT_S", 60))
+
+    # --- Audio input (mic) ---
+    record_seconds: int = field(default_factory=lambda: _env_int("RECORD_SECONDS", 5))
+    record_device: str = field(default_factory=lambda: _env_str("RECORD_DEVICE", "pipewire"))
+
+    # --- Groq STT ---
+    stt_model: str = field(default_factory=lambda: _env_str("STT_MODEL", "whisper-large-v3-turbo"))
+
+    # --- Groq TTS ---
+    tts_model: str = field(default_factory=lambda: _env_str("TTS_MODEL", "canopylabs/orpheus-v1-english"))
+    tts_voice: str = field(default_factory=lambda: _env_str("TTS_VOICE", "austin"))
+    tts_sample_rate: int = field(default_factory=lambda: _env_int("TTS_SAMPLE_RATE", 22050))
+    tts_gain: float = field(default_factory=lambda: _env_float("TTS_GAIN", 3.0))
+
+    # Voice character (Orpheus is a generic human voice, not Cozmo's real one).
+    # These defaults were picked by ear against sample WAVs — the ring-mod
+    # effect alone didn't actually read as "Cozmo," but this combo was the
+    # best available approximation. See cozmo_brain/llm/groq_client.py.
+    tts_pitch_shift: float = field(default_factory=lambda: _env_float("TTS_PITCH_SHIFT", 1.10))
+    tts_robot_mod_hz: float = field(default_factory=lambda: _env_float("TTS_ROBOT_MOD_HZ", 35.0))
+    tts_robot_mod_depth: float = field(default_factory=lambda: _env_float("TTS_ROBOT_MOD_DEPTH", 0.25))
+
+    # --- Scratch audio file paths ---
+    raw_input_wav: str = field(default_factory=lambda: _env_str("RAW_INPUT_WAV", "input.wav"))
+    tts_output_wav: str = field(default_factory=lambda: _env_str("TTS_OUTPUT_WAV", "cozmo_reply.wav"))
+    camera_snapshot_path: str = field(default_factory=lambda: _env_str("CAMERA_SNAPSHOT_PATH", "look.png"))
+
+    # Directory storing reference photos for remember_person/who_is_this.
+    # Experimental — see cozmo_brain/tools/registry.py for how matching works.
+    known_people_dir: str = field(default_factory=lambda: _env_str("KNOWN_PEOPLE_DIR", "known_people"))
+
+    # --- Robot backend ---
+    # "real" talks to an actual Cozmo over PyCozmo. "simulated" logs actions to
+    # the console instead — useful for developing/testing away from the robot.
+    robot_backend: str = field(default_factory=lambda: _env_str("ROBOT_BACKEND", "real"))
+
+    # Seconds without RobotState telemetry before is_healthy() treats the
+    # connection as dropped and reconnect() gets tried (see robot/real.py).
+    # Inferred from the protocol, not tuned against a real disconnect.
+    robot_stale_after_s: float = field(default_factory=lambda: _env_float("ROBOT_STALE_AFTER_S", 5.0))
+
+    # --- Wi-Fi auto-connect (optional, Linux/nmcli only — see robot/wifi.py) ---
+    # Leave COZMO_WIFI_SSID empty to disable and keep connecting manually (nmcli
+    # dev wifi connect ...) as before. Cozmo's SSID/password can regenerate on
+    # power cycle, so this is best-effort, not guaranteed.
+    cozmo_wifi_ssid: str = field(default_factory=lambda: _env_str("COZMO_WIFI_SSID", ""))
+    cozmo_wifi_password: str = field(default_factory=lambda: os.environ.get("COZMO_WIFI_PASSWORD", ""))
+
+    # --- Movement calibration ---
+    turn_speed_mmps: float = field(default_factory=lambda: _env_float("TURN_SPEED_MMPS", 40.0))
+    turn_seconds_per_degree: float = field(default_factory=lambda: _env_float("TURN_SECONDS_PER_DEGREE", 0.011))
+    max_drive_speed_mmps: float = field(default_factory=lambda: _env_float("MAX_DRIVE_SPEED_MMPS", 150.0))
+    max_drive_distance_mm: float = field(default_factory=lambda: _env_float("MAX_DRIVE_DISTANCE_MM", 1000.0))
+
+    # --- Agentic loop / conversation ---
+    max_tool_iterations: int = field(default_factory=lambda: _env_int("MAX_TOOL_ITERATIONS", 4))
+    conversation_max_messages: int = field(default_factory=lambda: _env_int("CONVERSATION_MAX_MESSAGES", 40))
+    conversation_history_path: str = field(
+        default_factory=lambda: _env_str("CONVERSATION_HISTORY_PATH", "conversation_history.json")
+    )
+
+    # --- Voice activity detection (--mode vad) ---
+    vad_aggressiveness: int = field(default_factory=lambda: _env_int("VAD_AGGRESSIVENESS", 2))
+    vad_silence_ms: int = field(default_factory=lambda: _env_int("VAD_SILENCE_MS", 800))
+    vad_max_utterance_s: int = field(default_factory=lambda: _env_int("VAD_MAX_UTTERANCE_S", 15))
+
+    # --- Vision ---
+    vision_enabled: bool = field(default_factory=lambda: _env_bool("VISION_ENABLED", True))
+
+    def require_groq_key(self) -> str:
+        if not self.groq_api_key:
+            raise RuntimeError(
+                "GROQ_API_KEY is not set. Copy .env.example to .env and fill it in."
+            )
+        return self.groq_api_key
+
+
+settings = Settings()

@@ -1,0 +1,8 @@
+# Core — required on any machine running orchestrator.py or the cozmo_brain package
+requests
+python-dotenv
+pycozmo
+
+# Only required on the deployment machine (Raspberry Pi) for --mode vad.
+# Push-to-talk (--mode voice), text (--mode text), and --simulate work without it.
+# webrtcvad

@@ -1,0 +1,28 @@
+# Secrets / local config
+.env
+
+# Original personal handoff notes — superseded by README.md, kept locally only
+cozmo-llm-project-handoff.md
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+cozmo-env/
+venv/
+.venv/
+
+# Runtime-generated audio/image scratch files and persisted chat history
+*.wav
+look.png
+conversation_history.json
+
+# Reference photos for remember_person/who_is_this — personal, local only
+known_people/
+
+# PyCozmo reference clone / downloaded resources (not part of this project's source)
+pycozmo-src/
+
+# OS
+.DS_Store
+Thumbs.db
