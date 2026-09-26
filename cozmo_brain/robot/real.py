@@ -108,11 +108,13 @@ class PyCozmoRobot(RobotBackend):
         # pycozmo.Client method, and never sent anywhere in this codebase
         # before now - meaning drive()/turn() had zero cliff protection
         # beyond whatever pycozmo's un-configured firmware default happens
-        # to be. Untested against real hardware exactly how the firmware
-        # reacts once this fires; _sleep_unless_cliff()'s CLIFF_DETECTED
-        # poll below is a software backstop in case it doesn't behave as
-        # hoped.
-        cli.conn.send(pycozmo.protocol_encoder.EnableStopOnCliff(enable=True))
+        # to be. _sleep_unless_cliff()'s CLIFF_DETECTED poll below is a
+        # software backstop in case it doesn't behave as hoped - and,
+        # confirmed on real hardware, this firmware-level protection is
+        # exactly what needs disabling too when leaving the charger (see
+        # drive()/spin_wheels_for()), since the dock's own platform/edge
+        # reads as a false cliff.
+        self._set_cliff_protection(enabled=True)
         cli.add_handler(pycozmo.protocol_encoder.RobotState, self._on_robot_state)
         self._last_seen = time.monotonic()
 
@@ -208,7 +210,10 @@ class PyCozmoRobot(RobotBackend):
         cli.play_audio(wav_path)
         cli.wait_for(pycozmo.event.EvtAudioCompleted, timeout=30)
 
-    def _sleep_unless_cliff(self, duration: float) -> str | None:
+    def _set_cliff_protection(self, enabled: bool) -> None:
+        self._client.conn.send(pycozmo.protocol_encoder.EnableStopOnCliff(enable=enabled))
+
+    def _sleep_unless_cliff(self, duration: float, ignore_cliff: bool = False) -> str | None:
         """Sleeps for `duration` like a plain time.sleep(), but polls
         CLIFF_DETECTED/IS_FALLING every _CLIFF_POLL_S and returns early with
         which one fired ("cliff"/"fall"), or None if the full duration
@@ -217,7 +222,14 @@ class PyCozmoRobot(RobotBackend):
         happens sooner. A software backstop alongside connect()'s
         EnableStopOnCliff (which only covers the cliff case, not falling)
         for cliffs, and the only protection at all for a fall - untested
-        against real hardware, so this doesn't rely on the firmware alone."""
+        against real hardware, so this doesn't rely on the firmware alone.
+
+        `ignore_cliff` skips the CLIFF_DETECTED check (IS_FALLING still
+        applies) - confirmed on real hardware that the charger dock's own
+        platform/edge reads as a false CLIFF_DETECTED, which otherwise made
+        the exact drive meant to leave the charger reflexively stop and
+        back right back onto it. Only drive()/spin_wheels_for() pass this,
+        and only when the drive started while still on the charger."""
         deadline = time.monotonic() + duration
         while True:
             remaining = deadline - time.monotonic()
@@ -227,7 +239,7 @@ class PyCozmoRobot(RobotBackend):
             if status & pycozmo.RobotStatusFlag.IS_FALLING:
                 logger.warning("Fall detected mid-drive - stopping early.")
                 return "fall"
-            if status & pycozmo.RobotStatusFlag.CLIFF_DETECTED:
+            if not ignore_cliff and status & pycozmo.RobotStatusFlag.CLIFF_DETECTED:
                 logger.warning("Cliff detected mid-drive - stopping early.")
                 return "cliff"
             time.sleep(min(_CLIFF_POLL_S, remaining))
@@ -297,6 +309,17 @@ class PyCozmoRobot(RobotBackend):
             logger.info("Ignoring drive() - Cozmo is still charging.")
             return MoveResult(moved=False)
 
+        # If this drive starts while still docked (full, not charging - the
+        # only way past the check above), it's the move meant to leave the
+        # charger. Confirmed on real hardware: the dock's own platform/edge
+        # reads as a false CLIFF_DETECTED, both at the firmware level
+        # (EnableStopOnCliff) and ours, so left as-is this drive stopped
+        # itself and backed right back onto the charger it was leaving.
+        # IS_FALLING protection is unrelated and stays active regardless.
+        leaving_charger = self.is_on_charger()
+        if leaving_charger:
+            self._set_cliff_protection(enabled=False)
+
         cli = self._client
         max_speed = self._settings.max_drive_speed_mmps
         max_distance = self._settings.max_drive_distance_mm
@@ -306,8 +329,11 @@ class PyCozmoRobot(RobotBackend):
         duration = abs(distance_mm) / speed
 
         cli.drive_wheels(lwheel_speed=signed_speed, rwheel_speed=signed_speed)
-        hazard = self._sleep_unless_cliff(duration)
+        hazard = self._sleep_unless_cliff(duration, ignore_cliff=leaving_charger)
         cli.stop_all_motors()
+
+        if leaving_charger:
+            self._set_cliff_protection(enabled=True)
         if hazard:
             self._react_to_hazard(hazard, backup_away_from_sign=signed_speed)
         return MoveResult(moved=True, hazard=hazard)
@@ -323,6 +349,21 @@ class PyCozmoRobot(RobotBackend):
         if self.is_on_charger() and self.is_charging():
             logger.info("Ignoring spin_wheels_for() - Cozmo is still charging.")
             return MoveResult(moved=False)
+
+        if self.is_on_charger():
+            # Full, but still on the dock - turning in place while still on/
+            # near the charger platform is the same false-CLIFF_DETECTED
+            # geometry drive() works around, plus a real physical risk of
+            # catching on the dock while rotating on it. Drive straight off
+            # first (reusing drive()'s own leaving-charger handling, so this
+            # gets the same cliff-suppression), then perform the requested
+            # turn only once genuinely clear - not by turning in place on
+            # top of the dock at all.
+            exit_result = self.drive(
+                self._settings.charger_exit_distance_mm, self._settings.charger_exit_speed_mmps
+            )
+            if exit_result.hazard:
+                return exit_result
 
         cli = self._client
         cli.drive_wheels(lwheel_speed=-speed_mmps, rwheel_speed=speed_mmps)

@@ -1041,6 +1041,7 @@ annotated list (it's the source of truth). The essentials:
 | `COZMO_WIFI_SSID` / `COZMO_WIFI_PASSWORD` | Optional Wi-Fi auto-connect (Linux/nmcli only). Password only needed for the first connect. |
 | `TURN_SPEED_MMPS` / `TURN_SECONDS_PER_DEGREE` | `turn()` calibration — tune with `--mode calibrate`. |
 | `MAX_DRIVE_SPEED_MMPS` / `MAX_DRIVE_DISTANCE_MM` | Safety clamps on the `drive` tool. |
+| `CHARGER_EXIT_DISTANCE_MM` / `CHARGER_EXIT_SPEED_MMPS` | How far/fast to drive straight off the charger before performing a requested turn, if still docked (real backend only). |
 | `MAX_TOOL_ITERATIONS` | Cap on LLM↔tool round-trips per user turn. |
 | `CONVERSATION_MAX_MESSAGES` / `CONVERSATION_HISTORY_PATH` | Memory size and persistence path. |
 | `VAD_AGGRESSIVENESS` / `VAD_SILENCE_MS` / `VAD_MAX_UTTERANCE_S` | Hands-free listening tuning. |
@@ -1275,10 +1276,46 @@ Still open, roughly in priority order:
      and can react conversationally too — the same principle now applies
      everywhere a `MoveResult` flows: charger-blocked and hazard-shortened
      moves both get told to the model truthfully rather than silently
-     collapsing into "success". **The reflex itself not yet verified
-     against real hardware** — only the pre-existing early-stop was
-     confirmed; the mood+backup reaction and the corrected tool message are
-     new since that test.
+     collapsing into "success".
+
+     **Confirmed on real hardware, a second time, that this created a new
+     problem of its own:** once charger-safe wheels (below) started
+     allowing a drive once full, Cozmo still couldn't actually leave the
+     charger — the dock's own platform/edge reads as a false
+     `CLIFF_DETECTED`, so the exact drive meant to exit the charger
+     immediately tripped the cliff reflex and backed him right back onto
+     the dock he was trying to leave. Fixed by having `drive()`/
+     `spin_wheels_for()` detect when a drive starts while still docked
+     (`is_on_charger()` true at the start — only possible once full, since
+     the charging check above already blocks it otherwise) and suppress
+     *only* `CLIFF_DETECTED` for that one drive, at both layers: the
+     firmware's `EnableStopOnCliff` (disabled for the duration, restored
+     right after) and the software poll (`_sleep_unless_cliff`'s new
+     `ignore_cliff` argument). `IS_FALLING` protection stays fully active
+     regardless — unrelated failure mode, no reason to suppress it near
+     the charger. **Trade-off worth knowing:** this fully suppresses cliff
+     detection for the entire duration of whatever drive left the charger,
+     not just the first moment near the dock — there's no cheap way yet to
+     tell "still near the dock" from "genuinely clear of it and now near a
+     real edge" within the same drive call.
+
+     **A related physical constraint, raised directly:** turning in place
+     while still on/near the charger platform risks catching on the dock,
+     separately from the cliff-suppression issue above. `spin_wheels_for()`
+     (so `turn()`, and any gesture step that turns) now checks
+     `is_on_charger()` first and, if still docked, drives straight off
+     (`CHARGER_EXIT_DISTANCE_MM`/`CHARGER_EXIT_SPEED_MMPS`, default 100mm
+     at 60mm/s — guessed, not tuned against the real dock) via `drive()`
+     itself before performing the requested turn at all, rather than
+     turning in place on top of the dock with cliff detection merely
+     suppressed. If that straight exit hits a real hazard (a fall — cliff
+     is already covered by `drive()`'s own suppression), the turn is
+     skipped entirely and that hazard is reported instead, rather than
+     compounding it with more movement. **Verified as control-flow logic
+     only** (a mocked test confirms `drive()` is called first with the
+     exit distance/speed, the turn is skipped on an exit hazard, and
+     neither happens when not on the charger) — the actual distance/speed
+     needed to clear the real dock is unverified.
    - ✅ **Charger-safe wheels — done, gated on "fully charged" not just
      "docked".** `drive()`/`spin_wheels_for()` (so `turn()` too) skip the
      wheel command entirely — returning `MoveResult(moved=False)` instead

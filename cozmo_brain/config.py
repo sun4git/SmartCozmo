@@ -149,6 +149,15 @@ class Settings:
     max_drive_speed_mmps: float = field(default_factory=lambda: _env_float("MAX_DRIVE_SPEED_MMPS", 150.0))
     max_drive_distance_mm: float = field(default_factory=lambda: _env_float("MAX_DRIVE_DISTANCE_MM", 1000.0))
 
+    # How far/fast to drive straight when a turn is requested while still
+    # resting (full) on the charger, before performing that turn - confirmed
+    # on real hardware that turning in place on/near the dock risks
+    # catching on it, and its platform/edge falsely trips CLIFF_DETECTED
+    # anyway (see robot/real.py). Guessed distance/speed, not yet tuned
+    # against the real dock's actual geometry.
+    charger_exit_distance_mm: float = field(default_factory=lambda: _env_float("CHARGER_EXIT_DISTANCE_MM", 100.0))
+    charger_exit_speed_mmps: float = field(default_factory=lambda: _env_float("CHARGER_EXIT_SPEED_MMPS", 60.0))
+
     # --- Agentic loop / conversation ---
     max_tool_iterations: int = field(default_factory=lambda: _env_int("MAX_TOOL_ITERATIONS", 4))
     conversation_max_messages: int = field(default_factory=lambda: _env_int("CONVERSATION_MAX_MESSAGES", 40))
