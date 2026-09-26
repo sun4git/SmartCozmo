@@ -736,6 +736,27 @@ that caused this one and adds a stronger hint, but nothing stops the model
 from inventing a different plausible-sounding word next time; if it
 happens again, that's the next thing to strengthen.
 
+**Found on real hardware, froze the whole process, had to be restarted:**
+`aplay` (system-speaker output, `audio/player.py`'s `play_wav()`) hung
+indefinitely mid-playback — the log showed it start, then nothing for
+several minutes except the unrelated battery monitor still ticking on its
+own thread, proving the main thread itself was stuck, not the process as
+a whole. Root cause: `subprocess.run(["aplay", ...], check=True)` had no
+`timeout` at all, unlike `robot.say_wav()`'s own `cli.wait_for(...,
+timeout=30)` for Cozmo's speaker — the system-audio path had no equivalent
+escape hatch. A stuck Bluetooth speaker/PipeWire sink (not confirmed which)
+could block that call forever, and with `AUDIO_OUTPUT=both`,
+`system_thread.join()` (also no timeout) would then block the main thread
+right along with it. Fixed by adding `timeout=30` (matching `say_wav()`'s
+value, not independently tuned) to the `subprocess.run()` call, catching
+`subprocess.TimeoutExpired` (`subprocess.run()` already kills the hung
+process by the time this fires) and `CalledProcessError`, and logging a
+warning instead of letting either propagate — a stuck playback device
+now can't freeze a turn, or the whole hands-free session, over one bad
+output. **Root cause of *why* aplay hung not identified** — same caveat
+as the STT-crash fix above: this makes it survivable and diagnosable
+(the warning log), not preventable.
+
 ### Routing speech to a real speaker (noisy environments)
 
 Cozmo's own speaker is small and quiet even with the `TTS_GAIN` fix — in a
