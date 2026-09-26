@@ -1271,6 +1271,32 @@ Done, via `cozmo_brain/`:
   moment remains unverified either way (same class of accepted trade-off
   as `pickup_reactor`'s note above, not new).
 
+  **Raised directly, a real regression from going async:** the lift
+  arm was reportedly not reliably ending up fully down anymore after a
+  gesture. Root cause: `run_gesture_async()`'s background thread had *no*
+  exception handling at all. Several gestures (`wake_up`, `cheer`,
+  `shrug`, `fist_pump`, `alert`) raise the lift partway through and only
+  lower it again as their own *final* step — in the old blocking
+  `run_gesture()`, a mid-gesture failure on any earlier step was already
+  visible as a failed tool call and (like any exception) would have
+  equally abandoned the remaining steps; on a background thread it
+  instead dies silently (Python's default: print a traceback, give up —
+  invisible in our own logs), with the arm possibly left raised and
+  nothing anywhere saying why. Exactly the one failure mode a background
+  thread with physical side effects can't afford to have be silent.
+  Fixed by wrapping the background thread's step loop in a try/except
+  that logs the failure clearly and attempts `lower_lift_fully()` as a
+  recovery action regardless of which step failed. **Verified the
+  mechanism** with a scripted test that forces a mid-gesture exception
+  (patching `set_head_angle_deg` to raise) and confirms the recovery
+  lower-lift call fires right after the logged warning — **not
+  confirmed this was the actual real-hardware trigger**, since nothing
+  here can reproduce whatever specifically failed (a transient
+  connection hiccup during `reconnect()` is a plausible candidate,
+  since a background gesture step can now genuinely run concurrently
+  with one). Either way, the recovery behavior is correct regardless of
+  which step raised.
+
 Still open, roughly in priority order:
 
 1. **Smarter conversation trimming.** Current strategy is a hard message-count

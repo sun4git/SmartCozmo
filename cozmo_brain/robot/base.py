@@ -11,12 +11,15 @@ physical robot.
 from __future__ import annotations
 
 import abc
+import logging
 import threading
 import time
 from dataclasses import dataclass
 
 from cozmo_brain.robot.gestures import GESTURES, Gesture, Step
 from cozmo_brain.robot.moods import MOODS, Mood
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -200,8 +203,25 @@ class RobotBackend(abc.ABC):
         gesture = self._get_gesture(name)
 
         def _run() -> None:
-            for step in gesture.steps:
-                self._run_step(step)
+            try:
+                for step in gesture.steps:
+                    self._run_step(step)
+            except Exception as e:  # noqa: BLE001 - a background gesture step
+                # failing must not silently abandon whatever came after it
+                # in the sequence - several gestures (wake_up, cheer, shrug,
+                # fist_pump, alert) raise the lift partway through and only
+                # lower it again as their own *final* step. In run_gesture()
+                # (blocking), a mid-gesture failure was already visible as
+                # a failed tool call; here it would otherwise die silently
+                # on a background thread (Python's default thread exception
+                # handling: print a traceback and give up, invisible in our
+                # own logs) with the arm possibly stuck raised - the one
+                # class of failure this can't afford to be silent about.
+                logger.warning("Gesture '%s' failed mid-sequence, arm may be left raised: %s", name, e)
+                try:
+                    self.lower_lift_fully()
+                except Exception as e2:  # noqa: BLE001 - best-effort recovery, not worth failing louder over
+                    logger.warning("Could not lower the lift after gesture '%s' failed: %s", name, e2)
 
         threading.Thread(target=_run, name=f"gesture-{name}", daemon=True).start()
         return gesture.description
