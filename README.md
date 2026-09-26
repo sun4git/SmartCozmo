@@ -715,6 +715,27 @@ endpoints carries the actual `error.message` explaining the rejection.
 survivable and diagnosable next time, not preventable; if it recurs, the
 logged response body is the next thing to look at.
 
+**Found on real hardware:** `Tool 'say' failed: Unknown mood 'offended'.`
+— the model called `say(mood="offended")`, a word that was never a real
+mood (`_MOOD_NAMES`, from `robot/moods.py`, has no such entry). The `say`
+tool's JSON schema already restricts `mood` to a proper `enum` of the real
+names (`tools/registry.py`), but that alone clearly isn't enough — the
+model doesn't reliably respect it. Root cause: `personality.py`'s own
+persona description said Cozmo is "easily delighted or offended by the
+smallest things" — the model read that, decided "offended" sounded like a
+plausible mood, and called it verbatim. Same issue, one line down:
+"comically devastated by small setbacks" ("devastated" isn't a mood
+either). Fixed both wording spots (swapped for real mood words —
+`excited`/`annoyed`, `sad`), and added a second line of defense: the
+prompt now also spells out the exact closed vocabulary of valid moods and
+gestures at the end, built from `MOODS`/`GESTURES` directly (not
+hardcoded, so it can't drift out of sync if either dict changes) rather
+than relying on the schema `enum` alone. **Not yet confirmed whether this
+fully prevents a recurrence** — it removes the specific prompt wording
+that caused this one and adds a stronger hint, but nothing stops the model
+from inventing a different plausible-sounding word next time; if it
+happens again, that's the next thing to strengthen.
+
 ### Routing speech to a real speaker (noisy environments)
 
 Cozmo's own speaker is small and quiet even with the `TTS_GAIN` fix — in a
