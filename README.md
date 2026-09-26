@@ -1255,17 +1255,30 @@ Still open, roughly in priority order:
      against real hardware** — only the pre-existing early-stop was
      confirmed; the mood+backup reaction and the corrected tool message are
      new since that test.
-   - ✅ **Charger-safe wheels — done.** `drive()`/`spin_wheels_for()` (so
-     `turn()` too) now check `IS_ON_CHARGER` first and skip the wheel
-     command entirely if set — returning `False` (moved: no) instead of
-     raising, specifically so a gesture's face/light/head/lift steps still
-     play uninterrupted even when its wheel steps get skipped (dance/spin
-     etc. mix both — see `robot/gestures.py`). The `drive`/`turn` **tools**
-     check that return value and tell the model honestly ("still on the
-     charger") instead of reporting a movement that never happened; the
-     bool is also threaded through `--mode calibrate`, which now warns and
-     discards the sample instead of quietly recording a bogus
-     degrees-per-second reading if you calibrate while docked by mistake.
+   - ✅ **Charger-safe wheels — done, gated on "fully charged" not just
+     "docked".** `drive()`/`spin_wheels_for()` (so `turn()` too) skip the
+     wheel command entirely — returning `MoveResult(moved=False)` instead
+     of raising, specifically so a gesture's face/light/head/lift steps
+     still play uninterrupted even when its wheel steps get skipped
+     (dance/spin etc. mix both — see `robot/gestures.py`) — but only while
+     `IS_ON_CHARGER and IS_CHARGING` both hold. Once full
+     (`IS_ON_CHARGER` but no longer `IS_CHARGING` — inferred from normal
+     charge-controller behavior, not a documented Anki spec, worth
+     confirming it doesn't also happen at some in-between state like a
+     thermal cutoff), a normal `drive`/`turn` is allowed to proceed exactly
+     like any other, which drives Cozmo off the dock as a side effect of
+     whatever actually asked for movement. **Deliberately not an autonomous
+     "leave the charger once full" behavior of its own** — that decision
+     stays with whatever ordinarily triggers a drive (conversation, a tool
+     call), not a background reactor moving Cozmo unprompted. `is_on_charger()`/
+     `is_charging()` are exposed as their own `RobotBackend` methods (not
+     just used internally), so a future `battery_status()` tool can answer
+     "are you charged?" without needing new plumbing. The `drive`/`turn`
+     **tools** check the returned `MoveResult` and tell the model honestly
+     ("still charging") instead of reporting a movement that never
+     happened; same threading through `--mode calibrate`, which now warns
+     and discards the sample instead of quietly recording a bogus
+     degrees-per-second reading if you calibrate while it's still charging.
      **Not yet verified against real hardware.**
    - ✅ **Startle reaction on pickup — done.** `RobotBackend.is_picked_up()`
      (real backend: `IS_PICKED_UP`, already read for tap-gating; simulated:

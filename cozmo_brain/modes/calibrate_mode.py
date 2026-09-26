@@ -30,7 +30,7 @@ def run(robot: RobotBackend, settings: Settings) -> None:
 
         result = robot.spin_wheels_for(_TEST_DURATION_S, settings.turn_speed_mmps)
         if not result.moved:
-            print("Cozmo is on the charger - take him off before calibrating.\n")
+            print("Cozmo is still charging - wait until fully charged, or take him off, before calibrating.\n")
             continue
         if result.hazard:
             print(f"Detected a {result.hazard} mid-spin - discarding this sample, it won't be a clean reading.\n")

@@ -263,8 +263,11 @@ class PyCozmoRobot(RobotBackend):
         except Exception as e:  # noqa: BLE001 - same as above
             logger.warning("Could not back away from cliff: %s", e)
 
-    def _is_on_charger(self) -> bool:
+    def is_on_charger(self) -> bool:
         return bool(self._latest_status & pycozmo.RobotStatusFlag.IS_ON_CHARGER)
+
+    def is_charging(self) -> bool:
+        return bool(self._latest_status & pycozmo.RobotStatusFlag.IS_CHARGING)
 
     def is_picked_up(self) -> bool:
         return bool(self._latest_status & pycozmo.RobotStatusFlag.IS_PICKED_UP)
@@ -282,8 +285,16 @@ class PyCozmoRobot(RobotBackend):
     # completely unrelated next).
 
     def drive(self, distance_mm: float, speed_mmps: float) -> MoveResult:
-        if self._is_on_charger():
-            logger.info("Ignoring drive() - Cozmo is on the charger.")
+        # Blocked only while actively *charging*, not merely resting on the
+        # charger - once full (is_on_charger() and not is_charging()), a
+        # normal drive/turn is allowed to proceed like any other, and drives
+        # Cozmo off the dock as a side effect of whatever actually asked for
+        # movement. Deliberately not an autonomous "leave the charger once
+        # full" behavior of its own - that decision stays with whatever
+        # ordinarily triggers a drive (conversation, a tool call), not a
+        # background reactor deciding to move Cozmo unprompted.
+        if self.is_on_charger() and self.is_charging():
+            logger.info("Ignoring drive() - Cozmo is still charging.")
             return MoveResult(moved=False)
 
         cli = self._client
@@ -309,8 +320,8 @@ class PyCozmoRobot(RobotBackend):
         return self.spin_wheels_for(duration, turn_speed * direction)
 
     def spin_wheels_for(self, seconds: float, speed_mmps: float) -> MoveResult:
-        if self._is_on_charger():
-            logger.info("Ignoring spin_wheels_for() - Cozmo is on the charger.")
+        if self.is_on_charger() and self.is_charging():
+            logger.info("Ignoring spin_wheels_for() - Cozmo is still charging.")
             return MoveResult(moved=False)
 
         cli = self._client

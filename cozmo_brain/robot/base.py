@@ -118,6 +118,22 @@ class RobotBackend(abc.ABC):
         """Whether Cozmo is currently detected as picked up/carried
         (backends with no such concept always return False)."""
 
+    @abc.abstractmethod
+    def is_on_charger(self) -> bool:
+        """Whether Cozmo is currently docked on the charger (backends with
+        no such concept always return False)."""
+
+    @abc.abstractmethod
+    def is_charging(self) -> bool:
+        """Whether Cozmo is currently actively charging. `is_on_charger()
+        and not is_charging()` means docked but not charging - i.e. full,
+        assuming the charge controller stops topping off once full like
+        chargers normally do (backends with no such concept always return
+        False). drive()/turn() block only while this is True - once full,
+        a normal drive/turn is allowed and drives Cozmo off the dock as a
+        side effect, rather than any background behavior deciding to leave
+        the charger unprompted."""
+
     # --- connection health (default: always healthy — overridden by real.py) ---
     def is_healthy(self) -> bool:
         """Whether the connection looks alive. Backends with no real

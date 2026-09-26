@@ -115,6 +115,14 @@ class SimulatedRobot(RobotBackend):
         # No real accelerometer/status flag to read - never "picked up".
         return False
 
+    def is_on_charger(self) -> bool:
+        # No real charger contacts to read - never "on the charger", so
+        # drive()/turn() are never blocked by it either.
+        return False
+
+    def is_charging(self) -> bool:
+        return False
+
     def list_animations(self) -> list[str]:
         return list(_FAKE_ANIMATIONS)
 
