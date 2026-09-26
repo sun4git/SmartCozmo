@@ -89,6 +89,13 @@ class PyCozmoRobot(RobotBackend):
         self._tap_event = threading.Event()
         self._last_tap_time: float = 0.0
         self._latest_status: int = 0
+        # Reentrant: spin_wheels_for()'s own charger-exit maneuver calls
+        # self.drive() while already holding this (see spin_wheels_for()) -
+        # a plain Lock would deadlock on that. Guards drive()/
+        # spin_wheels_for() end to end so a background async gesture's own
+        # wheel steps (run_gesture_async(), see base.py) can't race a
+        # foreground drive/turn tool call issued at the same moment.
+        self._wheel_lock = threading.RLock()
 
     def connect(self) -> None:
         wifi.ensure_connected(self._settings.cozmo_wifi_ssid, self._settings.cozmo_wifi_password)
@@ -309,34 +316,41 @@ class PyCozmoRobot(RobotBackend):
             logger.info("Ignoring drive() - Cozmo is still charging.")
             return MoveResult(moved=False)
 
-        # If this drive starts while still docked (full, not charging - the
-        # only way past the check above), it's the move meant to leave the
-        # charger. Confirmed on real hardware: the dock's own platform/edge
-        # reads as a false CLIFF_DETECTED, both at the firmware level
-        # (EnableStopOnCliff) and ours, so left as-is this drive stopped
-        # itself and backed right back onto the charger it was leaving.
-        # IS_FALLING protection is unrelated and stays active regardless.
-        leaving_charger = self.is_on_charger()
-        if leaving_charger:
-            self._set_cliff_protection(enabled=False)
+        # Serializes against spin_wheels_for()/another drive() so a
+        # background async gesture (run_gesture_async(), see base.py) can't
+        # race a foreground movement call for control of the wheels -
+        # reentrant because spin_wheels_for()'s charger-exit maneuver calls
+        # back into this same method while already holding it.
+        with self._wheel_lock:
+            # If this drive starts while still docked (full, not charging -
+            # the only way past the check above), it's the move meant to
+            # leave the charger. Confirmed on real hardware: the dock's own
+            # platform/edge reads as a false CLIFF_DETECTED, both at the
+            # firmware level (EnableStopOnCliff) and ours, so left as-is
+            # this drive stopped itself and backed right back onto the
+            # charger it was leaving. IS_FALLING protection is unrelated
+            # and stays active regardless.
+            leaving_charger = self.is_on_charger()
+            if leaving_charger:
+                self._set_cliff_protection(enabled=False)
 
-        cli = self._client
-        max_speed = self._settings.max_drive_speed_mmps
-        max_distance = self._settings.max_drive_distance_mm
-        distance_mm = _clamp(distance_mm, -max_distance, max_distance)
-        speed = _clamp(abs(speed_mmps), 1.0, max_speed)
-        signed_speed = speed if distance_mm >= 0 else -speed
-        duration = abs(distance_mm) / speed
+            cli = self._client
+            max_speed = self._settings.max_drive_speed_mmps
+            max_distance = self._settings.max_drive_distance_mm
+            distance_mm = _clamp(distance_mm, -max_distance, max_distance)
+            speed = _clamp(abs(speed_mmps), 1.0, max_speed)
+            signed_speed = speed if distance_mm >= 0 else -speed
+            duration = abs(distance_mm) / speed
 
-        cli.drive_wheels(lwheel_speed=signed_speed, rwheel_speed=signed_speed)
-        hazard = self._sleep_unless_cliff(duration, ignore_cliff=leaving_charger)
-        cli.stop_all_motors()
+            cli.drive_wheels(lwheel_speed=signed_speed, rwheel_speed=signed_speed)
+            hazard = self._sleep_unless_cliff(duration, ignore_cliff=leaving_charger)
+            cli.stop_all_motors()
 
-        if leaving_charger:
-            self._set_cliff_protection(enabled=True)
-        if hazard:
-            self._react_to_hazard(hazard, backup_away_from_sign=signed_speed)
-        return MoveResult(moved=True, hazard=hazard)
+            if leaving_charger:
+                self._set_cliff_protection(enabled=True)
+            if hazard:
+                self._react_to_hazard(hazard, backup_away_from_sign=signed_speed)
+            return MoveResult(moved=True, hazard=hazard)
 
     def turn(self, angle_degrees: float) -> MoveResult:
         turn_speed = self._settings.turn_speed_mmps
@@ -350,28 +364,32 @@ class PyCozmoRobot(RobotBackend):
             logger.info("Ignoring spin_wheels_for() - Cozmo is still charging.")
             return MoveResult(moved=False)
 
-        if self.is_on_charger():
-            # Full, but still on the dock - turning in place while still on/
-            # near the charger platform is the same false-CLIFF_DETECTED
-            # geometry drive() works around, plus a real physical risk of
-            # catching on the dock while rotating on it. Drive straight off
-            # first (reusing drive()'s own leaving-charger handling, so this
-            # gets the same cliff-suppression), then perform the requested
-            # turn only once genuinely clear - not by turning in place on
-            # top of the dock at all.
-            exit_result = self.drive(
-                self._settings.charger_exit_distance_mm, self._settings.charger_exit_speed_mmps
-            )
-            if exit_result.hazard:
-                return exit_result
+        # See drive()'s matching comment. Reentrant because the charger-exit
+        # branch below calls self.drive() while already holding this.
+        with self._wheel_lock:
+            if self.is_on_charger():
+                # Full, but still on the dock - turning in place while
+                # still on/near the charger platform is the same false-
+                # CLIFF_DETECTED geometry drive() works around, plus a real
+                # physical risk of catching on the dock while rotating on
+                # it. Drive straight off first (reusing drive()'s own
+                # leaving-charger handling, so this gets the same cliff-
+                # suppression), then perform the requested turn only once
+                # genuinely clear - not by turning in place on top of the
+                # dock at all.
+                exit_result = self.drive(
+                    self._settings.charger_exit_distance_mm, self._settings.charger_exit_speed_mmps
+                )
+                if exit_result.hazard:
+                    return exit_result
 
-        cli = self._client
-        cli.drive_wheels(lwheel_speed=-speed_mmps, rwheel_speed=speed_mmps)
-        hazard = self._sleep_unless_cliff(seconds)
-        cli.stop_all_motors()
-        if hazard:
-            self._react_to_hazard(hazard)
-        return MoveResult(moved=True, hazard=hazard)
+            cli = self._client
+            cli.drive_wheels(lwheel_speed=-speed_mmps, rwheel_speed=speed_mmps)
+            hazard = self._sleep_unless_cliff(seconds)
+            cli.stop_all_motors()
+            if hazard:
+                self._react_to_hazard(hazard)
+            return MoveResult(moved=True, hazard=hazard)
 
     def set_head_angle_deg(self, angle_deg: float, duration: float = 0.4) -> None:
         angle_deg = _clamp(angle_deg, _MIN_HEAD_DEG, _MAX_HEAD_DEG)

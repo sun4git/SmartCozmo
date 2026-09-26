@@ -11,10 +11,11 @@ physical robot.
 from __future__ import annotations
 
 import abc
+import threading
 import time
 from dataclasses import dataclass
 
-from cozmo_brain.robot.gestures import GESTURES, Step
+from cozmo_brain.robot.gestures import GESTURES, Gesture, Step
 from cozmo_brain.robot.moods import MOODS, Mood
 
 
@@ -176,12 +177,33 @@ class RobotBackend(abc.ABC):
     def list_gestures(self) -> list[str]:
         return sorted(GESTURES)
 
-    def run_gesture(self, name: str) -> str:
+    def _get_gesture(self, name: str) -> Gesture:
         gesture = GESTURES.get(name.lower())
         if gesture is None:
             raise ValueError(f"Unknown gesture '{name}'. Known gestures: {', '.join(sorted(GESTURES))}")
+        return gesture
+
+    def run_gesture(self, name: str) -> str:
+        gesture = self._get_gesture(name)
         for step in gesture.steps:
             self._run_step(step)
+        return gesture.description
+
+    def run_gesture_async(self, name: str) -> str:
+        """Like run_gesture(), but runs the gesture's steps on a background
+        thread and returns immediately once the name is validated, instead
+        of blocking until the whole choreography finishes. Lets a `say`
+        tool call right after it actually overlap with the gesture instead
+        of waiting - the whole point of this existing, since sequential
+        gesture-then-speech was adding dead air before every reply. Still
+        raises immediately for an unknown name, same as run_gesture()."""
+        gesture = self._get_gesture(name)
+
+        def _run() -> None:
+            for step in gesture.steps:
+                self._run_step(step)
+
+        threading.Thread(target=_run, name=f"gesture-{name}", daemon=True).start()
         return gesture.description
 
     def _run_step(self, step: Step) -> None:

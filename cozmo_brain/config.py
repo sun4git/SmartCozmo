@@ -239,6 +239,17 @@ class Settings:
     idle_fidget_enabled: bool = field(default_factory=lambda: _env_bool("IDLE_FIDGET_ENABLED", True))
     idle_fidget_after_s: int = field(default_factory=lambda: _env_int("IDLE_FIDGET_AFTER_S", 300))
 
+    # --- Gesture/speech concurrency ---
+    # Whether the `gesture` tool runs asynchronously (starts the
+    # choreography on a background thread and returns immediately) instead
+    # of blocking until it finishes. Confirmed thread-safe at the protocol
+    # level (pycozmo.Connection.send() is just a thread-safe queue.put()),
+    # but this is genuinely new end-to-end on real hardware, and it changes
+    # what the gesture tool's result means to the model (started, not
+    # necessarily finished) - set false to fall back to the old strictly
+    # sequential behavior if it misbehaves.
+    gesture_async_enabled: bool = field(default_factory=lambda: _env_bool("GESTURE_ASYNC_ENABLED", True))
+
     # --- Vision ---
     vision_enabled: bool = field(default_factory=lambda: _env_bool("VISION_ENABLED", True))
 

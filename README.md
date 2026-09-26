@@ -1093,6 +1093,7 @@ annotated list (it's the source of truth). The essentials:
 | `WAKE_WORD_MODEL` / `WAKE_WORD_THRESHOLD` | Wake word gating `--mode vad` — stock name or path to a custom `.onnx`. |
 | `TAP_THRESHOLD` / `TAP_DEBOUNCE_MS` | `--mode vad`'s tap-activation tuning — accelerometer-spike threshold and minimum time between accepted taps (real backend only; alternate trigger alongside the wake word). |
 | `IDLE_FIDGET_ENABLED` / `IDLE_FIDGET_AFTER_S` | Whether Cozmo plays a small idle gesture after this many quiet seconds with no real conversation turn. |
+| `GESTURE_ASYNC_ENABLED` | Whether `gesture` runs in the background so `say` can overlap with it, instead of blocking until the gesture finishes. |
 | `VISION_ENABLED` | Whether `look()`'s photo gets attached to the next LLM turn. |
 | `KNOWN_PEOPLE_DIR` | Where `remember_person`'s reference photos are stored (experimental). |
 
@@ -1207,6 +1208,32 @@ Done, via `cozmo_brain/`:
   nothing guaranteed to ever lower it again — fixed alongside the rest.
   See item 4 below for the full detail on each, including exactly what's
   confirmed on real hardware vs. still simulated-only.
+- ✅ **Concurrent gesture + speech** — `gesture` and `say` used to be
+  strictly sequential (a full gesture choreography blocking until it
+  finished before speech could even start synthesizing), adding real dead
+  air to every reply that used both. Nothing about the *hardware* requires
+  that — Cozmo's real animation clips already combine audio + movement as
+  one synchronized track — it was purely this program's own tool-dispatch
+  loop and blocking calls. `RobotBackend.run_gesture_async()` (`robot/base.py`)
+  now validates the gesture name synchronously (still fails fast on an
+  unknown name) but runs its steps on a background thread and returns
+  immediately, so a `say` call right after actually overlaps with the
+  gesture instead of waiting on it. `GESTURE_ASYNC_ENABLED` (default
+  `true`) falls back to the old strictly-sequential behavior. A reentrant
+  wheel lock (`drive()`/`spin_wheels_for()` in `robot/real.py`) prevents a
+  background gesture's own wheel steps from racing a separately-requested
+  `drive`/`turn` tool call for control of the wheels — reentrant
+  specifically because the charger-exit-before-turning logic above already
+  calls `drive()` from inside `spin_wheels_for()` while holding it.
+  **Verified:** the transport is genuinely thread-safe (`pycozmo`'s
+  `Connection.send()` is a plain thread-safe `queue.Queue.put()`); the
+  simulated backend confirms the gesture tool returns immediately while
+  its own steps keep logging afterward; a mocked test confirms the
+  reentrant lock doesn't deadlock on the charger-exit self-call. **Not
+  verified:** end-to-end on real hardware, and the cosmetic race where a
+  background gesture's own mood step and a concurrent `say()`'s mood-setting
+  land around the same moment (same class of accepted trade-off as
+  `pickup_reactor`'s note above, not new).
 
 Still open, roughly in priority order:
 

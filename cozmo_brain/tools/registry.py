@@ -74,6 +74,9 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: OllamaClient,
         return ToolResult(True, f"Said (mood={mood}): {text}")
 
     def handle_gesture(name: str) -> ToolResult:
+        if settings.gesture_async_enabled:
+            description = robot.run_gesture_async(name)
+            return ToolResult(True, f"Started gesture '{name}': {description}")
         description = robot.run_gesture(name)
         return ToolResult(True, f"Performed gesture '{name}': {description}")
 

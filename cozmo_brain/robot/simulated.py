@@ -10,6 +10,7 @@ in .env, or --simulate on the CLI.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 
 from cozmo_brain.robot.base import MoveResult, RobotBackend
@@ -37,6 +38,11 @@ _FAKE_ANIMATIONS = [
 class SimulatedRobot(RobotBackend):
     def __init__(self, *_args, **_kwargs):
         self._connected = False
+        # Matches real.py's wheel lock, purely so --simulate testing of
+        # async gestures (run_gesture_async(), see base.py) doesn't produce
+        # interleaved log lines from two "wheel" calls at once - no actual
+        # hardware resource to protect here.
+        self._wheel_lock = threading.RLock()
 
     def connect(self) -> None:
         self._connected = True
@@ -52,20 +58,23 @@ class SimulatedRobot(RobotBackend):
         time.sleep(0.1)
 
     def drive(self, distance_mm: float, speed_mmps: float) -> MoveResult:
-        duration = abs(distance_mm) / max(abs(speed_mmps), 1.0)
-        logger.info("[sim] \U0001f697 drive %.0fmm at %.0fmm/s (~%.1fs)", distance_mm, speed_mmps, duration)
-        time.sleep(min(duration, 0.3))
-        return MoveResult(moved=True)
+        with self._wheel_lock:
+            duration = abs(distance_mm) / max(abs(speed_mmps), 1.0)
+            logger.info("[sim] \U0001f697 drive %.0fmm at %.0fmm/s (~%.1fs)", distance_mm, speed_mmps, duration)
+            time.sleep(min(duration, 0.3))
+            return MoveResult(moved=True)
 
     def turn(self, angle_degrees: float) -> MoveResult:
-        logger.info("[sim] \U0001f504 turn %.0f degrees", angle_degrees)
-        time.sleep(0.1)
-        return MoveResult(moved=True)
+        with self._wheel_lock:
+            logger.info("[sim] \U0001f504 turn %.0f degrees", angle_degrees)
+            time.sleep(0.1)
+            return MoveResult(moved=True)
 
     def spin_wheels_for(self, seconds: float, speed_mmps: float) -> MoveResult:
-        logger.info("[sim] \U0001f504 spin wheels for %.1fs at %.0fmm/s", seconds, speed_mmps)
-        time.sleep(min(seconds, 0.3))
-        return MoveResult(moved=True)
+        with self._wheel_lock:
+            logger.info("[sim] \U0001f504 spin wheels for %.1fs at %.0fmm/s", seconds, speed_mmps)
+            time.sleep(min(seconds, 0.3))
+            return MoveResult(moved=True)
 
     def set_head_angle_deg(self, angle_deg: float, duration: float = 0.4) -> None:
         logger.info("[sim] \U0001f440 head angle -> %.1f deg", angle_deg)
