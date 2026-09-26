@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import time
 
-from cozmo_brain.robot.base import RobotBackend
+from cozmo_brain.robot.base import MoveResult, RobotBackend
 
 logger = logging.getLogger(__name__)
 
@@ -51,21 +51,21 @@ class SimulatedRobot(RobotBackend):
         logger.info("[sim] \U0001f50a playing audio: %s", wav_path)
         time.sleep(0.1)
 
-    def drive(self, distance_mm: float, speed_mmps: float) -> bool:
+    def drive(self, distance_mm: float, speed_mmps: float) -> MoveResult:
         duration = abs(distance_mm) / max(abs(speed_mmps), 1.0)
         logger.info("[sim] \U0001f697 drive %.0fmm at %.0fmm/s (~%.1fs)", distance_mm, speed_mmps, duration)
         time.sleep(min(duration, 0.3))
-        return True
+        return MoveResult(moved=True)
 
-    def turn(self, angle_degrees: float) -> bool:
+    def turn(self, angle_degrees: float) -> MoveResult:
         logger.info("[sim] \U0001f504 turn %.0f degrees", angle_degrees)
         time.sleep(0.1)
-        return True
+        return MoveResult(moved=True)
 
-    def spin_wheels_for(self, seconds: float, speed_mmps: float) -> bool:
+    def spin_wheels_for(self, seconds: float, speed_mmps: float) -> MoveResult:
         logger.info("[sim] \U0001f504 spin wheels for %.1fs at %.0fmm/s", seconds, speed_mmps)
         time.sleep(min(seconds, 0.3))
-        return True
+        return MoveResult(moved=True)
 
     def set_head_angle_deg(self, angle_deg: float, duration: float = 0.4) -> None:
         logger.info("[sim] \U0001f440 head angle -> %.1f deg", angle_deg)

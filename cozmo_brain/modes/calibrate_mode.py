@@ -28,8 +28,12 @@ def run(robot: RobotBackend, settings: Settings) -> None:
         if cmd == "done":
             break
 
-        if not robot.spin_wheels_for(_TEST_DURATION_S, settings.turn_speed_mmps):
+        result = robot.spin_wheels_for(_TEST_DURATION_S, settings.turn_speed_mmps)
+        if not result.moved:
             print("Cozmo is on the charger - take him off before calibrating.\n")
+            continue
+        if result.hazard:
+            print(f"Detected a {result.hazard} mid-spin - discarding this sample, it won't be a clean reading.\n")
             continue
         raw = input("How many degrees did he turn (best estimate)? > ").strip()
         try:

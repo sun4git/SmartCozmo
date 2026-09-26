@@ -28,6 +28,11 @@ _GESTURE_NAMES = sorted(GESTURES)
 
 _KNOWN_PHOTO_EXTS = (".jpg", ".jpeg", ".png")
 
+_HAZARD_MESSAGES = {
+    "cliff": "detected a cliff/edge partway through and immediately backed away for safety",
+    "fall": "detected a fall partway through and stopped immediately for safety",
+}
+
 _COMPARE_FACES_PROMPT = (
     "You are comparing two photos taken by a low-resolution, often blurry robot "
     "camera with a warm/reddish color cast — ignore lighting and color entirely "
@@ -89,13 +94,19 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: OllamaClient,
         return ToolResult(True, f"Available animations: {', '.join(shown)}{more}")
 
     def handle_drive(distance_mm: float, speed_mmps: float) -> ToolResult:
-        if not robot.drive(distance_mm, speed_mmps):
+        result = robot.drive(distance_mm, speed_mmps)
+        if not result.moved:
             return ToolResult(True, "Didn't drive - still on the charger. Take me off it first.")
+        if result.hazard:
+            return ToolResult(True, f"Only drove partway toward {distance_mm:.0f}mm - {_HAZARD_MESSAGES[result.hazard]}.")
         return ToolResult(True, f"Drove {distance_mm:.0f}mm at {speed_mmps:.0f}mm/s.")
 
     def handle_turn(angle_degrees: float) -> ToolResult:
-        if not robot.turn(angle_degrees):
+        result = robot.turn(angle_degrees)
+        if not result.moved:
             return ToolResult(True, "Didn't turn - still on the charger. Take me off it first.")
+        if result.hazard:
+            return ToolResult(True, f"Only turned partway - {_HAZARD_MESSAGES[result.hazard]}.")
         return ToolResult(True, f"Turned {angle_degrees:.0f} degrees.")
 
     def handle_look() -> ToolResult:

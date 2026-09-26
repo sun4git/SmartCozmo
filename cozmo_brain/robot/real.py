@@ -42,7 +42,7 @@ import pycozmo
 
 from cozmo_brain.config import Settings
 from cozmo_brain.robot import wifi
-from cozmo_brain.robot.base import RobotBackend
+from cozmo_brain.robot.base import MoveResult, RobotBackend
 
 logger = logging.getLogger(__name__)
 
@@ -208,25 +208,60 @@ class PyCozmoRobot(RobotBackend):
         cli.play_audio(wav_path)
         cli.wait_for(pycozmo.event.EvtAudioCompleted, timeout=30)
 
-    def _sleep_unless_cliff(self, duration: float) -> None:
+    def _sleep_unless_cliff(self, duration: float) -> str | None:
         """Sleeps for `duration` like a plain time.sleep(), but polls
-        CLIFF_DETECTED/IS_FALLING every _CLIFF_POLL_S and returns early - the
-        caller still calls stop_all_motors() right after this either way, so
-        an early return here just means it happens sooner. A software
-        backstop alongside connect()'s EnableStopOnCliff (which only covers
-        the cliff case, not falling) for cliffs, and the only protection at
-        all for a fall - untested against real hardware, so this doesn't
-        rely on the firmware alone."""
-        hazard_bits = pycozmo.RobotStatusFlag.CLIFF_DETECTED | pycozmo.RobotStatusFlag.IS_FALLING
+        CLIFF_DETECTED/IS_FALLING every _CLIFF_POLL_S and returns early with
+        which one fired ("cliff"/"fall"), or None if the full duration
+        elapsed with neither - the caller still calls stop_all_motors()
+        right after this either way, so an early return here just means it
+        happens sooner. A software backstop alongside connect()'s
+        EnableStopOnCliff (which only covers the cliff case, not falling)
+        for cliffs, and the only protection at all for a fall - untested
+        against real hardware, so this doesn't rely on the firmware alone."""
         deadline = time.monotonic() + duration
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
-                return
-            if self._latest_status & hazard_bits:
-                logger.warning("Cliff or fall detected mid-drive - stopping early.")
-                return
+                return None
+            status = self._latest_status
+            if status & pycozmo.RobotStatusFlag.IS_FALLING:
+                logger.warning("Fall detected mid-drive - stopping early.")
+                return "fall"
+            if status & pycozmo.RobotStatusFlag.CLIFF_DETECTED:
+                logger.warning("Cliff detected mid-drive - stopping early.")
+                return "cliff"
             time.sleep(min(_CLIFF_POLL_S, remaining))
+
+    def _react_to_hazard(self, hazard: str, backup_away_from_sign: float = 1.0) -> None:
+        """Autonomous physical reflex the instant a hazard fires - no LLM/TTS
+        round-trip, since that latency is exactly wrong for "about to fall
+        off a table". Reuses gestures.py's own "flinch" gesture's numbers
+        (scared mood, -40mm at 80mm/s) but calls the raw primitives directly
+        instead of run_gesture()/drive(), to avoid recursing back into this
+        same hazard-detection path (drive() calls this, and run_gesture()'s
+        "drive" step calls drive() - going through either would loop).
+
+        Only backs away for "cliff" - "fall" means Cozmo's orientation/
+        position is unknown, so driving blind could make things worse; a
+        plain stop + reaction is safer. For "cliff", backs away *opposite*
+        `backup_away_from_sign` (the sign of the drive that triggered it),
+        so a hazard hit while already reversing backs up forward instead of
+        further into whatever tripped the sensor."""
+        try:
+            self.apply_mood("scared")
+        except Exception as e:  # noqa: BLE001 - a reflex hiccup shouldn't crash the caller
+            logger.warning("Could not show 'scared' mood after a %s: %s", hazard, e)
+
+        if hazard != "cliff":
+            return
+        try:
+            back_speed = -80.0 if backup_away_from_sign >= 0 else 80.0
+            cli = self._client
+            cli.drive_wheels(lwheel_speed=back_speed, rwheel_speed=back_speed)
+            time.sleep(0.5)
+            cli.stop_all_motors()
+        except Exception as e:  # noqa: BLE001 - same as above
+            logger.warning("Could not back away from cliff: %s", e)
 
     def _is_on_charger(self) -> bool:
         return bool(self._latest_status & pycozmo.RobotStatusFlag.IS_ON_CHARGER)
@@ -234,18 +269,22 @@ class PyCozmoRobot(RobotBackend):
     def is_picked_up(self) -> bool:
         return bool(self._latest_status & pycozmo.RobotStatusFlag.IS_PICKED_UP)
 
-    # drive()/spin_wheels_for() return a bool (moved or not) rather than
-    # raising when blocked by the charger, specifically so a gesture's
-    # face/light/head/lift steps still play (base.py's _run_step loop just
-    # ignores the return value) - only the wheel steps are skipped. Tool
-    # handlers (tools/registry.py) check the return value themselves, so
-    # the model still finds out a drive/turn didn't actually happen instead
-    # of reporting a movement that never occurred.
+    # drive()/spin_wheels_for() return a MoveResult rather than raising when
+    # blocked by the charger or cut short by a hazard, specifically so a
+    # gesture's face/light/head/lift steps still play (base.py's _run_step
+    # loop just ignores the return value) - only the wheel steps are
+    # skipped/shortened. Tool handlers (tools/registry.py) check the
+    # returned MoveResult themselves, so the model finds out a drive/turn
+    # didn't fully happen instead of reporting a movement that never
+    # occurred (confirmed on real hardware: this used to always report
+    # "Drove Xmm" verbatim even when a cliff cut the drive short seconds in,
+    # and the model - never told anything happened - said something
+    # completely unrelated next).
 
-    def drive(self, distance_mm: float, speed_mmps: float) -> bool:
+    def drive(self, distance_mm: float, speed_mmps: float) -> MoveResult:
         if self._is_on_charger():
             logger.info("Ignoring drive() - Cozmo is on the charger.")
-            return False
+            return MoveResult(moved=False)
 
         cli = self._client
         max_speed = self._settings.max_drive_speed_mmps
@@ -256,27 +295,31 @@ class PyCozmoRobot(RobotBackend):
         duration = abs(distance_mm) / speed
 
         cli.drive_wheels(lwheel_speed=signed_speed, rwheel_speed=signed_speed)
-        self._sleep_unless_cliff(duration)
+        hazard = self._sleep_unless_cliff(duration)
         cli.stop_all_motors()
-        return True
+        if hazard:
+            self._react_to_hazard(hazard, backup_away_from_sign=signed_speed)
+        return MoveResult(moved=True, hazard=hazard)
 
-    def turn(self, angle_degrees: float) -> bool:
+    def turn(self, angle_degrees: float) -> MoveResult:
         turn_speed = self._settings.turn_speed_mmps
         seconds_per_degree = self._settings.turn_seconds_per_degree
         duration = abs(angle_degrees) * seconds_per_degree
         direction = 1 if angle_degrees > 0 else -1
         return self.spin_wheels_for(duration, turn_speed * direction)
 
-    def spin_wheels_for(self, seconds: float, speed_mmps: float) -> bool:
+    def spin_wheels_for(self, seconds: float, speed_mmps: float) -> MoveResult:
         if self._is_on_charger():
             logger.info("Ignoring spin_wheels_for() - Cozmo is on the charger.")
-            return False
+            return MoveResult(moved=False)
 
         cli = self._client
         cli.drive_wheels(lwheel_speed=-speed_mmps, rwheel_speed=speed_mmps)
-        self._sleep_unless_cliff(seconds)
+        hazard = self._sleep_unless_cliff(seconds)
         cli.stop_all_motors()
-        return True
+        if hazard:
+            self._react_to_hazard(hazard)
+        return MoveResult(moved=True, hazard=hazard)
 
     def set_head_angle_deg(self, angle_deg: float, duration: float = 0.4) -> None:
         angle_deg = _clamp(angle_deg, _MIN_HEAD_DEG, _MAX_HEAD_DEG)

@@ -1225,7 +1225,35 @@ Still open, roughly in priority order:
      `drive()`/`spin_wheels_for()` (so `turn()` too) poll
      `CLIFF_DETECTED | IS_FALLING` every 50ms while "sleeping" through a
      commanded move and stop early if either fires — the only protection at
-     all for the falling case. **Not yet verified against real hardware.**
+     all for the falling case.
+
+     **Confirmed on real hardware that stopping early wasn't the whole
+     story:** the cliff poll fired correctly (`"Cliff detected mid-drive -
+     stopping early"` in the log), but `drive()` still returned a bare
+     `True`/success, so the `drive` tool reported "Drove 50mm..." verbatim
+     and the model — never told anything happened — said something
+     completely unrelated next ("Ta-da! Precision movement..."), with
+     Cozmo left sitting right at the edge. Fixed by replacing the bare
+     bool return with `MoveResult(moved, hazard)` (`robot/base.py`) and
+     adding an immediate autonomous reflex, `_react_to_hazard()` in
+     `robot/real.py`: shows the `scared` mood, and for a cliff specifically
+     (not a fall — orientation/position is unknown then, so driving blind
+     could make it worse) backs away ~40mm in the opposite direction from
+     whatever was commanded, reusing `gestures.py`'s existing `flinch`
+     numbers but calling the raw wheel primitives directly rather than
+     `run_gesture()`/`drive()`, to avoid recursing back into this same
+     hazard-detection path. This reflex is immediate and unconditional — no
+     LLM/TTS round-trip, since that latency is exactly wrong for "about to
+     fall". Separately, the `drive`/`turn` **tools** now check the returned
+     hazard and report it honestly ("detected a cliff/edge... and backed
+     away for safety") instead of a plain success, so the model finds out
+     and can react conversationally too — the same principle now applies
+     everywhere a `MoveResult` flows: charger-blocked and hazard-shortened
+     moves both get told to the model truthfully rather than silently
+     collapsing into "success". **The reflex itself not yet verified
+     against real hardware** — only the pre-existing early-stop was
+     confirmed; the mood+backup reaction and the corrected tool message are
+     new since that test.
    - ✅ **Charger-safe wheels — done.** `drive()`/`spin_wheels_for()` (so
      `turn()` too) now check `IS_ON_CHARGER` first and skip the wheel
      command entirely if set — returning `False` (moved: no) instead of

@@ -12,9 +12,21 @@ from __future__ import annotations
 
 import abc
 import time
+from dataclasses import dataclass
 
 from cozmo_brain.robot.gestures import GESTURES, Step
 from cozmo_brain.robot.moods import MOODS, Mood
+
+
+@dataclass(frozen=True)
+class MoveResult:
+    """Outcome of a drive()/turn()/spin_wheels_for() call - richer than a
+    bare bool so a caller (tool handlers, calibrate_mode) can tell "didn't
+    move at all" (e.g. still on the charger) apart from "moved, but a
+    hazard cut it short" instead of both collapsing into a plain success."""
+
+    moved: bool
+    hazard: str | None = None  # None, "cliff", or "fall" - see robot/real.py
 
 
 class RobotBackend(abc.ABC):
@@ -38,20 +50,21 @@ class RobotBackend(abc.ABC):
         """Play a WAV file through the robot's speaker, blocking until done."""
 
     @abc.abstractmethod
-    def drive(self, distance_mm: float, speed_mmps: float) -> bool:
-        """Drive straight for a distance at a speed, blocking until stopped.
-        Returns whether it actually moved (False if blocked, e.g. still on
-        the charger — backends with no such concept always return True)."""
+    def drive(self, distance_mm: float, speed_mmps: float) -> MoveResult:
+        """Drive straight for a distance at a speed, blocking until stopped
+        (or until a hazard cuts it short and reacts — see robot/real.py).
+        `moved=False` if blocked entirely, e.g. still on the charger —
+        backends with no such concept always return MoveResult(True)."""
 
     @abc.abstractmethod
-    def turn(self, angle_degrees: float) -> bool:
+    def turn(self, angle_degrees: float) -> MoveResult:
         """Turn in place by an (approximate, calibrated) angle, blocking
-        until stopped. Returns whether it actually moved (see drive())."""
+        until stopped. See drive() for the return value."""
 
     @abc.abstractmethod
-    def spin_wheels_for(self, seconds: float, speed_mmps: float) -> bool:
-        """Spin wheels in opposite directions for a fixed duration, then stop.
-        Returns whether it actually moved (see drive()).
+    def spin_wheels_for(self, seconds: float, speed_mmps: float) -> MoveResult:
+        """Spin wheels in opposite directions for a fixed duration, then
+        stop. See drive() for the return value.
 
         A raw primitive `turn()` is built on — exposed separately so the
         calibration mode can measure real degrees-per-second without going
