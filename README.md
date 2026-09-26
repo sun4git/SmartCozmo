@@ -1213,6 +1213,25 @@ Still open, roughly in priority order:
      one means sending a raw `ObjectConnect(factory_id=..., connect=True)`
      ourselves, then handling `ObjectTapped`. Blocked on replacing the
      cubes' batteries; revisit once a cube is powered on.
+   - ✅ **Cliff-detection safety gate — done.** Found while auditing what
+     sensor-driven features to build next: nothing in `cozmo_brain` sent
+     PyCozmo's `EnableStopOnCliff` command, or read the `CLIFF_DETECTED`
+     status flag, anywhere — `drive()`/`turn()` had zero table-edge
+     protection beyond whatever pycozmo's un-configured firmware default
+     happens to be. Fixed two ways in `robot/real.py`: `connect()` now sends
+     `EnableStopOnCliff(enable=True)` (firmware-level, but this exact
+     command was untested here, so not trusted alone), and
+     `drive()`/`spin_wheels_for()` (so `turn()` too) poll `CLIFF_DETECTED`
+     every 50ms while "sleeping" through a commanded move and stop early if
+     it fires, as a software backstop. **Not yet verified against a real
+     edge** — no hardware here to test against.
+   - **Other sensor-driven ideas, not yet built:** don't spin wheels while
+     `IS_ON_CHARGER`/`IS_CHARGING` (arm/face gestures still fine); a startle
+     reaction on `IS_PICKED_UP` (already read, for tap-gating); stop early
+     if `IS_FALLING` fires; detect "stuck" by comparing commanded vs. actual
+     `lwheel_speed_mmps`/`rwheel_speed_mmps`; detect tipped-over via
+     `pose_pitch_rad`; a proactive low-battery TTS nudge instead of just the
+     face icon; idle fidgeting after a few quiet minutes.
 5. **A fully key-free STT+TTS provider**, on top of the existing Groq/OpenAI
    split — for running with literally no API account at all, not just as a
    Groq-rate-limit fallback. Two different properties are easy to conflate

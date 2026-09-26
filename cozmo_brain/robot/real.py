@@ -69,6 +69,11 @@ _MAX_LIFT_MM = pycozmo.MAX_LIFT_HEIGHT.mm
 # IS_PICKED_UP anyway.
 _TAP_BASELINE_ALPHA = 0.02
 
+# How often drive()/spin_wheels_for() check CLIFF_DETECTED while "sleeping"
+# through a commanded move. Frequent enough that an edge stops a drive
+# promptly, cheap enough (just an int compare) to not matter performance-wise.
+_CLIFF_POLL_S = 0.05
+
 
 def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
@@ -83,6 +88,7 @@ class PyCozmoRobot(RobotBackend):
         self._accel_baseline: float | None = None
         self._tap_event = threading.Event()
         self._last_tap_time: float = 0.0
+        self._latest_status: int = 0
 
     def connect(self) -> None:
         wifi.ensure_connected(self._settings.cozmo_wifi_ssid, self._settings.cozmo_wifi_password)
@@ -97,6 +103,16 @@ class PyCozmoRobot(RobotBackend):
             raise
         self._cli = cli
         cli.set_volume(65535)
+        # Firmware-level table-edge protection. Confirmed present in the
+        # protocol (protocol_declaration.py) but not wrapped by any
+        # pycozmo.Client method, and never sent anywhere in this codebase
+        # before now - meaning drive()/turn() had zero cliff protection
+        # beyond whatever pycozmo's un-configured firmware default happens
+        # to be. Untested against real hardware exactly how the firmware
+        # reacts once this fires; _sleep_unless_cliff()'s CLIFF_DETECTED
+        # poll below is a software backstop in case it doesn't behave as
+        # hoped.
+        cli.conn.send(pycozmo.protocol_encoder.EnableStopOnCliff(enable=True))
         cli.add_handler(pycozmo.protocol_encoder.RobotState, self._on_robot_state)
         self._last_seen = time.monotonic()
 
@@ -135,6 +151,7 @@ class PyCozmoRobot(RobotBackend):
 
     def _on_robot_state(self, _cli, pkt) -> None:
         self._last_seen = time.monotonic()
+        self._latest_status = pkt.status
         self._update_tap_detection(pkt)
 
     def _update_tap_detection(self, pkt) -> None:
@@ -191,6 +208,24 @@ class PyCozmoRobot(RobotBackend):
         cli.play_audio(wav_path)
         cli.wait_for(pycozmo.event.EvtAudioCompleted, timeout=30)
 
+    def _sleep_unless_cliff(self, duration: float) -> None:
+        """Sleeps for `duration` like a plain time.sleep(), but polls
+        CLIFF_DETECTED every _CLIFF_POLL_S and returns early - the caller
+        still calls stop_all_motors() right after this either way, so an
+        early return here just means it happens sooner. A software backstop
+        alongside connect()'s EnableStopOnCliff, in case that firmware-level
+        protection doesn't behave as hoped - untested against real
+        hardware, so this doesn't rely on it alone."""
+        deadline = time.monotonic() + duration
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            if self._latest_status & pycozmo.RobotStatusFlag.CLIFF_DETECTED:
+                logger.warning("Cliff detected mid-drive - stopping early.")
+                return
+            time.sleep(min(_CLIFF_POLL_S, remaining))
+
     def drive(self, distance_mm: float, speed_mmps: float) -> None:
         cli = self._client
         max_speed = self._settings.max_drive_speed_mmps
@@ -201,7 +236,7 @@ class PyCozmoRobot(RobotBackend):
         duration = abs(distance_mm) / speed
 
         cli.drive_wheels(lwheel_speed=signed_speed, rwheel_speed=signed_speed)
-        time.sleep(duration)
+        self._sleep_unless_cliff(duration)
         cli.stop_all_motors()
 
     def turn(self, angle_degrees: float) -> None:
@@ -214,7 +249,7 @@ class PyCozmoRobot(RobotBackend):
     def spin_wheels_for(self, seconds: float, speed_mmps: float) -> None:
         cli = self._client
         cli.drive_wheels(lwheel_speed=-speed_mmps, rwheel_speed=speed_mmps)
-        time.sleep(seconds)
+        self._sleep_unless_cliff(seconds)
         cli.stop_all_motors()
 
     def set_head_angle_deg(self, angle_deg: float, duration: float = 0.4) -> None:
