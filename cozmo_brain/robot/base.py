@@ -100,6 +100,11 @@ class RobotBackend(abc.ABC):
         `timeout` seconds elapse (blocks indefinitely if None). Returns
         whether a tap was actually detected (False only on timeout)."""
 
+    @abc.abstractmethod
+    def is_picked_up(self) -> bool:
+        """Whether Cozmo is currently detected as picked up/carried
+        (backends with no such concept always return False)."""
+
     # --- connection health (default: always healthy — overridden by real.py) ---
     def is_healthy(self) -> bool:
         """Whether the connection looks alive. Backends with no real

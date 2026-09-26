@@ -111,6 +111,10 @@ class SimulatedRobot(RobotBackend):
         input("[sim] Press Enter to simulate a tap > ")
         return True
 
+    def is_picked_up(self) -> bool:
+        # No real accelerometer/status flag to read - never "picked up".
+        return False
+
     def list_animations(self) -> list[str]:
         return list(_FAKE_ANIMATIONS)
 

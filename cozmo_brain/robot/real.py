@@ -229,6 +229,9 @@ class PyCozmoRobot(RobotBackend):
     def _is_on_charger(self) -> bool:
         return bool(self._latest_status & pycozmo.RobotStatusFlag.IS_ON_CHARGER)
 
+    def is_picked_up(self) -> bool:
+        return bool(self._latest_status & pycozmo.RobotStatusFlag.IS_PICKED_UP)
+
     # drive()/spin_wheels_for() return a bool (moved or not) rather than
     # raising when blocked by the charger, specifically so a gesture's
     # face/light/head/lift steps still play (base.py's _run_step loop just

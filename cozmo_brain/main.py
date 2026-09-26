@@ -15,6 +15,7 @@ from cozmo_brain.llm.ollama_client import OllamaClient
 from cozmo_brain.personality import SYSTEM_PROMPT
 from cozmo_brain.robot import create_robot
 from cozmo_brain.robot.battery_monitor import BatteryMonitor
+from cozmo_brain.robot.pickup_reactor import PickupReactor
 from cozmo_brain.tools import build_tools
 
 
@@ -64,6 +65,9 @@ def main(argv: list[str] | None = None) -> int:
         battery_monitor = BatteryMonitor(robot, settings)
         battery_monitor.start()
 
+        pickup_reactor = PickupReactor(robot)
+        pickup_reactor.start()
+
         speech = create_speech_client(settings)
         ollama = OllamaClient(settings)
         tools = build_tools(robot, speech, ollama, settings)
@@ -93,6 +97,7 @@ def main(argv: list[str] | None = None) -> int:
                 interactive.run(engine, speech, settings)
         finally:
             battery_monitor.stop()
+            pickup_reactor.stop()
 
     return 0
 

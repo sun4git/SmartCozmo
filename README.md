@@ -1237,8 +1237,18 @@ Still open, roughly in priority order:
      discards the sample instead of quietly recording a bogus
      degrees-per-second reading if you calibrate while docked by mistake.
      **Not yet verified against real hardware.**
-   - **Other sensor-driven ideas, not yet built:** a startle reaction on
-     `IS_PICKED_UP` (already read, for tap-gating); stop early if
+   - ✅ **Startle reaction on pickup — done.** `RobotBackend.is_picked_up()`
+     (real backend: `IS_PICKED_UP`, already read for tap-gating; simulated:
+     always `False`) is polled by a small background thread,
+     `robot/pickup_reactor.py` — same shape as `battery_monitor.py`, wired
+     up alongside it in `main.py`. Reacts on the edge only (picked-up-now
+     but wasn't a moment ago): plays the `surprised` mood, then back to
+     `neutral` the moment he's set back down. Purely a physical reaction —
+     no LLM turn involved. Can cosmetically race with another thread's own
+     `apply_mood()` call around the same moment (e.g. `--mode vad`'s
+     "curious"/"neutral" listening indicator) — worst case is a flickered
+     mood, not a crash. **Not yet verified against real hardware.**
+   - **Other sensor-driven ideas, not yet built:** stop early if
      `IS_FALLING` fires; detect "stuck" by comparing commanded vs. actual
      `lwheel_speed_mmps`/`rwheel_speed_mmps`; detect tipped-over via
      `pose_pitch_rad`; a proactive low-battery TTS nudge instead of just the
