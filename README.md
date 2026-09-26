@@ -1130,10 +1130,15 @@ Done, via `cozmo_brain/`:
 - ✅ **TTS voice/tone polish** — `TTS_PITCH_SHIFT` + `TTS_ROBOT_MOD_DEPTH`, picked by
   ear against sample WAVs (see [Making the voice sound less generic](#making-the-voice-sound-less-generic)).
 - ✅ **Robustness** — Ollama request failures are caught gracefully
-  mid-conversation; Cozmo mid-session disconnects are now detected (via a
-  `RobotState` telemetry heartbeat — see [Detecting and recovering from a
-  dropped connection](#detecting-and-recovering-from-a-dropped-connection))
-  and auto-reconnected, which also re-runs Wi-Fi auto-connect if
+  mid-conversation; STT request failures (`speech.transcribe()`, in both
+  `interactive.py` and `vad_mode.py`) are now caught the same way instead
+  of crashing the session — **confirmed on real hardware**: an OpenAI 400
+  used to take the whole process down mid-`--mode vad` session, with the
+  model never told anything went wrong; Cozmo mid-session disconnects are
+  now detected (via a `RobotState` telemetry heartbeat — see [Detecting
+  and recovering from a dropped
+  connection](#detecting-and-recovering-from-a-dropped-connection)) and
+  auto-reconnected, which also re-runs Wi-Fi auto-connect if
   `COZMO_WIFI_SSID` is set. **Untested against a real hardware drop** — this
   environment has no Cozmo to disconnect.
 - ✅ **STT/TTS provider flexibility** — `AUDIO_PROVIDER=groq`/`openai` in
@@ -1142,6 +1147,23 @@ Done, via `cozmo_brain/`:
 - ✅ **Battery indicator** — `BatteryMonitor` shows a face icon + red backpack
   light a few seconds before Cozmo auto-powers-off. See [Battery
   monitor](#battery-monitor).
+- ✅ **Physical sensor reactions** — all built on `RobotState` telemetry
+  that was previously only ever used for the connection-health heartbeat
+  (nothing in `cozmo_brain` used to *listen* to Cozmo at all): tap-to-talk
+  (an alternate `--mode vad` activation trigger alongside the wake word,
+  detected via an accelerometer-magnitude spike rather than a touch sensor
+  Cozmo's body doesn't actually have); a cliff/fall safety reflex during
+  every `drive()`/`turn()` (stops early, shows a scared face, and backs
+  away specifically for a cliff); charger-safe wheels (`drive()`/`turn()`
+  blocked only while actively charging, not merely resting on the dock —
+  full-but-docked is allowed to move); a startle reaction the instant
+  Cozmo is picked up; and idle fidgeting after a few quiet minutes with no
+  real conversation turn. Auditing all of this for real also surfaced a
+  genuine, separate bug: two gestures and 8 of 16 moods could leave
+  Cozmo's lift arm raised (which physically covers the face screen) with
+  nothing guaranteed to ever lower it again — fixed alongside the rest.
+  See item 4 below for the full detail on each, including exactly what's
+  confirmed on real hardware vs. still simulated-only.
 
 Still open, roughly in priority order:
 
@@ -1155,19 +1177,21 @@ Still open, roughly in priority order:
    real clip names to seed into the `gesture` tool's enum, instead of
    requiring the model to call `list_animations` first every time.
 4. **React to physical sensors — picked up, touched, shaken, cliff-detected,
-   placed on the charger.** Nothing in `cozmo_brain` currently *listens* to
-   Cozmo at all; everything so far is one-way (we send commands, we never
-   read anything back). PyCozmo genuinely supports this — confirmed in
-   `protocol_encoder.RobotState` (already used for the connection-health
-   heartbeat): real accelerometer/gyroscope data and 4 raw cliff sensors
-   (not exposed as convenient attributes, but present on the packet), and
-   discrete events already wired up for `IS_PICKED_UP`, `IS_FALLING`,
+   placed on the charger. Mostly done now** (see the ✅ sub-items below);
+   this item started from the observation that nothing in `cozmo_brain`
+   *listened* to Cozmo at all — everything was one-way (send commands,
+   never read anything back) — even though PyCozmo genuinely supports it,
+   confirmed in `protocol_encoder.RobotState` (already used for the
+   connection-health heartbeat): real accelerometer/gyroscope data and 4
+   raw cliff sensors (not exposed as convenient attributes, but present on
+   the packet), and discrete events for `IS_PICKED_UP`, `IS_FALLING`,
    `CLIFF_DETECTED`, `IS_ON_CHARGER`, `IS_CHARGING`, `IS_MOVING`,
    `IS_CARRYING_BLOCK`. No literal "fist bump detected" event exists (that
-   was a scripted Anki app behavior, not a discrete hardware signal), but a
-   real reactive-behavior feature — a background listener feeding physical
-   events into the conversation loop, with touch/accel thresholds tuned on
-   real hardware — is genuinely buildable on top of this.
+   was a scripted Anki app behavior, not a discrete hardware signal).
+   Still genuinely open: "stuck" detection, tipped-over detection, and a
+   proactive low-battery TTS nudge (each needs either real calibration
+   data or a bit more design first — see their own sub-item below), and
+   tap-to-talk via a light cube specifically (blocked on cube batteries).
 
    - ✅ **Tap-to-talk, on Cozmo's own body — done, folded into `--mode vad`
      as a second activation trigger alongside the wake word (not a
