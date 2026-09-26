@@ -28,7 +28,9 @@ def run(robot: RobotBackend, settings: Settings) -> None:
         if cmd == "done":
             break
 
-        robot.spin_wheels_for(_TEST_DURATION_S, settings.turn_speed_mmps)
+        if not robot.spin_wheels_for(_TEST_DURATION_S, settings.turn_speed_mmps):
+            print("Cozmo is on the charger - take him off before calibrating.\n")
+            continue
         raw = input("How many degrees did he turn (best estimate)? > ").strip()
         try:
             degrees = float(raw)

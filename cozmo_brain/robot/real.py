@@ -226,7 +226,22 @@ class PyCozmoRobot(RobotBackend):
                 return
             time.sleep(min(_CLIFF_POLL_S, remaining))
 
-    def drive(self, distance_mm: float, speed_mmps: float) -> None:
+    def _is_on_charger(self) -> bool:
+        return bool(self._latest_status & pycozmo.RobotStatusFlag.IS_ON_CHARGER)
+
+    # drive()/spin_wheels_for() return a bool (moved or not) rather than
+    # raising when blocked by the charger, specifically so a gesture's
+    # face/light/head/lift steps still play (base.py's _run_step loop just
+    # ignores the return value) - only the wheel steps are skipped. Tool
+    # handlers (tools/registry.py) check the return value themselves, so
+    # the model still finds out a drive/turn didn't actually happen instead
+    # of reporting a movement that never occurred.
+
+    def drive(self, distance_mm: float, speed_mmps: float) -> bool:
+        if self._is_on_charger():
+            logger.info("Ignoring drive() - Cozmo is on the charger.")
+            return False
+
         cli = self._client
         max_speed = self._settings.max_drive_speed_mmps
         max_distance = self._settings.max_drive_distance_mm
@@ -238,19 +253,25 @@ class PyCozmoRobot(RobotBackend):
         cli.drive_wheels(lwheel_speed=signed_speed, rwheel_speed=signed_speed)
         self._sleep_unless_cliff(duration)
         cli.stop_all_motors()
+        return True
 
-    def turn(self, angle_degrees: float) -> None:
+    def turn(self, angle_degrees: float) -> bool:
         turn_speed = self._settings.turn_speed_mmps
         seconds_per_degree = self._settings.turn_seconds_per_degree
         duration = abs(angle_degrees) * seconds_per_degree
         direction = 1 if angle_degrees > 0 else -1
-        self.spin_wheels_for(duration, turn_speed * direction)
+        return self.spin_wheels_for(duration, turn_speed * direction)
 
-    def spin_wheels_for(self, seconds: float, speed_mmps: float) -> None:
+    def spin_wheels_for(self, seconds: float, speed_mmps: float) -> bool:
+        if self._is_on_charger():
+            logger.info("Ignoring spin_wheels_for() - Cozmo is on the charger.")
+            return False
+
         cli = self._client
         cli.drive_wheels(lwheel_speed=-speed_mmps, rwheel_speed=speed_mmps)
         self._sleep_unless_cliff(seconds)
         cli.stop_all_motors()
+        return True
 
     def set_head_angle_deg(self, angle_deg: float, duration: float = 0.4) -> None:
         angle_deg = _clamp(angle_deg, _MIN_HEAD_DEG, _MAX_HEAD_DEG)

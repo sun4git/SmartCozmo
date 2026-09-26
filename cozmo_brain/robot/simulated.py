@@ -51,18 +51,21 @@ class SimulatedRobot(RobotBackend):
         logger.info("[sim] \U0001f50a playing audio: %s", wav_path)
         time.sleep(0.1)
 
-    def drive(self, distance_mm: float, speed_mmps: float) -> None:
+    def drive(self, distance_mm: float, speed_mmps: float) -> bool:
         duration = abs(distance_mm) / max(abs(speed_mmps), 1.0)
         logger.info("[sim] \U0001f697 drive %.0fmm at %.0fmm/s (~%.1fs)", distance_mm, speed_mmps, duration)
         time.sleep(min(duration, 0.3))
+        return True
 
-    def turn(self, angle_degrees: float) -> None:
+    def turn(self, angle_degrees: float) -> bool:
         logger.info("[sim] \U0001f504 turn %.0f degrees", angle_degrees)
         time.sleep(0.1)
+        return True
 
-    def spin_wheels_for(self, seconds: float, speed_mmps: float) -> None:
+    def spin_wheels_for(self, seconds: float, speed_mmps: float) -> bool:
         logger.info("[sim] \U0001f504 spin wheels for %.1fs at %.0fmm/s", seconds, speed_mmps)
         time.sleep(min(seconds, 0.3))
+        return True
 
     def set_head_angle_deg(self, angle_deg: float, duration: float = 0.4) -> None:
         logger.info("[sim] \U0001f440 head angle -> %.1f deg", angle_deg)

@@ -89,11 +89,13 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: OllamaClient,
         return ToolResult(True, f"Available animations: {', '.join(shown)}{more}")
 
     def handle_drive(distance_mm: float, speed_mmps: float) -> ToolResult:
-        robot.drive(distance_mm, speed_mmps)
+        if not robot.drive(distance_mm, speed_mmps):
+            return ToolResult(True, "Didn't drive - still on the charger. Take me off it first.")
         return ToolResult(True, f"Drove {distance_mm:.0f}mm at {speed_mmps:.0f}mm/s.")
 
     def handle_turn(angle_degrees: float) -> ToolResult:
-        robot.turn(angle_degrees)
+        if not robot.turn(angle_degrees):
+            return ToolResult(True, "Didn't turn - still on the charger. Take me off it first.")
         return ToolResult(True, f"Turned {angle_degrees:.0f} degrees.")
 
     def handle_look() -> ToolResult:

@@ -38,16 +38,20 @@ class RobotBackend(abc.ABC):
         """Play a WAV file through the robot's speaker, blocking until done."""
 
     @abc.abstractmethod
-    def drive(self, distance_mm: float, speed_mmps: float) -> None:
-        """Drive straight for a distance at a speed, blocking until stopped."""
+    def drive(self, distance_mm: float, speed_mmps: float) -> bool:
+        """Drive straight for a distance at a speed, blocking until stopped.
+        Returns whether it actually moved (False if blocked, e.g. still on
+        the charger — backends with no such concept always return True)."""
 
     @abc.abstractmethod
-    def turn(self, angle_degrees: float) -> None:
-        """Turn in place by an (approximate, calibrated) angle, blocking until stopped."""
+    def turn(self, angle_degrees: float) -> bool:
+        """Turn in place by an (approximate, calibrated) angle, blocking
+        until stopped. Returns whether it actually moved (see drive())."""
 
     @abc.abstractmethod
-    def spin_wheels_for(self, seconds: float, speed_mmps: float) -> None:
+    def spin_wheels_for(self, seconds: float, speed_mmps: float) -> bool:
         """Spin wheels in opposite directions for a fixed duration, then stop.
+        Returns whether it actually moved (see drive()).
 
         A raw primitive `turn()` is built on — exposed separately so the
         calibration mode can measure real degrees-per-second without going

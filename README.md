@@ -1225,10 +1225,21 @@ Still open, roughly in priority order:
      every 50ms while "sleeping" through a commanded move and stop early if
      it fires, as a software backstop. **Not yet verified against a real
      edge** — no hardware here to test against.
-   - **Other sensor-driven ideas, not yet built:** don't spin wheels while
-     `IS_ON_CHARGER`/`IS_CHARGING` (arm/face gestures still fine); a startle
-     reaction on `IS_PICKED_UP` (already read, for tap-gating); stop early
-     if `IS_FALLING` fires; detect "stuck" by comparing commanded vs. actual
+   - ✅ **Charger-safe wheels — done.** `drive()`/`spin_wheels_for()` (so
+     `turn()` too) now check `IS_ON_CHARGER` first and skip the wheel
+     command entirely if set — returning `False` (moved: no) instead of
+     raising, specifically so a gesture's face/light/head/lift steps still
+     play uninterrupted even when its wheel steps get skipped (dance/spin
+     etc. mix both — see `robot/gestures.py`). The `drive`/`turn` **tools**
+     check that return value and tell the model honestly ("still on the
+     charger") instead of reporting a movement that never happened; the
+     bool is also threaded through `--mode calibrate`, which now warns and
+     discards the sample instead of quietly recording a bogus
+     degrees-per-second reading if you calibrate while docked by mistake.
+     **Not yet verified against real hardware.**
+   - **Other sensor-driven ideas, not yet built:** a startle reaction on
+     `IS_PICKED_UP` (already read, for tap-gating); stop early if
+     `IS_FALLING` fires; detect "stuck" by comparing commanded vs. actual
      `lwheel_speed_mmps`/`rwheel_speed_mmps`; detect tipped-over via
      `pose_pitch_rad`; a proactive low-battery TTS nudge instead of just the
      face icon; idle fidgeting after a few quiet minutes.
