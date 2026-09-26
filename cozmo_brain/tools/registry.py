@@ -49,12 +49,33 @@ def _sanitize_name(name: str) -> str:
 
 
 def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: OllamaClient, settings: Settings) -> list[Tool]:
-    def handle_say(text: str, mood: str = "neutral") -> ToolResult:
+    def handle_say(text: str, mood: str = "neutral", gesture: str | None = None) -> ToolResult:
         # "neutral" now resets pose (see moods.py) rather than being a
         # no-op, so it must actually run, not be skipped like other moods
         # used to be for efficiency.
         if mood:
             robot.apply_mood(mood)
+
+        # Bundled into this one call, rather than relying on the model
+        # calling the separate `gesture` tool right before/after, because
+        # that ordering is entirely up to the model and unreliable -
+        # confirmed on real hardware: when it called `say` before
+        # `gesture`, there was zero overlap (say() fully blocks on its own
+        # audio regardless of gesture's async-ness), so speech and
+        # movement never actually happened together despite gesture()
+        # itself being non-blocking. This guarantees the order instead.
+        gesture_note = ""
+        if gesture:
+            if settings.gesture_async_enabled:
+                description = robot.run_gesture_async(gesture)
+                gesture_note = f" while performing '{gesture}' ({description})"
+            else:
+                # Same fallback GESTURE_ASYNC_ENABLED=false gives the
+                # standalone `gesture` tool: fully sequential, gesture
+                # finishes before speech starts.
+                description = robot.run_gesture(gesture)
+                gesture_note = f" after performing '{gesture}' ({description})"
+
         wav_path = speech.synthesize(text, settings.tts_output_wav)
 
         output = settings.audio_output.lower()
@@ -71,7 +92,7 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: OllamaClient,
         else:
             robot.say_wav(wav_path)
 
-        return ToolResult(True, f"Said (mood={mood}): {text}")
+        return ToolResult(True, f"Said (mood={mood}){gesture_note}: {text}")
 
     def handle_gesture(name: str) -> ToolResult:
         if settings.gesture_async_enabled:
@@ -152,7 +173,12 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: OllamaClient,
             description=(
                 "Speak a short sentence out loud through Cozmo's speaker, with an optional "
                 "mood that sets Cozmo's face and backpack lights while speaking. Use this for "
-                "almost every turn — Cozmo should talk, not just act silently."
+                "almost every turn — Cozmo should talk, not just act silently. Pass `gesture` "
+                "here (not a separate `gesture` tool call) whenever you want Cozmo to move "
+                "WHILE talking, e.g. dancing while cheering — this is the only way to guarantee "
+                "the gesture and the speech actually happen at the same time, since calling the "
+                "separate `gesture` tool before or after `say` only ever runs one before the "
+                "other, never together."
             ),
             parameters={
                 "type": "object",
@@ -163,17 +189,24 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: OllamaClient,
                         "enum": _MOOD_NAMES,
                         "description": "Cozmo's emotional expression while saying this.",
                     },
+                    "gesture": {
+                        "type": "string",
+                        "enum": _GESTURE_NAMES,
+                        "description": "Optional — a gesture to perform at the same time as speaking.",
+                    },
                 },
                 "required": ["text"],
             },
-            handler=lambda args: handle_say(args["text"], args.get("mood", "neutral")),
+            handler=lambda args: handle_say(args["text"], args.get("mood", "neutral"), args.get("gesture")),
         ),
         Tool(
             name="gesture",
             description=(
-                "Perform a physical gesture: a short choreographed combination of face, "
-                "lights, head/arm movement, and driving. Use this to be funny and expressive "
-                "alongside or instead of speaking."
+                "Perform a physical gesture on its own, with no speech: a short choreographed "
+                "combination of face, lights, head/arm movement, and driving. Use this for a "
+                "silent physical reaction. If Cozmo should talk WHILE gesturing, use `say`'s "
+                "own `gesture` argument instead — calling this tool alongside `say` never "
+                "actually overlaps them, only one runs before the other."
             ),
             parameters={
                 "type": "object",

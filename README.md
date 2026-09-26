@@ -479,8 +479,8 @@ why this ended up folded into `--mode vad` instead of a standalone mode.
 
 | Tool | Does |
 |---|---|
-| `say(text, mood)` | Speaks via Groq TTS (routed per `AUDIO_OUTPUT`), striking a matching facial expression + backpack light color first. |
-| `gesture(name)` | Plays a curated multi-step choreography (face + lights + head/arm + wheels). |
+| `say(text, mood, gesture)` | Speaks via Groq TTS (routed per `AUDIO_OUTPUT`), striking a matching facial expression + backpack light color first. The optional `gesture` plays a choreography concurrently with the speech (guaranteed overlap — see below), rather than before or after it. |
+| `gesture(name)` | Plays a curated multi-step choreography (face + lights + head/arm + wheels) **on its own, with no speech** — pairs with `say` only sequentially, never simultaneously (use `say`'s own `gesture` argument for that). |
 | `play_animation(name)` | Plays a **real** Anki animation clip or group by exact name. |
 | `list_animations()` | Lists the real animation/group names actually loaded on this robot. |
 | `drive(distance_mm, speed_mmps)` | Drives straight, clamped to safe limits. |
@@ -1239,14 +1239,35 @@ Done, via `cozmo_brain/`:
   `drive`/`turn` tool call for control of the wheels — reentrant
   specifically because the charger-exit-before-turning logic above already
   calls `drive()` from inside `spin_wheels_for()` while holding it.
-  **Verified:** the transport is genuinely thread-safe (`pycozmo`'s
-  `Connection.send()` is a plain thread-safe `queue.Queue.put()`); the
-  simulated backend confirms the gesture tool returns immediately while
-  its own steps keep logging afterward; a mocked test confirms the
-  reentrant lock doesn't deadlock on the charger-exit self-call. **Not
-  verified:** end-to-end on real hardware, and the cosmetic race where a
-  background gesture's own mood step and a concurrent `say()`'s mood-setting
-  land around the same moment (same class of accepted trade-off as
+  **Confirmed on real hardware that this alone didn't produce actual
+  overlap:** `gesture` being non-blocking only helps if it's called
+  *before* `say` — the ordering between two separate tool calls is
+  entirely up to the model, and when it called `say` first, `say()`
+  fully blocks on its own audio regardless of `gesture`'s async-ness, so
+  speech and movement never happened together at all (observed directly:
+  audio played fully, *then* the gesture happened). Fixed by not relying
+  on the model batching two separate tool calls in the right order at
+  all: `say` now takes its own optional `gesture` argument
+  (`tools/registry.py`'s `handle_say`), so one call deterministically
+  starts the gesture (still via `run_gesture_async()`, gated by the same
+  `GESTURE_ASYNC_ENABLED`) and then proceeds straight into TTS
+  synthesis + playback while it continues in the background — genuine
+  overlap guaranteed by construction instead of hoped for. The standalone
+  `gesture` tool still exists for a silent physical reaction with no
+  speech; the system prompt now explains the distinction (and that
+  calling `gesture` alongside `say`, even in the same turn, never
+  actually overlaps them). **Verified:** the transport is genuinely
+  thread-safe (`pycozmo`'s `Connection.send()` is a plain thread-safe
+  `queue.Queue.put()`); a scripted test with a fake speech client
+  (simulated TTS latency) confirms the gesture's own steps run
+  concurrently with synthesis and audio playback begins while the
+  gesture is still finishing; a mocked test confirms the reentrant wheel
+  lock doesn't deadlock on the charger-exit self-call. **Not yet
+  re-verified on real hardware** — this fixes the specific ordering
+  problem just confirmed there, but the fix itself hasn't been tested on
+  the robot yet. The cosmetic race where a background gesture's own mood
+  step and a concurrent `say()`'s mood-setting land around the same
+  moment is unchanged (same class of accepted trade-off as
   `pickup_reactor`'s note above, not new).
 
 Still open, roughly in priority order:
