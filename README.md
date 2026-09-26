@@ -1213,18 +1213,19 @@ Still open, roughly in priority order:
      one means sending a raw `ObjectConnect(factory_id=..., connect=True)`
      ourselves, then handling `ObjectTapped`. Blocked on replacing the
      cubes' batteries; revisit once a cube is powered on.
-   - ✅ **Cliff-detection safety gate — done.** Found while auditing what
+   - ✅ **Cliff/fall safety gate — done.** Found while auditing what
      sensor-driven features to build next: nothing in `cozmo_brain` sent
-     PyCozmo's `EnableStopOnCliff` command, or read the `CLIFF_DETECTED`
-     status flag, anywhere — `drive()`/`turn()` had zero table-edge
-     protection beyond whatever pycozmo's un-configured firmware default
-     happens to be. Fixed two ways in `robot/real.py`: `connect()` now sends
-     `EnableStopOnCliff(enable=True)` (firmware-level, but this exact
-     command was untested here, so not trusted alone), and
-     `drive()`/`spin_wheels_for()` (so `turn()` too) poll `CLIFF_DETECTED`
-     every 50ms while "sleeping" through a commanded move and stop early if
-     it fires, as a software backstop. **Not yet verified against a real
-     edge** — no hardware here to test against.
+     PyCozmo's `EnableStopOnCliff` command, or read the `CLIFF_DETECTED`/
+     `IS_FALLING` status flags, anywhere — `drive()`/`turn()` had zero
+     table-edge or fall protection beyond whatever pycozmo's un-configured
+     firmware default happens to be (and `EnableStopOnCliff` only ever
+     covers the cliff case, not a fall). Fixed two ways in `robot/real.py`:
+     `connect()` now sends `EnableStopOnCliff(enable=True)` (firmware-level,
+     but this exact command was untested here, so not trusted alone), and
+     `drive()`/`spin_wheels_for()` (so `turn()` too) poll
+     `CLIFF_DETECTED | IS_FALLING` every 50ms while "sleeping" through a
+     commanded move and stop early if either fires — the only protection at
+     all for the falling case. **Not yet verified against real hardware.**
    - ✅ **Charger-safe wheels — done.** `drive()`/`spin_wheels_for()` (so
      `turn()` too) now check `IS_ON_CHARGER` first and skip the wheel
      command entirely if set — returning `False` (moved: no) instead of
@@ -1248,11 +1249,19 @@ Still open, roughly in priority order:
      `apply_mood()` call around the same moment (e.g. `--mode vad`'s
      "curious"/"neutral" listening indicator) — worst case is a flickered
      mood, not a crash. **Not yet verified against real hardware.**
-   - **Other sensor-driven ideas, not yet built:** stop early if
-     `IS_FALLING` fires; detect "stuck" by comparing commanded vs. actual
-     `lwheel_speed_mmps`/`rwheel_speed_mmps`; detect tipped-over via
-     `pose_pitch_rad`; a proactive low-battery TTS nudge instead of just the
-     face icon; idle fidgeting after a few quiet minutes.
+   - **Other sensor-driven ideas, not yet built — deliberately held back,
+     each needs either real calibration data or a bit more design first,
+     unlike the flag-only checks above:** detecting "stuck" by comparing
+     commanded vs. actual `lwheel_speed_mmps`/`rwheel_speed_mmps` needs a
+     real stall-vs-normal-driving threshold, and there's no real wheel-speed
+     log to pick one from yet (same class of problem `TAP_THRESHOLD` had
+     before the tap-detection diagnostic script); detecting tipped-over via
+     `pose_pitch_rad`/accelerometer has the same calibration gap; a
+     proactive low-battery TTS nudge needs `battery_monitor.py` to gain
+     access to the `SpeechClient` and share `TTS_OUTPUT_WAV` safely with a
+     real conversation turn possibly speaking at the same moment, not just
+     a flag read; idle fidgeting is timer-based, not sensor-driven, but is
+     otherwise cheap and could be picked up any time.
 5. **A fully key-free STT+TTS provider**, on top of the existing Groq/OpenAI
    split — for running with literally no API account at all, not just as a
    Groq-rate-limit fallback. Two different properties are easy to conflate

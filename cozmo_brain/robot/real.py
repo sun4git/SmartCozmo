@@ -210,19 +210,21 @@ class PyCozmoRobot(RobotBackend):
 
     def _sleep_unless_cliff(self, duration: float) -> None:
         """Sleeps for `duration` like a plain time.sleep(), but polls
-        CLIFF_DETECTED every _CLIFF_POLL_S and returns early - the caller
-        still calls stop_all_motors() right after this either way, so an
-        early return here just means it happens sooner. A software backstop
-        alongside connect()'s EnableStopOnCliff, in case that firmware-level
-        protection doesn't behave as hoped - untested against real
-        hardware, so this doesn't rely on it alone."""
+        CLIFF_DETECTED/IS_FALLING every _CLIFF_POLL_S and returns early - the
+        caller still calls stop_all_motors() right after this either way, so
+        an early return here just means it happens sooner. A software
+        backstop alongside connect()'s EnableStopOnCliff (which only covers
+        the cliff case, not falling) for cliffs, and the only protection at
+        all for a fall - untested against real hardware, so this doesn't
+        rely on the firmware alone."""
+        hazard_bits = pycozmo.RobotStatusFlag.CLIFF_DETECTED | pycozmo.RobotStatusFlag.IS_FALLING
         deadline = time.monotonic() + duration
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return
-            if self._latest_status & pycozmo.RobotStatusFlag.CLIFF_DETECTED:
-                logger.warning("Cliff detected mid-drive - stopping early.")
+            if self._latest_status & hazard_bits:
+                logger.warning("Cliff or fall detected mid-drive - stopping early.")
                 return
             time.sleep(min(_CLIFF_POLL_S, remaining))
 
