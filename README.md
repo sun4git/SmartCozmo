@@ -445,7 +445,7 @@ doing exactly one thing per user utterance.
 
 ```bash
 python3 -m cozmo_brain --mode voice       # push-to-talk (default) — press Enter, speak
-python3 -m cozmo_brain --mode vad         # hands-free — say the wake word, then talk (needs webrtcvad + openwakeword)
+python3 -m cozmo_brain --mode vad         # hands-free — say the wake word OR tap Cozmo, then talk (needs webrtcvad + openwakeword)
 python3 -m cozmo_brain --mode text        # type instead of speak — great for dev/testing
 python3 -m cozmo_brain --mode calibrate   # measure real turn() degrees-per-second
 python3 -m cozmo_brain --simulate         # force the console-logging robot backend (any mode)
@@ -460,6 +460,20 @@ since it was committed from a Windows checkout).
 
 Conversation history persists to `CONVERSATION_HISTORY_PATH` between runs;
 pass `--fresh` to start clean instead.
+
+`--mode vad` accepts either the wake word or a gentle tap on Cozmo's body as
+the activation trigger — whichever comes first (see
+`modes/vad_mode.py`/`_wait_for_wake_word_or_tap`). A tap is detected as a
+brief accelerometer-magnitude spike above a rolling baseline
+(`TAP_THRESHOLD`/`TAP_DEBOUNCE_MS`, see `.env.example` and `robot/real.py`),
+gated on Cozmo's own `IS_PICKED_UP` status flag so being picked up/carried
+isn't mistaken for a tap — real backend only (`--simulate` falls back to a
+keypress in place of a tap; wake-word detection still needs a real mic
+either way). Once either trigger fires, everything else — VAD-gated
+listening, the follow-up window, hallucination filtering — is the exact
+same code path as before; tapping is just a second way in. See [item 4 in
+the roadmap](#roadmap--open-work) for how the threshold was picked, and
+why this ended up folded into `--mode vad` instead of a standalone mode.
 
 ### Tools available to the LLM
 
@@ -1013,6 +1027,7 @@ annotated list (it's the source of truth). The essentials:
 | `VAD_MIN_SPEECH_MS` | Onset debounce (consecutive ms of speech needed to start recording, not a minimum utterance length) — filters out noise-triggered hallucinated transcriptions. |
 | `VAD_MIN_RMS` | Loudness floor a frame must also clear (in addition to webrtcvad) to count as speech — the actual quota-saving filter, rejects noise before it ever reaches the STT API. |
 | `WAKE_WORD_MODEL` / `WAKE_WORD_THRESHOLD` | Wake word gating `--mode vad` — stock name or path to a custom `.onnx`. |
+| `TAP_THRESHOLD` / `TAP_DEBOUNCE_MS` | `--mode vad`'s tap-activation tuning — accelerometer-spike threshold and minimum time between accepted taps (real backend only; alternate trigger alongside the wake word). |
 | `VISION_ENABLED` | Whether `look()`'s photo gets attached to the next LLM turn. |
 | `KNOWN_PEOPLE_DIR` | Where `remember_person`'s reference photos are stored (experimental). |
 
@@ -1122,16 +1137,61 @@ Still open, roughly in priority order:
    Cozmo at all; everything so far is one-way (we send commands, we never
    read anything back). PyCozmo genuinely supports this — confirmed in
    `protocol_encoder.RobotState` (already used for the connection-health
-   heartbeat): real accelerometer/gyroscope data, a raw backpack touch
-   sensor value and 4 raw cliff sensors (not exposed as convenient
-   attributes, but present on the packet), and discrete events already
-   wired up for `IS_PICKED_UP`, `IS_FALLING`, `CLIFF_DETECTED`,
-   `IS_ON_CHARGER`, `IS_CHARGING`, `IS_MOVING`, `IS_CARRYING_BLOCK`. No
-   literal "fist bump detected" event exists (that was a scripted Anki app
-   behavior, not a discrete hardware signal), but a real reactive-behavior
-   feature — a background listener feeding physical events into the
-   conversation loop, with touch/accel thresholds tuned on real hardware —
-   is genuinely buildable on top of this.
+   heartbeat): real accelerometer/gyroscope data and 4 raw cliff sensors
+   (not exposed as convenient attributes, but present on the packet), and
+   discrete events already wired up for `IS_PICKED_UP`, `IS_FALLING`,
+   `CLIFF_DETECTED`, `IS_ON_CHARGER`, `IS_CHARGING`, `IS_MOVING`,
+   `IS_CARRYING_BLOCK`. No literal "fist bump detected" event exists (that
+   was a scripted Anki app behavior, not a discrete hardware signal), but a
+   real reactive-behavior feature — a background listener feeding physical
+   events into the conversation loop, with touch/accel thresholds tuned on
+   real hardware — is genuinely buildable on top of this.
+
+   - ✅ **Tap-to-talk, on Cozmo's own body — done, folded into `--mode vad`
+     as a second activation trigger alongside the wake word (not a
+     standalone mode).**
+     `RobotState.backpack_touch_sensor_raw` reads a flat `0` on real
+     hardware regardless of touching (confirmed 2026-09-26) — original
+     Cozmo, unlike Vector, has no capacitive touch sensor built into its
+     body, and that protocol field looks like it's simply never populated
+     on Cozmo's board. Pivoted to `accel_x/y/z` instead: real-hardware logs
+     showed resting jitter within ~50 of a rolling baseline, with genuine
+     taps spiking several hundred to 1000+ — a clean threshold at 150
+     (`TAP_THRESHOLD`). The one wrinkle: being picked up off the charger
+     produces spikes in the same range as a tap, but as a *sustained*
+     multi-sample event, not a single blip — resolved by gating on Cozmo's
+     own `IS_PICKED_UP` status flag rather than trying to infer "tap vs.
+     pickup" from accelerometer shape alone.
+
+     First built as its own `--mode tap` with fixed-duration recording, like
+     push-to-talk. Dropped that once it raised a real question: how do you
+     reliably tell "no speech was said" from a tap-triggered capture, to
+     end a follow-up conversation? Fixed-duration recording has no
+     loudness/spectral gating on it at all, so that mode could only infer
+     "no speech" from Whisper's *output* (empty text, or matching a small
+     curated hallucination-phrase blocklist) — and Whisper's actual known
+     failure mode on silence/noise is to *not* return empty, but to
+     hallucinate a plausible-sounding sentence instead (see
+     `llm/stt_postprocess.py`), which that blocklist can't fully catch.
+     `vad_mode.py` already solves exactly this, properly, with two signals
+     checked *before* Whisper is ever called (`webrtcvad` spectral
+     classification + the `VAD_MIN_RMS` loudness floor — see
+     `audio/vad.py`). So rather than half-rebuild that inside a second
+     mode, a tap became just an alternate way to fire `vad_mode`'s existing
+     activation (`_wait_for_wake_word_or_tap` in `modes/vad_mode.py`, races
+     the wake-word listener against `RobotBackend.wait_for_tap()` on
+     separate threads, cancels the loser) — everything downstream
+     (listening, follow-up, hallucination filtering) is the same code path
+     the wake word already used. See `robot/real.py` and [Modes](#modes).
+   - **Tap-to-talk, via a light cube — the real path, blocked on batteries.**
+     The protocol has a
+     genuine `ObjectTapped`/`ObjectTapFiltered` event (confirmed in
+     `protocol_declaration.py`, includes tap count and intensity).
+     pycozmo's client already discovers cubes (`ObjectAvailable` →
+     `available_objects`) but has no high-level pairing helper — connecting
+     one means sending a raw `ObjectConnect(factory_id=..., connect=True)`
+     ourselves, then handling `ObjectTapped`. Blocked on replacing the
+     cubes' batteries; revisit once a cube is powered on.
 5. **A fully key-free STT+TTS provider**, on top of the existing Groq/OpenAI
    split — for running with literally no API account at all, not just as a
    Groq-rate-limit fallback. Two different properties are easy to conflate

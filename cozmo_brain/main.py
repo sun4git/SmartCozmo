@@ -24,8 +24,9 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--mode",
         choices=["voice", "vad", "text", "calibrate"],
         default="voice",
-        help="voice = push-to-talk mic, vad = hands-free continuous listening, "
-        "text = type instead of speak, calibrate = measure turn() accuracy.",
+        help="voice = push-to-talk mic, vad = hands-free continuous listening "
+        "(wake word or a tap on Cozmo's body), text = type instead of speak, "
+        "calibrate = measure turn() accuracy.",
     )
     parser.add_argument(
         "--simulate",

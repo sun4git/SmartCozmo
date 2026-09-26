@@ -196,6 +196,24 @@ class Settings:
     # again. See modes/vad_mode.py.
     vad_followup_timeout_s: int = field(default_factory=lambda: _env_int("VAD_FOLLOWUP_TIMEOUT_S", 15))
 
+    # --- Tap-to-talk (an alternate --mode vad activation trigger, alongside
+    # the wake word — see modes/vad_mode.py) ---
+    # A tap is detected as a brief spike in accelerometer magnitude above a
+    # slow-moving rolling baseline (see robot/real.py). Threshold picked from
+    # real-hardware logs: resting jitter stayed within ~50 of baseline, a
+    # genuine tap spiked several hundred to 1000+, and a sustained multi-
+    # sample event (picked up off the charger, carried, set back down) was
+    # separately and more reliably rejected via the IS_PICKED_UP status flag
+    # below, not this threshold — so this only needs to clear noise, not
+    # distinguish a tap from a pickup.
+    tap_threshold: float = field(default_factory=lambda: _env_float("TAP_THRESHOLD", 150.0))
+
+    # Minimum time between two accepted taps - without this, a single tap's
+    # multi-sample "ringing" (confirmed on real hardware: one tap can cross
+    # the threshold on 2-3 consecutive RobotState packets) would register as
+    # several taps.
+    tap_debounce_ms: int = field(default_factory=lambda: _env_int("TAP_DEBOUNCE_MS", 450))
+
     # --- Wake word (--mode vad) ---
     # A stock openWakeWord model name (hey_jarvis, alexa, hey_mycroft,
     # hey_rhasspy, timer, weather) or a path to a custom-trained .onnx model.

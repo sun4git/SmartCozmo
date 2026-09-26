@@ -39,6 +39,7 @@ import contextlib
 import logging
 import os
 import subprocess
+import threading
 
 import numpy as np
 
@@ -58,8 +59,16 @@ def _score_key(model_spec: str) -> str:
     return model_spec
 
 
-def wait_for_wake_word(device: str, model_spec: str, threshold: float) -> None:
-    """Blocks until `model_spec` is heard in the mic stream, then returns."""
+def wait_for_wake_word(
+    device: str,
+    model_spec: str,
+    threshold: float,
+    stop_event: threading.Event | None = None,
+) -> bool:
+    """Blocks until `model_spec` is heard in the mic stream (returns True), or
+    until `stop_event` is set by another thread (returns False early) - used
+    to race this against a physical tap (see vad_mode.py) without leaving the
+    mic/model running in the background once the other trigger wins."""
     try:
         from openwakeword.model import Model
     except ImportError as e:
@@ -77,7 +86,7 @@ def wait_for_wake_word(device: str, model_spec: str, threshold: float) -> None:
         stdout=subprocess.PIPE,
     )
     try:
-        while True:
+        while stop_event is None or not stop_event.is_set():
             raw = proc.stdout.read(_CHUNK_BYTES)
             if len(raw) < _CHUNK_BYTES:
                 break
@@ -86,7 +95,8 @@ def wait_for_wake_word(device: str, model_spec: str, threshold: float) -> None:
             score = scores.get(key, 0.0)
             if score >= threshold:
                 logger.info("Wake word '%s' detected (score %.2f).", model_spec, score)
-                return
+                return True
+        return False
     finally:
         proc.terminate()
         with contextlib.suppress(Exception):

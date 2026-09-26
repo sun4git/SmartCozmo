@@ -59,6 +59,16 @@ _MAX_HEAD_DEG = pycozmo.MAX_HEAD_ANGLE.degrees
 _MIN_LIFT_MM = pycozmo.MIN_LIFT_HEIGHT.mm
 _MAX_LIFT_MM = pycozmo.MAX_LIFT_HEIGHT.mm
 
+# How fast the tap-detection baseline chases the accelerometer's actual
+# magnitude. Deliberately slow: a real tap (confirmed on hardware) is a
+# 1-2 sample blip, and at this alpha it barely nudges the baseline, so it
+# doesn't chase its own spike and suppress detection. A genuine rest-angle
+# change (Cozmo picked up and set back down somewhere slightly different)
+# still settles into the new baseline within a second or two - fast enough
+# to not matter, since that whole event is separately rejected below via
+# IS_PICKED_UP anyway.
+_TAP_BASELINE_ALPHA = 0.02
+
 
 def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
@@ -70,6 +80,9 @@ class PyCozmoRobot(RobotBackend):
         self._cli: pycozmo.Client | None = None
         self._animations_loaded = False
         self._last_seen: float = 0.0
+        self._accel_baseline: float | None = None
+        self._tap_event = threading.Event()
+        self._last_tap_time: float = 0.0
 
     def connect(self) -> None:
         wifi.ensure_connected(self._settings.cozmo_wifi_ssid, self._settings.cozmo_wifi_password)
@@ -120,8 +133,39 @@ class PyCozmoRobot(RobotBackend):
             raise RuntimeError("Robot is not connected.")
         return self._cli
 
-    def _on_robot_state(self, _cli, _pkt) -> None:
+    def _on_robot_state(self, _cli, pkt) -> None:
         self._last_seen = time.monotonic()
+        self._update_tap_detection(pkt)
+
+    def _update_tap_detection(self, pkt) -> None:
+        magnitude = math.sqrt(pkt.accel_x ** 2 + pkt.accel_y ** 2 + pkt.accel_z ** 2)
+        if self._accel_baseline is None:
+            self._accel_baseline = magnitude
+            return
+
+        delta = magnitude - self._accel_baseline
+        self._accel_baseline += _TAP_BASELINE_ALPHA * delta
+
+        # Picked up/carried (e.g. off the charger) is a real, sustained event
+        # on the same accelerometer signal - confirmed on hardware to produce
+        # spikes far larger than an actual tap, so a magnitude threshold
+        # alone can't tell them apart. IS_PICKED_UP can: it's computed by
+        # Cozmo's own firmware, so it's used as a hard gate instead of trying
+        # to infer "was this a tap or a pickup" from the accelerometer alone.
+        picked_up = bool(pkt.status & pycozmo.RobotStatusFlag.IS_PICKED_UP)
+        now = time.monotonic()
+        debounce_s = self._settings.tap_debounce_ms / 1000.0
+        if (
+            not picked_up
+            and abs(delta) > self._settings.tap_threshold
+            and (now - self._last_tap_time) > debounce_s
+        ):
+            self._last_tap_time = now
+            self._tap_event.set()
+
+    def wait_for_tap(self, timeout: float | None = None) -> bool:
+        self._tap_event.clear()
+        return self._tap_event.wait(timeout)
 
     def is_healthy(self) -> bool:
         if self._cli is None or self._last_seen == 0.0:

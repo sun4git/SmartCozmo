@@ -98,6 +98,16 @@ class SimulatedRobot(RobotBackend):
         # to exercise the battery-monitor code path without hardware.
         return 4.0
 
+    def wait_for_tap(self, timeout: float | None = None) -> bool:
+        # No real accelerometer to read — stand in with a keypress so
+        # --mode vad's tap trigger is still exercisable with --simulate.
+        # Ignores `timeout`: this blocks on input() either way, so a caller
+        # polling with a short timeout (see vad_mode._wait_for_wake_word_or_tap)
+        # won't get the fast reaction time it would from real hardware.
+        del timeout
+        input("[sim] Press Enter to simulate a tap > ")
+        return True
+
     def list_animations(self) -> list[str]:
         return list(_FAKE_ANIMATIONS)
 

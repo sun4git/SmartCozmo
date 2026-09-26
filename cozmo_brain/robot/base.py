@@ -90,6 +90,12 @@ class RobotBackend(abc.ABC):
         """Cozmo's current battery voltage, or None if unknown/unavailable
         (e.g. not connected yet, or a backend with no real battery)."""
 
+    @abc.abstractmethod
+    def wait_for_tap(self, timeout: float | None = None) -> bool:
+        """Blocks until a physical tap on Cozmo's body is detected, or until
+        `timeout` seconds elapse (blocks indefinitely if None). Returns
+        whether a tap was actually detected (False only on timeout)."""
+
     # --- connection health (default: always healthy — overridden by real.py) ---
     def is_healthy(self) -> bool:
         """Whether the connection looks alive. Backends with no real
