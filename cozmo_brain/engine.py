@@ -7,6 +7,7 @@ VAD, text, calibration) funnels user input through `CozmoEngine.handle_turn`.
 from __future__ import annotations
 
 import logging
+import time
 
 import requests
 
@@ -38,6 +39,11 @@ class CozmoEngine:
         self._tools = tools
         self._tools_by_name = {t.name: t for t in tools}
         self.conversation = conversation
+        # Tracks real conversation activity for idle_fidget.py - starts at
+        # construction time (not 0/unset) so idle counting begins from
+        # process start rather than looking infinitely idle before the
+        # first turn ever happens.
+        self.last_interaction_monotonic: float = time.monotonic()
 
     def _call_tool(self, name: str, arguments: dict) -> ToolResult:
         tool = self._tools_by_name.get(name)
@@ -59,6 +65,7 @@ class CozmoEngine:
     def handle_turn(self, user_text: str, images: list[str] | None = None) -> str:
         """Runs one full user turn through the tool-calling loop. Returns a
         transcript-ish summary of what Cozmo said/did, for logging/display."""
+        self.last_interaction_monotonic = time.monotonic()
         self.conversation.add_user(user_text, images=images)
         schema = [t.schema() for t in self._tools]
         summary_lines: list[str] = []

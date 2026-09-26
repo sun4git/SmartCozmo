@@ -221,6 +221,15 @@ class Settings:
     wake_word_model: str = field(default_factory=lambda: _env_str("WAKE_WORD_MODEL", "hey_jarvis"))
     wake_word_threshold: float = field(default_factory=lambda: _env_float("WAKE_WORD_THRESHOLD", 0.5))
 
+    # --- Idle fidgeting ---
+    # After this many seconds with no real conversation turn (see
+    # engine.py's last_interaction_monotonic), a small idle-appropriate
+    # gesture plays every interval this long while the quiet continues -
+    # purely cosmetic personality, not sensor-driven, so no calibration
+    # concern like the tap/cliff thresholds above. See idle_fidget.py.
+    idle_fidget_enabled: bool = field(default_factory=lambda: _env_bool("IDLE_FIDGET_ENABLED", True))
+    idle_fidget_after_s: int = field(default_factory=lambda: _env_int("IDLE_FIDGET_AFTER_S", 300))
+
     # --- Vision ---
     vision_enabled: bool = field(default_factory=lambda: _env_bool("VISION_ENABLED", True))
 

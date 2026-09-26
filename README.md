@@ -1049,6 +1049,7 @@ annotated list (it's the source of truth). The essentials:
 | `VAD_MIN_RMS` | Loudness floor a frame must also clear (in addition to webrtcvad) to count as speech — the actual quota-saving filter, rejects noise before it ever reaches the STT API. |
 | `WAKE_WORD_MODEL` / `WAKE_WORD_THRESHOLD` | Wake word gating `--mode vad` — stock name or path to a custom `.onnx`. |
 | `TAP_THRESHOLD` / `TAP_DEBOUNCE_MS` | `--mode vad`'s tap-activation tuning — accelerometer-spike threshold and minimum time between accepted taps (real backend only; alternate trigger alongside the wake word). |
+| `IDLE_FIDGET_ENABLED` / `IDLE_FIDGET_AFTER_S` | Whether Cozmo plays a small idle gesture after this many quiet seconds with no real conversation turn. |
 | `VISION_ENABLED` | Whether `look()`'s photo gets attached to the next LLM turn. |
 | `KNOWN_PEOPLE_DIR` | Where `remember_person`'s reference photos are stored (experimental). |
 
@@ -1277,19 +1278,41 @@ Still open, roughly in priority order:
      `apply_mood()` call around the same moment (e.g. `--mode vad`'s
      "curious"/"neutral" listening indicator) — worst case is a flickered
      mood, not a crash. **Not yet verified against real hardware.**
-   - **Other sensor-driven ideas, not yet built — deliberately held back,
-     each needs either real calibration data or a bit more design first,
-     unlike the flag-only checks above:** detecting "stuck" by comparing
-     commanded vs. actual `lwheel_speed_mmps`/`rwheel_speed_mmps` needs a
-     real stall-vs-normal-driving threshold, and there's no real wheel-speed
-     log to pick one from yet (same class of problem `TAP_THRESHOLD` had
-     before the tap-detection diagnostic script); detecting tipped-over via
-     `pose_pitch_rad`/accelerometer has the same calibration gap; a
-     proactive low-battery TTS nudge needs `battery_monitor.py` to gain
-     access to the `SpeechClient` and share `TTS_OUTPUT_WAV` safely with a
-     real conversation turn possibly speaking at the same moment, not just
-     a flag read; idle fidgeting is timer-based, not sensor-driven, but is
-     otherwise cheap and could be picked up any time.
+   - ✅ **Idle fidgeting — done.** Timer-based, not sensor-driven, so no
+     calibration concern like the items below. `CozmoEngine` now tracks
+     `last_interaction_monotonic`, updated at the top of every real
+     `handle_turn()` (every mode funnels through it). A new background
+     reactor, `idle_fidget.py` (same shape as `battery_monitor.py`/
+     `pickup_reactor.py`, but lives alongside `engine.py` since it needs
+     `CozmoEngine`, not just a `RobotBackend`) plays a random pick from
+     `("peek", "shrug")` — deliberately calm, no-drive gestures, so idle
+     Cozmo doesn't go rolling off somewhere on its own — every
+     `IDLE_FIDGET_AFTER_S` (default 300s) of continued quiet, resetting
+     the moment a real turn happens. `IDLE_FIDGET_ENABLED=false` disables
+     it entirely.
+
+     **Auditing this surfaced a real, separate bug, found by request:**
+     checked every existing gesture/mood for whether any of them raise the
+     lift arm (which physically covers the face screen when up) and leave
+     it there. Two gestures did: `wake_up` (ends via the `happy` mood,
+     lift=70 — meaning the arm was left up after *every single connect()*,
+     since `wake_up` runs there automatically) and `cheer` (its bounce
+     sequence ended at 40, not the canonical fully-down 32). More broadly,
+     8 of the 16 moods had `lift_mm=None` (don't touch the lift at all),
+     so applying one of them right after anything that *had* raised the
+     arm — a previous gesture, or an autonomous reflex like the cliff/fall
+     hazard reaction's `scared` mood or `pickup_reactor`'s `surprised` —
+     left the face hidden with nothing guaranteed to ever lower it again
+     (this was previously only fixed for `neutral` specifically, per its
+     own comment in `moods.py`). Fixed both ways: `wake_up`/`cheer` now
+     explicitly end each of their own sequences with the arm down, and
+     every mood except the four deliberately "arms up" celebratory ones
+     (`happy`/`excited`/`proud`/`smug`) now sets `lift_mm=32` (the real
+     minimum) instead of leaving it untouched — so any mood transition
+     anywhere guarantees a visible face unless it's one of those four by
+     design. **Verified in the simulated backend** (`wake_up`'s own
+     sequence, and a forced idle fidget, both logged ending at
+     `lift height -> 32.0 mm`) — not yet checked against real hardware.
 5. **A fully key-free STT+TTS provider**, on top of the existing Groq/OpenAI
    split — for running with literally no API account at all, not just as a
    Groq-rate-limit fallback. Two different properties are easy to conflate

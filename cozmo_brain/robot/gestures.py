@@ -46,13 +46,15 @@ GESTURES: dict[str, Gesture] = {
         ],
     ),
     "wake_up": Gesture(
-        "Lifts head and arm up as if waking up from a nap.",
+        "Lifts head and arm up as if waking up from a nap, then settles back down.",
         [
             Step("mood", "sleepy", duration=0.3),
             Step("pause", 0.6),
             Step("head", 30, duration=0.6),
             Step("lift", 70, duration=0.6),
             Step("mood", "happy", duration=0.3),
+            Step("pause", 0.4),
+            Step("lift", 32, duration=0.3),  # back down — don't leave the arm blocking the screen
         ],
     ),
     "sleep": Gesture(
@@ -70,7 +72,7 @@ GESTURES: dict[str, Gesture] = {
             Step("lift", 92, duration=0.2),
             Step("lift", 40, duration=0.2),
             Step("lift", 92, duration=0.2),
-            Step("lift", 40, duration=0.2),
+            Step("lift", 32, duration=0.2),  # back down — don't leave the arm blocking the screen
             Step("light", "green"),
         ],
     ),

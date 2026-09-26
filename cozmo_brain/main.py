@@ -10,6 +10,7 @@ import sys
 from cozmo_brain.config import settings
 from cozmo_brain.conversation import Conversation
 from cozmo_brain.engine import CozmoEngine
+from cozmo_brain.idle_fidget import IdleFidgeter
 from cozmo_brain.llm import create_speech_client
 from cozmo_brain.llm.ollama_client import OllamaClient
 from cozmo_brain.personality import SYSTEM_PROMPT
@@ -82,6 +83,9 @@ def main(argv: list[str] | None = None) -> int:
 
         engine = CozmoEngine(settings, robot, ollama, speech, tools, conversation)
 
+        idle_fidgeter = IdleFidgeter(robot, engine, settings)
+        idle_fidgeter.start()
+
         try:
             if args.mode == "text":
                 from cozmo_brain.modes import text_mode
@@ -98,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             battery_monitor.stop()
             pickup_reactor.stop()
+            idle_fidgeter.stop()
 
     return 0
 
