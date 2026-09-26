@@ -21,6 +21,8 @@ from __future__ import annotations
 import logging
 import threading
 
+import requests
+
 from cozmo_brain.audio.vad import record_until_silence
 from cozmo_brain.audio.wakeword import wait_for_wake_word
 from cozmo_brain.config import Settings
@@ -96,7 +98,23 @@ def run(engine: CozmoEngine, robot: RobotBackend, speech: SpeechClient, settings
                 _apply_mood_safely(robot, "neutral")
                 break
 
-            text = speech.transcribe(settings.raw_input_wav)
+            try:
+                text = speech.transcribe(settings.raw_input_wav)
+            except requests.RequestException as e:
+                # An STT request failure used to crash the whole hands-free
+                # session (confirmed on real hardware: an OpenAI 400 here
+                # took the process down mid-conversation, with nothing above
+                # this catching it) - treated the same as "heard something,
+                # nothing transcribable" instead, since the mic is otherwise
+                # unattended and a transient/edge-case API error shouldn't
+                # end the session. e.response.text carries the provider's
+                # actual error detail (raise_for_status() alone discards
+                # it), logged here since a bare "400 Bad Request" gives no
+                # way to root-cause a repeat.
+                detail = e.response.text.strip() if e.response is not None else str(e)
+                logger.warning("Speech-to-text request failed: %s", detail)
+                print(f"(speech-to-text request failed, try again: {detail})\n")
+                continue
             if not text:
                 continue  # heard something, but nothing transcribable - keep the conversation open
             print(f"You said: {text}")

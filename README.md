@@ -694,6 +694,27 @@ classify as speech → still rejected). If noise still gets through after
 tuning `VAD_MIN_RMS`, also worth trying `VAD_AGGRESSIVENESS=3` (stricter
 webrtcvad noise rejection) — untested against this specific environment.
 
+**Found on real hardware, crashed the whole process:** an STT request to
+OpenAI (`AUDIO_PROVIDER=openai`) returned `400 Bad Request` mid-`--mode vad`
+session, and nothing caught it — `resp.raise_for_status()` in
+`llm/openai_client.py`/`llm/groq_client.py` raises on any non-2xx response,
+but neither `vad_mode.py` nor `interactive.py` wrapped their
+`speech.transcribe()` call in anything, so the exception propagated all the
+way up and killed the process (contrast `engine.py`, which already catches
+`requests.RequestException` around its Ollama calls the same way). Bad for
+push-to-talk, worse for hands-free — nobody's watching an unattended
+session to restart it. Both call sites now catch `requests.RequestException`
+and treat it the same as "heard something, nothing transcribable" (logs a
+warning, keeps the follow-up window/loop open, moves on) instead of
+crashing. Also surfaced a second issue while fixing the first:
+`raise_for_status()` discards the response body, so the original crash's
+traceback showed only a generic `400 Client Error: Bad Request` with no clue
+why — the catch now logs `e.response.text`, which for OpenAI/Groq's STT
+endpoints carries the actual `error.message` explaining the rejection.
+**Root cause of that specific 400 not yet identified** — the fix makes it
+survivable and diagnosable next time, not preventable; if it recurs, the
+logged response body is the next thing to look at.
+
 ### Routing speech to a real speaker (noisy environments)
 
 Cozmo's own speaker is small and quiet even with the `TTS_GAIN` fix — in a

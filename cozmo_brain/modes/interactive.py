@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import logging
 
+import requests
+
 from cozmo_brain.audio.recorder import record_fixed
 from cozmo_brain.config import Settings
 from cozmo_brain.engine import CozmoEngine
@@ -22,7 +24,17 @@ def run(engine: CozmoEngine, speech: SpeechClient, settings: Settings) -> None:
             break
 
         record_fixed(settings.raw_input_wav, settings.record_seconds, settings.record_device)
-        text = speech.transcribe(settings.raw_input_wav)
+        try:
+            text = speech.transcribe(settings.raw_input_wav)
+        except requests.RequestException as e:
+            # Same fix as vad_mode.py's - an STT request failure used to
+            # crash the whole process. e.response.text carries the
+            # provider's actual error detail, which raise_for_status()
+            # alone discards.
+            detail = e.response.text.strip() if e.response is not None else str(e)
+            logger.warning("Speech-to-text request failed: %s", detail)
+            print(f"(speech-to-text request failed, try again: {detail})\n")
+            continue
         print(f"You said: {text}")
         if not text:
             print("(heard nothing, try again)\n")
