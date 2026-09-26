@@ -757,6 +757,20 @@ output. **Root cause of *why* aplay hung not identified** — same caveat
 as the STT-crash fix above: this makes it survivable and diagnosable
 (the warning log), not preventable.
 
+**Follow-up, ruling out a red herring:** repeated
+`AnimationController.IsReadyToPlay.BufferStarved` messages (from
+`pycozmo.robot`, decoded firmware debug messages) showed up in the log
+around the same incident, raising the question of whether *that* was the
+actual cause instead. Traced it: PyCozmo's own reference CLI (`run.py`)
+defaults that exact logger to `WARNING` specifically because this message
+is routine chatter — the animation engine reporting "nothing queued to
+play right now," true any time Cozmo isn't actively mid-playback, logged
+too often to be useful at INFO. `main.py` was never applying that same
+suppression (only `pycozmo.protocol`'s was), which is why it was visible
+at all. Now applied the same way, so this stops being clutter — and,
+more importantly, stops being a plausible-looking but wrong lead the next
+time something actually hangs.
+
 ### Routing speech to a real speaker (noisy environments)
 
 Cozmo's own speaker is small and quiet even with the `TTS_GAIN` fix — in a

@@ -53,6 +53,15 @@ def main(argv: list[str] | None = None) -> int:
         # few seconds (Connection.log_stats()) - distracting noise in normal
         # use, especially in --mode text. --log-level DEBUG opts back in.
         logging.getLogger("pycozmo.protocol").setLevel(logging.WARNING)
+        # Robot-firmware debug messages (decoded in pycozmo/robot_debug.py),
+        # most commonly "AnimationController.IsReadyToPlay.BufferStarved" -
+        # PyCozmo's own reference CLI (run.py) defaults this same logger to
+        # WARNING specifically because that message is routine chatter (the
+        # animation engine reporting "nothing queued to play right now",
+        # true whenever Cozmo isn't actively mid-playback) that fires too
+        # often to be useful at INFO. Matching that default here - we
+        # weren't applying it before, which is why it was visible at all.
+        logging.getLogger("pycozmo.robot").setLevel(logging.WARNING)
 
     robot = create_robot(settings, force_simulated=args.simulate)
 
