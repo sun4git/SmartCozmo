@@ -16,7 +16,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class Step:
-    kind: str  # "mood" | "expression" | "light" | "head" | "lift" | "turn" | "drive" | "pause"
+    kind: str  # "mood" | "expression" | "light" | "head" | "lift" | "lower_lift" | "turn" | "drive" | "pause"
     value: Any
     duration: float = 0.4
 
@@ -54,14 +54,14 @@ GESTURES: dict[str, Gesture] = {
             Step("lift", 70, duration=0.6),
             Step("mood", "happy", duration=0.3),
             Step("pause", 0.4),
-            Step("lift", 32, duration=0.3),  # back down — don't leave the arm blocking the screen
+            Step("lower_lift", None, duration=0.3),  # all the way down — don't leave the arm blocking the screen
         ],
     ),
     "sleep": Gesture(
         "Lowers head and arm and dims the lights, ready for a nap.",
         [
             Step("head", -25, duration=0.6),
-            Step("lift", 32, duration=0.6),
+            Step("lower_lift", None, duration=0.6),
             Step("mood", "sleepy", duration=0.3),
         ],
     ),
@@ -72,7 +72,7 @@ GESTURES: dict[str, Gesture] = {
             Step("lift", 92, duration=0.2),
             Step("lift", 40, duration=0.2),
             Step("lift", 92, duration=0.2),
-            Step("lift", 32, duration=0.2),  # back down — don't leave the arm blocking the screen
+            Step("lower_lift", None, duration=0.2),  # all the way down — don't leave the arm blocking the screen
             Step("light", "green"),
         ],
     ),
@@ -113,7 +113,7 @@ GESTURES: dict[str, Gesture] = {
         [
             Step("mood", "confused", duration=0.2),
             Step("lift", 92, duration=0.3),
-            Step("lift", 32, duration=0.3),
+            Step("lower_lift", None, duration=0.3),
         ],
     ),
     "fist_pump": Gesture(
@@ -122,7 +122,7 @@ GESTURES: dict[str, Gesture] = {
             Step("lift", 92, duration=0.4),
             Step("mood", "proud", duration=0.2),
             Step("pause", 0.5),
-            Step("lift", 32, duration=0.3),  # back down — don't leave the arm blocking the screen
+            Step("lower_lift", None, duration=0.3),  # all the way down — don't leave the arm blocking the screen
         ],
     ),
     "sneaky_creep": Gesture(
@@ -146,7 +146,7 @@ GESTURES: dict[str, Gesture] = {
             Step("head", 44, duration=0.3),
             Step("lift", 92, duration=0.3),
             Step("pause", 0.5),
-            Step("lift", 32, duration=0.3),  # back down — don't leave the arm blocking the screen
+            Step("lower_lift", None, duration=0.3),  # all the way down — don't leave the arm blocking the screen
         ],
     ),
 }

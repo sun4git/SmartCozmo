@@ -73,6 +73,9 @@ class SimulatedRobot(RobotBackend):
     def set_lift_height_mm(self, height_mm: float, duration: float = 0.4) -> None:
         logger.info("[sim] \U0001f4aa lift height -> %.1f mm", height_mm)
 
+    def lower_lift_fully(self, duration: float = 0.4) -> None:
+        logger.info("[sim] \U0001f4aa lift height -> fully down")
+
     def set_backpack_light(self, color: str) -> None:
         logger.info("[sim] \U0001f4a1 backpack light -> %s", color)
 

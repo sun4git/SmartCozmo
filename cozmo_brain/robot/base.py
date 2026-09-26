@@ -78,6 +78,15 @@ class RobotBackend(abc.ABC):
     def set_lift_height_mm(self, height_mm: float, duration: float = 0.4) -> None: ...
 
     @abc.abstractmethod
+    def lower_lift_fully(self, duration: float = 0.4) -> None:
+        """Commands the lift as low as it will physically go, rather than
+        clamping to a specific documented minimum height - confirmed on
+        real hardware that the documented minimum (32mm) can't be relied
+        on to visibly/consistently bottom out. Used everywhere a mood or
+        gesture means "settle all the way down", instead of
+        set_lift_height_mm() with a hardcoded low number."""
+
+    @abc.abstractmethod
     def set_backpack_light(self, color: str) -> None:
         """color is one of: green, red, blue, white, off."""
 
@@ -155,7 +164,9 @@ class RobotBackend(abc.ABC):
         self.set_backpack_light(mood.light)
         if mood.head_deg is not None:
             self.set_head_angle_deg(mood.head_deg)
-        if mood.lift_mm is not None:
+        if mood.lower_lift:
+            self.lower_lift_fully()
+        elif mood.lift_mm is not None:
             self.set_lift_height_mm(mood.lift_mm)
         return mood
 
@@ -184,6 +195,8 @@ class RobotBackend(abc.ABC):
             self.set_head_angle_deg(step.value, duration=step.duration)
         elif step.kind == "lift":
             self.set_lift_height_mm(step.value, duration=step.duration)
+        elif step.kind == "lower_lift":
+            self.lower_lift_fully(duration=step.duration)
         elif step.kind == "turn":
             self.turn(step.value)
         elif step.kind == "drive":

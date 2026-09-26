@@ -1371,22 +1371,37 @@ Still open, roughly in priority order:
      it there. Two gestures did: `wake_up` (ends via the `happy` mood,
      lift=70 — meaning the arm was left up after *every single connect()*,
      since `wake_up` runs there automatically) and `cheer` (its bounce
-     sequence ended at 40, not the canonical fully-down 32). More broadly,
-     8 of the 16 moods had `lift_mm=None` (don't touch the lift at all),
-     so applying one of them right after anything that *had* raised the
-     arm — a previous gesture, or an autonomous reflex like the cliff/fall
-     hazard reaction's `scared` mood or `pickup_reactor`'s `surprised` —
-     left the face hidden with nothing guaranteed to ever lower it again
-     (this was previously only fixed for `neutral` specifically, per its
-     own comment in `moods.py`). Fixed both ways: `wake_up`/`cheer` now
-     explicitly end each of their own sequences with the arm down, and
-     every mood except the four deliberately "arms up" celebratory ones
-     (`happy`/`excited`/`proud`/`smug`) now sets `lift_mm=32` (the real
-     minimum) instead of leaving it untouched — so any mood transition
-     anywhere guarantees a visible face unless it's one of those four by
-     design. **Verified in the simulated backend** (`wake_up`'s own
-     sequence, and a forced idle fidget, both logged ending at
-     `lift height -> 32.0 mm`) — not yet checked against real hardware.
+     sequence ended at 40, not fully down). More broadly, 8 of the 16
+     moods had `lift_mm=None` (don't touch the lift at all), so applying
+     one of them right after anything that *had* raised the arm — a
+     previous gesture, or an autonomous reflex like the cliff/fall hazard
+     reaction's `scared` mood or `pickup_reactor`'s `surprised` — left the
+     face hidden with nothing guaranteed to ever lower it again (this was
+     previously only fixed for `neutral` specifically, per its own comment
+     in `moods.py`). Initially fixed by having `wake_up`/`cheer` end with
+     an explicit `lift_mm=32` step, and every mood except the four
+     deliberately "arms up" celebratory ones (`happy`/`excited`/`proud`/
+     `smug`) default to `lift_mm=32` too.
+
+     **Confirmed on real hardware that 32mm itself was the wrong fix:**
+     32mm is `pycozmo.MIN_LIFT_HEIGHT` — a documented constant, not
+     something ever confirmed to actually bottom out on this unit, and it
+     doesn't reliably/visibly do so. Tracked down why: `_clamp(height_mm,
+     32, 92)` in `real.py`'s `set_lift_height_mm()` is the *only* thing
+     enforcing that floor — `pycozmo.Client.set_lift_height()` itself does
+     no clamping at all (confirmed against its source: a plain passthrough
+     to the firmware), so our own software was the sole obstacle to ever
+     asking for lower. Replaced every "settle all the way down" case with
+     a dedicated `RobotBackend.lower_lift_fully()` (a new `Mood.lower_lift`
+     flag and a `"lower_lift"` gesture `Step` kind, alongside the existing
+     numeric `lift_mm`/`"lift"` for the four raised moods) that sends
+     `0.0` directly, unclamped — letting the real mechanical limit decide
+     where "fully down" actually is, instead of trusting a documented
+     constant that doesn't hold up in practice. **Verified in the
+     simulated backend** (`wake_up`'s own sequence, and a forced idle
+     fidget, now log `lift height -> fully down` instead of a specific mm
+     value) — the real-hardware behavior of sending `0.0` unclamped is
+     itself not yet confirmed.
 5. **A fully key-free STT+TTS provider**, on top of the existing Groq/OpenAI
    split — for running with literally no API account at all, not just as a
    Groq-rate-limit fallback. Two different properties are easy to conflate

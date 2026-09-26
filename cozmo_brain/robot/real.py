@@ -383,6 +383,18 @@ class PyCozmoRobot(RobotBackend):
         self._client.set_lift_height(height_mm, duration=duration)
         time.sleep(duration)
 
+    def lower_lift_fully(self, duration: float = 0.4) -> None:
+        # Deliberately bypasses set_lift_height_mm()'s clamp to _MIN_LIFT_MM
+        # (pycozmo's documented 32mm minimum) - confirmed on real hardware
+        # that 32mm can't be relied on to visibly/consistently bottom out.
+        # pycozmo.Client.set_lift_height() does no clamping of its own (a
+        # plain passthrough to the firmware, confirmed against its source),
+        # so asking for 0.0 directly lets the real mechanical limit decide
+        # where "fully down" actually is, instead of trusting a possibly-
+        # wrong documented constant.
+        self._client.set_lift_height(0.0, duration=duration)
+        time.sleep(duration)
+
     def set_backpack_light(self, color: str) -> None:
         light = _LIGHTS.get(color.lower())
         if light is None:
