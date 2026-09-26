@@ -1256,19 +1256,20 @@ Done, via `cozmo_brain/`:
   `gesture` tool still exists for a silent physical reaction with no
   speech; the system prompt now explains the distinction (and that
   calling `gesture` alongside `say`, even in the same turn, never
-  actually overlaps them). **Verified:** the transport is genuinely
-  thread-safe (`pycozmo`'s `Connection.send()` is a plain thread-safe
-  `queue.Queue.put()`); a scripted test with a fake speech client
-  (simulated TTS latency) confirms the gesture's own steps run
-  concurrently with synthesis and audio playback begins while the
+  actually overlaps them). **Verified, including on real hardware:** the
+  transport is genuinely thread-safe (`pycozmo`'s `Connection.send()` is
+  a plain thread-safe `queue.Queue.put()`); a scripted test with a fake
+  speech client (simulated TTS latency) confirms the gesture's own steps
+  run concurrently with synthesis and audio playback begins while the
   gesture is still finishing; a mocked test confirms the reentrant wheel
-  lock doesn't deadlock on the charger-exit self-call. **Not yet
-  re-verified on real hardware** — this fixes the specific ordering
-  problem just confirmed there, but the fix itself hasn't been tested on
-  the robot yet. The cosmetic race where a background gesture's own mood
-  step and a concurrent `say()`'s mood-setting land around the same
-  moment is unchanged (same class of accepted trade-off as
-  `pickup_reactor`'s note above, not new).
+  lock doesn't deadlock on the charger-exit self-call; and — the actual
+  goal — directly observed on the robot itself: the model used `say`'s
+  `gesture` argument on its own (no separate `gesture` tool call), and
+  Cozmo genuinely spoke while performing the gesture (`peek`), not one
+  after the other. The cosmetic race where a background gesture's own
+  mood step and a concurrent `say()`'s mood-setting land around the same
+  moment remains unverified either way (same class of accepted trade-off
+  as `pickup_reactor`'s note above, not new).
 
 Still open, roughly in priority order:
 
