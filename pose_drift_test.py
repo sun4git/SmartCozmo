@@ -62,10 +62,19 @@ load_dotenv()
 # a point turn (positive = left/counterclockwise, matching cozmo_brain's
 # own turn() convention). Kept as a plain, hand-edited list rather than a
 # CLI - this is meant to be tweaked per test run, not a polished tool.
+#
+# Room-scale path (~2.1m total, 2 turns) - the first two runs (see
+# README's roadmap item 6) only used a short ~0.9m/1-turn path, which
+# landed within a few mm/fraction of a degree but isn't representative of
+# an actual multi-meter "return to charger" distance. This is the next
+# real data point: does drift stay that tight over a longer, more
+# realistic path, or does it get meaningfully worse.
 DRIVE_STEPS: list[tuple[float, float] | tuple[str, float]] = [
-    (300.0, 100.0),  # drive forward 300mm
-    ("turn", 90.0),  # turn 90 degrees left
-    (300.0, 100.0),  # drive forward another 300mm
+    (900.0, 100.0),   # drive forward ~0.9m
+    ("turn", 90.0),   # turn 90 degrees left
+    (700.0, 100.0),   # drive forward ~0.7m
+    ("turn", -60.0),  # turn 60 degrees right
+    (500.0, 100.0),   # drive forward ~0.5m
 ]
 
 # Matches cozmo_brain's own turn() calibration, read from the same .env so
