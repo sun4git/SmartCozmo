@@ -888,6 +888,23 @@ somewhere else (e.g. a different disk on the Pi). To pre-warm the model
 before a real test, so the first STT call isn't slowed by the download:
 `python3 -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', compute_type='int8')"`.
 
+`LOCAL_STT_MODEL` also accepts a full Hugging Face repo id directly (any
+string containing a `/`), not just the short size names above — confirmed
+against `download_model()`'s source: a `/` only changes how the repo id is
+resolved (skips the short-name lookup table, treats the value as a literal
+repo id instead), it doesn't change *where* the download goes. Same cache,
+same `HF_HOME` override, just a different subfolder name for whichever
+repo you pointed at. This makes **distil-whisper** models a drop-in,
+zero-code-change option worth trying for exactly the `tiny`/`base`-speed
+vs. `small`-accuracy trade-off: they're real CTranslate2 conversions
+published under `Systran/faster-distil-whisper-{small,medium,large-v3}.en`
+(English-only), claimed ~6x faster than the equivalent full-size Whisper
+model at roughly 1% worse WER — i.e. built specifically to close that gap:
+
+```env
+LOCAL_STT_MODEL=Systran/faster-distil-whisper-small.en
+```
+
 Chat/tool-calling (the "brain" — see [Architecture](#architecture)) has its
 own independent `CHAT_PROVIDER` setting and a matching `create_chat_client()`
 factory + `ChatClient` interface (`cozmo_brain/llm/chat_client.py`), mirroring
