@@ -22,16 +22,21 @@ against docs/client source:
   line is valid JSON on its own - see _parse_transcript(), which decodes
   each top-level object in sequence regardless of internal newlines.
 
-One anomaly seen during verification, worth knowing about rather than
-hiding: one single call (out of ~6, same audio file, immediately
-surrounding calls all correct) returned a completely unrelated transcript
-("Hey Facebook.") with no error. Not reproduced since, on either this
-client or a raw request - looked like a transient hiccup on Wit.ai's end
-(possibly a cold-start quirk on a freshly created app), not a bug here,
-but flagging it as a real, if rare, failure mode: this is speech
-recognition, not a guarantee, same as any other STT provider (see
-stt_postprocess.py's hallucination-filtering pattern already used for
-Groq/OpenAI - the same class of problem, not unique to Wit.ai).
+An anomaly seen twice during verification, worth taking seriously rather
+than dismissing as noise: 2 of ~9 test calls (different audio each time,
+immediately surrounding calls all correct) returned the exact same
+unrelated transcript, verbatim: "Hey Facebook." - not two different
+garbage strings, the identical phrase both times. That specificity points
+away from random network/audio corruption and toward something systematic
+- e.g. a low-confidence fallback baked into a fresh, completely untrained
+Wit.ai app (this app has zero custom utterances/training data), possibly
+example/demo content from Wit.ai's own default app template. Observed
+rate so far (~20%) is too high to treat as negligible. `stt_postprocess.py`
+already has a phrase-matching hallucination backstop for this exact class
+of problem, but it's scoped specifically to documented Whisper (Groq/
+OpenAI) artifacts, not this - if "Hey Facebook." keeps recurring on real
+testing, it likely deserves its own small check here rather than being
+folded into that Whisper-specific list.
 """
 
 from __future__ import annotations

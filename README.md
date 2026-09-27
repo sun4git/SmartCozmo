@@ -908,12 +908,22 @@ guessed; each object is itself pretty-printed across several lines
 `"is_final": true`). `_parse_transcript()` decodes each top-level object
 in sequence regardless of internal newlines, rather than naively
 splitting on lines (which fails on every single line, since none are
-valid JSON alone). One anomaly seen during verification, worth knowing
-about: a single call out of ~6 (same audio, surrounding calls all correct)
-returned a completely unrelated transcript with no error — not reproduced
-since, looked like a transient hiccup on Wit.ai's end, not a bug here, but
-a real (if rare) failure mode same as any STT provider can have. Worth
-weighing before committing to it either way: it's Meta's servers
+valid JSON alone). **An anomaly seen twice during verification, worth
+taking seriously rather than dismissing as noise:** 2 of ~9 test calls
+(different audio each time, surrounding calls all correct) returned the
+exact same unrelated transcript, verbatim — "Hey Facebook." — not two
+different garbage strings, the identical phrase both times. That
+specificity points away from random corruption and toward something
+systematic, e.g. a low-confidence fallback baked into a fresh, completely
+untrained Wit.ai app (possibly example/demo content from Wit.ai's own
+default app template). Observed rate so far (~20%) is too high to treat
+as negligible — worth adding a small hallucination-style filter for this
+specific phrase (see `stt_postprocess.py`'s existing Whisper-focused one,
+though this would need to be a separate check, not folded into that
+Whisper-specific list) if it keeps recurring on real testing. Latency,
+measured from a dev machine (not the Pi — real Pi numbers will differ):
+~1-2s per short utterance. Worth weighing before committing to it either
+way: it's Meta's servers
 processing the audio.
 
 `LOCAL_STT_MODEL` also accepts a full Hugging Face repo id directly (any
