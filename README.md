@@ -919,9 +919,25 @@ model); `OPENAI_CHAT_MODEL`'s default (`gpt-4o-mini`) already handles
 vision itself, so `OPENAI_VISION_MODEL` is left empty (falls back) by
 default. Same idea for Ollama — pick a vision-capable `OLLAMA_MODEL`
 directly, or set `OLLAMA_VISION_MODEL` instead if the chat model you want
-for tool-calling isn't vision-capable. The switch checks the whole
-conversation history, not just the latest turn, so once an image has been
-attached the vision model stays selected until that message ages out of
+for tool-calling isn't vision-capable.
+
+Beyond just a different *model*, `VISION_PROVIDER` can also point at a
+completely different *provider* than `CHAT_PROVIDER` — e.g.
+`CHAT_PROVIDER=ollama` with `VISION_PROVIDER=groq` keeps regular chat/
+tool-calling on Ollama but routes only image-bearing turns to Groq
+instead, in any combination of the three. Left empty (default), it falls
+back to `CHAT_PROVIDER` (same provider, just possibly a different model,
+as above). `create_chat_client()` builds one client per provider actually
+needed (same as `create_speech_client()` does for STT/TTS) and, only when
+the two providers actually differ, wraps them in a small `_ChatRouter`
+that dispatches `chat()` to whichever one the current turn needs — when
+they're the same provider, the plain client is returned directly, so
+nothing changes from before this existed.
+
+Either way — same-provider model switch or cross-provider routing — the
+decision of which to use checks the whole conversation history, not just
+the latest turn, so once an image has been attached the vision model/
+provider stays selected until that message ages out of
 `CONVERSATION_MAX_MESSAGES` — harmless since a vision-capable model still
 handles plain text/tool-calling turns fine, just not the cheapest choice
 for those turns.
@@ -1164,6 +1180,7 @@ annotated list (it's the source of truth). The essentials:
 | `OPENAI_API_KEY` | Required if `STT_PROVIDER` or `TTS_PROVIDER` is `openai`. |
 | `STT_PROVIDER` / `TTS_PROVIDER` | `groq` (default), `openai`, or `local`, set independently — which provider does STT vs. TTS; they don't have to match. |
 | `CHAT_PROVIDER` | Which provider does chat/tool-calling: `ollama` (default), `groq`, or `openai`. |
+| `VISION_PROVIDER` | Which provider handles image-bearing turns (`look`/`who_is_this`) — independent of `CHAT_PROVIDER`, e.g. `ollama` for chat + `groq` for vision. Empty = same as `CHAT_PROVIDER`. |
 | `CHAT_TIMEOUT_S` | Request timeout for `CHAT_PROVIDER`=`groq`/`openai` chat calls (Ollama has its own `OLLAMA_TIMEOUT_S`). |
 | `GROQ_CHAT_MODEL` / `OPENAI_CHAT_MODEL` | Model name for `CHAT_PROVIDER`=`groq`/`openai` — must support tool-calling. |
 | `OLLAMA_VISION_MODEL` / `GROQ_VISION_MODEL` / `OPENAI_VISION_MODEL` | Model used instead, per chat provider, on any turn with an image attached (`look`/`who_is_this`). Empty = fall back to that provider's regular chat model. |
@@ -1299,11 +1316,14 @@ Done, via `cozmo_brain/`:
   `openai_compatible_chat.py`, shared since both are the same wire format),
   including `look`/`who_is_this`'s image attachments translated to OpenAI's
   content-array format, and a per-provider `*_VISION_MODEL` override for
-  when the regular chat model isn't itself vision-capable. **Not yet
-  verified against a real Groq/OpenAI account** — implemented and
-  unit-checked directly (message translation, image mime-sniffing,
-  vision-model selection, client construction) but no live turn has
-  actually been run against either endpoint yet. See
+  when the regular chat model isn't itself vision-capable. `VISION_PROVIDER`
+  goes further — it can point image-bearing turns at an entirely different
+  *provider* than `CHAT_PROVIDER` (e.g. Ollama for chat, Groq for vision),
+  via a small `_ChatRouter` in `create_chat_client()`. **Not yet verified
+  against a real Groq/OpenAI account** — implemented and unit-checked
+  directly (message translation, image mime-sniffing, vision-model/
+  provider selection, client construction) but no live turn has actually
+  been run against either endpoint yet. See
   [Switching speech providers](#switching-speech-providers-and-separately-chat).
 - ✅ **Battery indicator** — `BatteryMonitor` shows a face icon + red backpack
   light a few seconds before Cozmo auto-powers-off. See [Battery

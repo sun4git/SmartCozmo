@@ -45,6 +45,15 @@ class Settings:
     tts_provider: str = field(default_factory=lambda: _env_str("TTS_PROVIDER", "groq"))
     chat_provider: str = field(default_factory=lambda: _env_str("CHAT_PROVIDER", "ollama"))
 
+    # Which provider handles a turn that has an image attached (`look`/
+    # `who_is_this`) — independent of CHAT_PROVIDER, so e.g.
+    # CHAT_PROVIDER=ollama + VISION_PROVIDER=groq is valid: regular
+    # chat/tool-calling stays on Ollama, only vision turns go to Groq
+    # instead. Left empty (default), it falls back to CHAT_PROVIDER — same
+    # provider for both, just possibly a different *model* within it (see
+    # GROQ_VISION_MODEL etc. below). See create_chat_client()'s _ChatRouter.
+    vision_provider: str = field(default_factory=lambda: _env_str("VISION_PROVIDER", ""))
+
     # Request timeout in seconds for GroqChatClient/OpenAIChatClient (Ollama
     # has its own OLLAMA_TIMEOUT_S below).
     chat_timeout_s: int = field(default_factory=lambda: _env_int("CHAT_TIMEOUT_S", 60))

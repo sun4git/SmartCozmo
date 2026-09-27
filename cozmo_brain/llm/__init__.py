@@ -51,8 +51,8 @@ def create_speech_client(settings: Settings) -> SpeechClient:
     return _SpeechRouter(stt_client, tts_client)
 
 
-def create_chat_client(settings: Settings) -> ChatClient:
-    provider = settings.chat_provider.lower()
+def _build_chat_provider(provider: str, settings: Settings) -> ChatClient:
+    provider = provider.lower()
 
     if provider == "ollama":
         return OllamaClient(settings)
@@ -67,7 +67,44 @@ def create_chat_client(settings: Settings) -> ChatClient:
 
         return OpenAIChatClient(settings)
 
-    raise ValueError(f"Unknown CHAT_PROVIDER '{provider}'. Use 'ollama', 'groq', or 'openai'.")
+    raise ValueError(f"Unknown provider '{provider}'. Use 'ollama', 'groq', or 'openai'.")
+
+
+class _ChatRouter:
+    """Dispatches chat() to VISION_PROVIDER's client for any turn carrying
+    an image, and to CHAT_PROVIDER's client otherwise - so the two can be
+    different providers entirely (e.g. CHAT_PROVIDER=ollama +
+    VISION_PROVIDER=groq), not just a different model within the same one
+    (each client already does that switch internally via *_VISION_MODEL -
+    see ollama_client.py/openai_compatible_chat.py - which still applies
+    when this router isn't even in play, i.e. VISION_PROVIDER == CHAT_PROVIDER)."""
+
+    def __init__(self, chat_client: ChatClient, vision_client: ChatClient):
+        self._chat_client = chat_client
+        self._vision_client = vision_client
+
+    def chat(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+    ) -> ChatResponse:
+        client = self._vision_client if any(m.get("images") for m in messages) else self._chat_client
+        return client.chat(messages, tools=tools)
+
+    def is_reachable(self) -> bool:
+        return self._chat_client.is_reachable()
+
+
+def create_chat_client(settings: Settings) -> ChatClient:
+    chat_provider = settings.chat_provider.lower()
+    vision_provider = (settings.vision_provider or settings.chat_provider).lower()
+
+    chat_client = _build_chat_provider(chat_provider, settings)
+    if vision_provider == chat_provider:
+        return chat_client
+
+    vision_client = _build_chat_provider(vision_provider, settings)
+    return _ChatRouter(chat_client, vision_client)
 
 
 __all__ = [
