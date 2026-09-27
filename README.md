@@ -917,11 +917,14 @@ different garbage strings, the identical phrase both times. That
 specificity points away from random corruption and toward something
 systematic, e.g. a low-confidence fallback baked into a fresh, completely
 untrained Wit.ai app (possibly example/demo content from Wit.ai's own
-default app template). Observed rate so far (~20%) is too high to treat
-as negligible — worth adding a small hallucination-style filter for this
-specific phrase (see `stt_postprocess.py`'s existing Whisper-focused one,
-though this would need to be a separate check, not folded into that
-Whisper-specific list) if it keeps recurring on real testing. Latency,
+default app template). **Confirmed recurring on real testing** — "hey
+facebook" is now in `stt_postprocess.py`'s known-phrase filter, which
+turned out fine to fold directly into the same list as Whisper's own
+hallucination phrases: every call site there just wants "is this text
+probably not real speech" regardless of which provider produced it, and
+each entry's own comment records which provider/mechanism it's actually
+from, so the list stays honest about provenance without needing a
+parallel function. Latency,
 measured from a dev machine (not the Pi — real Pi numbers will differ):
 ~1-2s per short utterance. Worth weighing before committing to it either
 way: it's Meta's servers
