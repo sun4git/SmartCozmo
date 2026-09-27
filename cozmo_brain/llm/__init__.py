@@ -27,7 +27,12 @@ def _build_speech_provider(provider: str, settings: Settings) -> SpeechClient:
 
         return WitAIClient(settings)
 
-    raise ValueError(f"Unknown provider '{provider}'. Use 'groq', 'openai', 'local', or 'witai'.")
+    if provider == "edge":
+        from cozmo_brain.llm.edge_client import EdgeTTSClient
+
+        return EdgeTTSClient(settings)
+
+    raise ValueError(f"Unknown provider '{provider}'. Use 'groq', 'openai', 'local', 'witai', or 'edge'.")
 
 
 class _SpeechRouter:

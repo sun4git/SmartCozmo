@@ -104,6 +104,7 @@ See [Roadmap](#roadmap--open-work) for what's still open.
     │   ├── openai_client.py     # OpenAI Whisper STT + TTS + OpenAIChatClient (STT_PROVIDER/TTS_PROVIDER/CHAT_PROVIDER=openai)
     │   ├── local_client.py      # Offline faster-whisper STT + Piper TTS (STT_PROVIDER/TTS_PROVIDER=local)
     │   ├── witai_client.py      # Wit.ai (Meta) STT only, free/no billing (STT_PROVIDER=witai)
+    │   ├── edge_client.py       # Microsoft Edge online TTS only, free/no key (TTS_PROVIDER=edge)
     │   ├── tts_postprocess.py    # shared voice character + gain, used by both providers
     │   └── stt_postprocess.py    # filters known Whisper hallucination phrases
     ├── audio/
@@ -926,6 +927,37 @@ measured from a dev machine (not the Pi — real Pi numbers will differ):
 way: it's Meta's servers
 processing the audio.
 
+A fifth option, `edge` (`TTS_PROVIDER` only — see
+`cozmo_brain/llm/edge_client.py`), uses Microsoft Edge's online TTS via the
+unofficial `edge-tts` library: free, no API key, needs internet (an
+unofficial, reverse-engineered endpoint, not a published/supported
+Microsoft product — can break if Microsoft changes something internally).
+Edge has no speech-to-text counterpart, so it can only ever be
+`TTS_PROVIDER`; setting `STT_PROVIDER=edge` raises `NotImplementedError`
+from `transcribe()` instead of silently misbehaving. `EDGE_TTS_VOICE`
+picks a stock voice (list them all with `edge-tts --list-voices`);
+`EDGE_TTS_SPEED` uses the same `>1.0`=faster direction as the other
+providers, converted to edge-tts's own signed-percentage `rate` string.
+
+**Real integration cost, not just a drop-in:** edge-tts's own service only
+ever returns MP3 — confirmed against its source (`communicate.py`): the
+output format is hardcoded to `audio-24khz-48kbitrate-mono-mp3`, not
+configurable at all. `tts_postprocess.py`'s pitch/gain/ring-mod pipeline is
+built on Python's stdlib `wave` module, which can't read MP3, so
+`edge_client.py` decodes MP3 → raw PCM → a WAV container via `PyAV` (the
+`av` package) before handing it off — same shape every other provider
+already produces. PyAV ships FFmpeg bundled in its own wheel (no system
+`ffmpeg` install needed), and is already a dependency of `faster-whisper`
+(`STT_PROVIDER=local`), so it's often already installed for free. **Verified
+directly, not assumed:** measured the decode step in isolation — ~8ms for
+a ~4.6s clip (after one-time codec init), negligible next to the ~1.1s
+network+synthesis round-trip it followed. The full pipeline (real network
+call → MP3 → PyAV decode → WAV → `tts_postprocess.py`'s resample/pitch/
+gain → file) was run end-to-end through the actual `create_speech_client()`
+factory and produced a correct, correctly-resampled WAV — not just unit
+logic. **Not yet verified on real hardware** — confirmed from a dev
+machine, not the Pi.
+
 `LOCAL_STT_MODEL` also accepts a full Hugging Face repo id directly (any
 string containing a `/`), not just the short size names above — confirmed
 against `download_model()`'s source: a `/` only changes how the repo id is
@@ -1250,7 +1282,7 @@ annotated list (it's the source of truth). The essentials:
 | `GROQ_API_KEY` | Required unless both `STT_PROVIDER` and `TTS_PROVIDER` are `openai`. Auth for Groq STT + TTS. |
 | `OPENAI_API_KEY` | Required if `STT_PROVIDER` or `TTS_PROVIDER` is `openai`. |
 | `WITAI_ACCESS_TOKEN` | Required if `STT_PROVIDER` is `witai`. Free, no billing — Wit.ai (Meta) has no TTS product, so this is STT-only. |
-| `STT_PROVIDER` / `TTS_PROVIDER` | `groq` (default), `openai`, or `local`, set independently — which provider does STT vs. TTS; they don't have to match. `STT_PROVIDER` can also be `witai`. |
+| `STT_PROVIDER` / `TTS_PROVIDER` | `groq` (default), `openai`, or `local`, set independently — which provider does STT vs. TTS; they don't have to match. `STT_PROVIDER` can also be `witai`; `TTS_PROVIDER` can also be `edge`. |
 | `CHAT_PROVIDER` | Which provider does chat/tool-calling: `ollama` (default), `groq`, or `openai`. |
 | `VISION_PROVIDER` | Which provider handles image-bearing turns (`look`/`who_is_this`) — independent of `CHAT_PROVIDER`, e.g. `ollama` for chat + `groq` for vision. Empty = same as `CHAT_PROVIDER`. |
 | `CHAT_TIMEOUT_S` | Request timeout for `CHAT_PROVIDER`=`groq`/`openai` chat calls (Ollama has its own `OLLAMA_TIMEOUT_S`). |
@@ -1267,6 +1299,8 @@ annotated list (it's the source of truth). The essentials:
 | `LOCAL_STT_MODEL` / `LOCAL_STT_DEVICE` / `LOCAL_STT_COMPUTE_TYPE` | faster-whisper model size/device/compute type (used when `STT_PROVIDER`=`local`). No key, no network after the first model download. |
 | `LOCAL_TTS_VOICE_PATH` | Path to a downloaded Piper `.onnx` voice model (used when `TTS_PROVIDER`=`local`). |
 | `LOCAL_TTS_SPEED` | Speed, same `>1.0`=faster direction as `GROQ_TTS_SPEED`/`OPENAI_TTS_SPEED` (Piper's own `length_scale` is the inverse — converted in `local_client.py`). |
+| `EDGE_TTS_VOICE` | Stock `edge-tts` voice name (used when `TTS_PROVIDER`=`edge`). List them with `edge-tts --list-voices`. |
+| `EDGE_TTS_SPEED` | Speed, same `>1.0`=faster direction as the other `*_TTS_SPEED` settings (converted to edge-tts's own signed-percentage `rate` string). |
 | `TTS_GAIN` | Max volume boost for TTS output, RMS-targeted with a soft limiter (Cozmo's speaker is quiet). |
 | `TTS_LEADIN_MS` | Silent lead-in before speech, works around the first word often being inaudible. |
 | `TTS_PITCH_SHIFT` | Pitch+tempo shift for a smaller/more childlike/robotic voice. 1.0 = off. |
@@ -1809,15 +1843,21 @@ Still open, roughly in priority order:
      was available here to benchmark on. `LOCAL_STT_MODEL`/
      `LOCAL_TTS_VOICE_PATH` are both easy to drop to a smaller/faster
      model/voice from `.env` alone once real latency is known.
-   - **No key, but still needs the internet** — not built. `edge-tts`
-     (confirmed real, maintained package): uses Microsoft Edge's own cloud
-     TTS over an unofficial, reverse-engineered API (no account, but it's
-     not a published/supported Microsoft product — it has periodically
-     broken when Microsoft changes something internally, historically
-     fixed upstream but not guaranteed). Good natural-sounding voices for
-     free, at the cost of that reliability risk and still needing a
-     network. Would fit the same `SpeechClient` interface as a fourth
-     provider if this is ever wanted.
+   - ✅ **No key, but still needs the internet — done, TTS side.**
+     `TTS_PROVIDER=edge` (`cozmo_brain/llm/edge_client.py`) uses Microsoft
+     Edge's own cloud TTS via the unofficial `edge-tts` library — no
+     account, but not a published/supported Microsoft product, so it can
+     break if Microsoft changes something internally (historically fixed
+     upstream, not guaranteed). Good natural-sounding voices for free, at
+     the cost of that reliability risk and still needing a network. See
+     [Switching speech providers](#switching-speech-providers-and-separately-chat)
+     for the real integration cost this surfaced (edge-tts only ever
+     returns MP3, decoded via `PyAV` before reaching `tts_postprocess.py`)
+     and what's actually been verified. **STT side still not built** — the
+     Wit.ai option added separately (`STT_PROVIDER=witai`) covers a
+     different trade-off (needs its own account, but no billing) rather
+     than this exact "no key, needs internet" STT combination; nothing
+     currently fills that specific gap.
 
 ---
 

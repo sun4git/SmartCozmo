@@ -150,6 +150,17 @@ class Settings:
     # inverse as "length_scale" (>1.0 = slower) - local_client.py converts.
     local_tts_speed: float = field(default_factory=lambda: _env_float("LOCAL_TTS_SPEED", 1.0))
 
+    # --- Edge TTS (used when TTS_PROVIDER=edge) ---
+    # Microsoft Edge's online TTS via the unofficial `edge-tts` library -
+    # free, no API key, needs internet. TTS only, no STT counterpart. See
+    # cozmo_brain/llm/edge_client.py.
+    edge_tts_voice: str = field(default_factory=lambda: _env_str("EDGE_TTS_VOICE", "en-US-EmmaMultilingualNeural"))
+
+    # Same >1.0=faster direction as GROQ_TTS_SPEED/OPENAI_TTS_SPEED/
+    # LOCAL_TTS_SPEED - converted to edge-tts's own signed-percentage
+    # "rate" string (e.g. "+20%") in edge_client.py.
+    edge_tts_speed: float = field(default_factory=lambda: _env_float("EDGE_TTS_SPEED", 1.0))
+
     # OpenAI's own speed control (0.25-4.0, native to their TTS API).
     # Measured directly: the default "alloy" voice speaks ~14% faster than
     # Groq's Orpheus "austin" for identical text — try ~0.85-0.90 here to

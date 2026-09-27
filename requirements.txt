@@ -37,3 +37,17 @@ pycozmo
 # <name>.onnx.json in the current directory) before LOCAL_TTS_VOICE_PATH in
 # .env can point at it:
 # python3 -m piper.download_voices en_US-lessac-medium
+
+# Only required if TTS_PROVIDER=edge in .env — Microsoft Edge's online TTS
+# via the unofficial edge-tts library: free, no API key, needs internet.
+# TTS only, no STT counterpart. See cozmo_brain/llm/edge_client.py.
+# edge-tts
+#
+# edge-tts's service only ever returns MP3 (confirmed against its source,
+# not configurable) — av (PyAV) decodes it to WAV before it reaches
+# tts_postprocess.py, which is built on Python's stdlib `wave` module and
+# can't read MP3 directly. Ships FFmpeg bundled in its own wheel (no
+# system ffmpeg install needed), and is already a dependency of
+# faster-whisper (STT_PROVIDER=local) — often already installed for free
+# if that's in use too.
+# av
