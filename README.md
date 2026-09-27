@@ -1558,7 +1558,11 @@ Done, via `cozmo_brain/`:
   observable behavior difference (tested alongside `TTS_PROVIDER=edge`,
   whose higher latency — see below — makes the default's overlap loss
   easy to notice) — which setting actually feels better is a personal/
-  use-case call, not settled here.
+  use-case call, not settled here. With `true` specifically, confirmed the
+  pause is exactly as designed: mood/face changes immediately (unaffected
+  by this setting, applied at the very top of `handle_say()` regardless),
+  while the gesture's physical movement is what actually waits for
+  synthesis to finish.
 
   **A real bug found while auditing this, before it ever shipped to real
   use:** with `GESTURE_SPEECH_SYNC_ENABLED=true`, the gesture start was
