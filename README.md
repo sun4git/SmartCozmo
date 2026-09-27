@@ -2045,14 +2045,38 @@ Still open, roughly in priority order:
      independently-verified runs now support the same conclusion: dead-
      reckoning + this heading correction gets Cozmo back within single-
      digit millimeters and well under a degree over a real room-scale path.
-   - **Remaining open question:** whether this ~3-4.5% position drift
-     holds up over an even longer path (a real cross-room return could
-     exceed 2.1m), and whether it's tight enough on its own to hand off
-     directly to `dock()`, or still needs a vision-loop correction step
-     (reusing the existing `look()` + vision-capable-chat pipeline, no new
-     PyCozmo capability needed) for final fine alignment first — though
-     given how tight both runs landed, the vision-loop may end up being a
-     rarely-needed safety net rather than doing most of the work.
+   - ✅ **Third run, desk-scale and turn-heavy — same conclusion via a
+     different, arguably harder path.** Cozmo mostly stays on a desk in
+     actual use, not crossing a room, so this tested the opposite shape of
+     stress: `~800mm` total across 4 tighter turns (90°/−120°/45°/−90°)
+     instead of a long path with only 2. **Outbound-leg drift was
+     proportionally *worse* here — `~63mm` over `~800mm` (`~7.9%`),
+     notably higher than the room-scale runs' `~3-4.5%`** — confirming
+     that more turns over a shorter distance really is a harder test for
+     accumulated heading error, exactly as expected (each turn is its own
+     source of calibration error, and a shorter path has less distance to
+     "dilute" that error across proportionally). **But the return accuracy
+     was the best of all three runs regardless: `~0.5mm` position error
+     and `~0.1°` heading error.** This isn't a contradiction — `go_to_pose()`
+     doesn't retrace or care about the outbound path's drift at all, it
+     just drives directly from wherever `cli.pose` currently believes
+     Cozmo is, back to the recorded target. What actually matters for a
+     real return-to-charger feature isn't how messy the outbound wandering
+     was, only whether `cli.pose` keeps an accurate *current* estimate
+     regardless of path — which it does, confirmed across three
+     meaningfully different paths now (2-turn room-scale ×2, 4-turn
+     desk-scale ×1), all landing within a few mm and well under a degree.
+   - **Remaining open question:** whether this holds up over an even
+     longer, more convoluted path than any tested so far (a real
+     multi-minute desk-interaction session could involve dozens of turns,
+     not just 2-4 — cumulative pose-tracking error could plausibly behave
+     differently at that scale, not just proportionally), and whether
+     accuracy this tight is enough to hand off directly to `dock()`, or
+     still needs a vision-loop correction step (reusing the existing
+     `look()` + vision-capable-chat pipeline, no new PyCozmo capability
+     needed) for final fine alignment first — though given how tight all
+     three runs landed, the vision-loop may end up being a rarely-needed
+     safety net rather than doing most of the work.
    - **PyCozmo has no built-in charger/marker vision at all — confirmed
      absent, not just unused.** The charger has a printed visual marker
      (same mechanism as the light cubes, confirmed via the official Anki
