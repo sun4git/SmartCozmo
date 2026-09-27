@@ -105,8 +105,8 @@ See [Roadmap](#roadmap--open-work) for what's still open.
     │   ├── local_client.py      # Offline faster-whisper STT + Piper TTS (STT_PROVIDER/TTS_PROVIDER=local)
     │   ├── witai_client.py      # Wit.ai (Meta) STT only, free/no billing (STT_PROVIDER=witai)
     │   ├── edge_client.py       # Microsoft Edge online TTS only, free/no key (TTS_PROVIDER=edge)
-    │   ├── tts_postprocess.py    # shared voice character + gain, used by both providers
-    │   └── stt_postprocess.py    # filters known Whisper hallucination phrases
+    │   ├── tts_postprocess.py    # shared voice character + gain, used by every TTS provider
+    │   └── stt_postprocess.py    # filters known STT hallucination/fallback phrases (Whisper + Wit.ai)
     ├── audio/
     │   ├── recorder.py        # fixed-length arecord capture (push-to-talk)
     │   ├── vad.py              # webrtcvad-based hands-free capture
