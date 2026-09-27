@@ -23,11 +23,21 @@ Protocol:
 4. You physically measure where Cozmo actually is/facing and compare
    against step 3's numbers - tells you whether wheel-odometry pose
    tracking itself is accurate.
-5. Command `go_to_pose()` back to the exact starting pose.
-6. You physically measure how close he actually lands to the real start
-   mark/heading - this is the number that decides whether dead-reckoning
-   alone is tight enough to build a "return to charger" behavior on top
-   of, or whether it needs vision-loop correction too.
+5. Command `go_to_pose()` back to the exact starting pose, then measure
+   position accuracy.
+6. Correct heading ourselves: confirmed directly on real hardware that
+   go_to_pose()'s point-turn segment doesn't actually rotate Cozmo to the
+   target heading at all - the line segment drives to position and just
+   ends up facing whichever way it drove, then nothing further happens.
+   cli.pose's own heading readback does track physical reality correctly
+   though, so this reads it back, computes the delta to the desired
+   heading, and issues our own already-calibrated turn() for it instead
+   of trusting go_to_pose()'s built-in turn.
+7. You physically measure how close he actually lands to the real start
+   mark/heading after the correction - this is the number that decides
+   whether dead-reckoning (+ this correction) is tight enough to build a
+   "return to charger" behavior on top of, or whether it needs vision-loop
+   correction too.
 
 Usage: python3 pose_drift_test.py
 (Same cozmo-env setup as orchestrator.py - this only talks to the robot
@@ -117,8 +127,30 @@ def main() -> None:
         print_pose(cli, "After go_to_pose() back to start")
         print(
             "\nNow physically measure how close Cozmo actually landed to the real "
-            "starting mark, and how far off his heading is - this is the number that "
-            "decides whether dead-reckoning is tight enough on its own.\n"
+            "starting mark - go_to_pose()'s position accuracy is what this checks.\n"
+        )
+
+        # Confirmed directly on real hardware: go_to_pose()'s AppendPathSegPointTurn
+        # segment doesn't actually rotate Cozmo to the target heading - the line
+        # segment drives to position and naturally ends up facing whichever way it
+        # just drove (that's inherent to driving a straight line, not a commanded
+        # turn), and nothing further happens after it stops. cli.pose's own heading
+        # *readback* does track physical reality correctly though (confirmed
+        # separately by comparing it against the line segment's own direction of
+        # travel) - so use it as a trustworthy feedback signal instead of trusting
+        # go_to_pose()'s built-in point-turn: read the actual heading back, compute
+        # the delta to the desired heading ourselves, and issue our own
+        # already-calibrated turn_in_place() for it.
+        target_heading_deg = 0.0
+        current_heading_deg = cli.pose.rotation.angle_z.degrees
+        heading_error_deg = (target_heading_deg - current_heading_deg + 180) % 360 - 180
+        print(f"Heading error after go_to_pose(): {heading_error_deg:.1f}deg - correcting with our own turn()...")
+        turn_in_place(cli, heading_error_deg)
+        print_pose(cli, "After corrective turn")
+        print(
+            "\nNow physically measure how far off his heading still is - this checks "
+            "whether the corrective turn actually worked, and whether dead-reckoning "
+            "position + this correction is tight enough on its own.\n"
         )
 
 
