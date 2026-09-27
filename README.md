@@ -1399,7 +1399,33 @@ Done, via `cozmo_brain/`:
 
 - ✅ **Conversation memory** — `Conversation` class, trimmed + persisted to disk.
 - ✅ **Real animation API** — `play_animation`/`list_animations` tools.
-- ✅ **`turn()` calibration** — `--mode calibrate`.
+- ✅ **`turn()` calibration** — `--mode calibrate`, offering a choice of two
+  checks. The original (spin the wheels for a fixed 2s, estimate the
+  resulting angle, derive `TURN_SECONDS_PER_DEGREE` from scratch) is good
+  for an initial calibration, but extrapolates a single linear rate from
+  a short sample to any commanded turn — **confirmed on real hardware**
+  that this can be noticeably off for a much longer commanded turn (e.g.
+  `gestures.py`'s `spin`, a full 360°, ~4x longer than the 2s sample the
+  rate was derived from) even when smaller turns feel fine: a small
+  estimation error at the 2s scale gets linearly amplified by however much
+  longer the real commanded turn is — a plausible root cause for an
+  observed ~65°-out-of-360° spin overshoot. Added a second check instead
+  of just recalibrating more carefully at the same scale: it turns a real
+  360° through the actual `turn()` method (using whatever rate is
+  currently configured) and asks how far short of or past the *starting
+  mark* it landed, rather than estimating an abstract angle from scratch
+  — comparing an end point to a visible start point is both easier and
+  more precise for a person to judge, and it measures `turn()` at the same
+  scale `spin` actually uses it at. Corrects the existing rate
+  proportionally (assumes a linear duration-to-angle relationship near the
+  current rate, same assumption the original check already makes, not a
+  fixed-offset overshoot independent of commanded duration) rather than
+  deriving one from zero, so it's meant to run after some baseline value
+  already exists. **Verified as control-flow and correction-math logic
+  only** (scripted tests against the simulated backend confirm both
+  checks' math and that "short"/"past"/"exact" all produce the expected
+  corrected value) — not yet confirmed this actually fixes the real
+  overshoot on hardware.
 - ✅ **Voice activity detection** — `--mode vad` (`webrtcvad`), gated by a
   zero-network on-device wake word (`openwakeword`, see [Wake word
   detection](#wake-word-detection-zero-network) below).
