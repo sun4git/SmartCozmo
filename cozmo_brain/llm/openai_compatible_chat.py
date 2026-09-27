@@ -7,19 +7,17 @@ differ. Used by GroqChatClient (groq_client.py) and OpenAIChatClient
 Translates cozmo_brain's internal message shape - Ollama's own /api/chat
 conventions, since that's the format Conversation/engine.py build (see
 conversation.py) - into what OpenAI-compatible endpoints strictly require:
-"tool" messages keyed by tool_call_id (not name), and tool_calls with a
-JSON-*string*-encoded arguments field (not a dict). Getting this wrong
-doesn't degrade gracefully - both providers reject the request outright
-with a 400 on the very first tool-calling turn. See _to_wire_messages().
-
-Known gap: vision (the `look` tool's photo) isn't translated here - Ollama's
-"images" message field is silently dropped rather than converted to
-OpenAI's content-array image format, so vision-in-chat only works with
-CHAT_PROVIDER=ollama today.
+"tool" messages keyed by tool_call_id (not name), tool_calls with a
+JSON-*string*-encoded arguments field (not a dict), and image attachments
+as a content-array "image_url" part (not Ollama's own top-level "images"
+list of bare base64 strings). Getting the first two wrong doesn't degrade
+gracefully - both providers reject the request outright with a 400 on the
+very first tool-calling turn. See _to_wire_messages().
 """
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 from typing import Any
@@ -29,6 +27,20 @@ import requests
 from cozmo_brain.llm.ollama_client import ChatResponse, ToolCall
 
 logger = logging.getLogger(__name__)
+
+
+def _sniff_image_mime(raw: bytes) -> str:
+    """Detect the real format from the image's own magic bytes rather than
+    trusting a file extension - `who_is_this` compares a `look`-captured
+    PNG (camera_snapshot_path) against `remember_person`-saved *.jpg
+    reference photos in the same call, so a single hardcoded mime type
+    would be wrong for one side of that comparison."""
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if raw.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    logger.warning("Unrecognized image format (first bytes: %r), assuming JPEG.", raw[:8])
+    return "image/jpeg"
 
 
 def _to_wire_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -44,7 +56,18 @@ def _to_wire_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             )
             continue
 
-        out: dict[str, Any] = {"role": msg["role"], "content": msg.get("content", "")}
+        images = msg.get("images")
+        if images:
+            content: list[dict[str, Any]] = []
+            text = msg.get("content", "")
+            if text:
+                content.append({"type": "text", "text": text})
+            for b64 in images:
+                mime = _sniff_image_mime(base64.b64decode(b64))
+                content.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}})
+            out: dict[str, Any] = {"role": msg["role"], "content": content}
+        else:
+            out = {"role": msg["role"], "content": msg.get("content", "")}
 
         tool_calls = msg.get("tool_calls")
         if tool_calls:
@@ -68,10 +91,11 @@ class OpenAICompatibleChatClient:
     """Talks to an OpenAI-compatible /chat/completions endpoint with
     tool-calling. Model must support tools to get tool_calls back."""
 
-    def __init__(self, base_url: str, api_key: str, model: str, timeout_s: int):
+    def __init__(self, base_url: str, api_key: str, model: str, vision_model: str, timeout_s: int):
         self._base_url = base_url
         self._headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         self._model = model
+        self._vision_model = vision_model
         self._timeout_s = timeout_s
         self._session = requests.Session()
 
@@ -80,8 +104,14 @@ class OpenAICompatibleChatClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
     ) -> ChatResponse:
+        # Switch to the vision model for any turn carrying an image - checks
+        # the whole history, not just the latest message, so it stays
+        # selected until an old image-bearing turn ages out of the trimmed
+        # history (see OllamaClient.chat()'s identical logic/rationale).
+        model = self._vision_model if any(m.get("images") for m in messages) else self._model
+
         payload: dict[str, Any] = {
-            "model": self._model,
+            "model": model,
             "messages": _to_wire_messages(messages),
         }
         if tools:

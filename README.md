@@ -98,7 +98,7 @@ See [Roadmap](#roadmap--open-work) for what's still open.
     ├── llm/
     │   ├── ollama_client.py   # /api/chat wrapper with tool-calling
     │   ├── chat_client.py      # ChatClient interface (CHAT_PROVIDER=ollama/groq/openai)
-    │   ├── openai_compatible_chat.py  # Shared chat-completions impl for GroqChatClient/OpenAIChatClient
+    │   ├── openai_compatible_chat.py  # Shared chat-completions impl for GroqChatClient/OpenAIChatClient (tool-calling + vision wire translation)
     │   ├── speech_client.py    # SpeechClient interface shared by every STT/TTS provider
     │   ├── groq_client.py       # Groq Whisper STT + Orpheus TTS + GroqChatClient
     │   ├── openai_client.py     # OpenAI Whisper STT + TTS + OpenAIChatClient (STT_PROVIDER/TTS_PROVIDER/CHAT_PROVIDER=openai)
@@ -898,17 +898,41 @@ by `OllamaClient` too, if Ollama's own response didn't include one) so
 `engine.py`/`conversation.py` can thread it through without needing to know
 which provider is actually active.
 
-**Not yet verified against a real Groq/OpenAI account** — the message
-translation was unit-checked directly (round-tripped a sample tool-call
-exchange through `_to_wire_messages()` and confirmed the exact wire shape),
-and client construction was checked against the real `.env` keys, but no
-live tool-calling turn has been run against either endpoint yet.
+**Vision is translated too:** `_to_wire_messages()` converts Ollama's own
+`"images"` message field (a plain list of base64 strings, used by both
+`look`'s vision-in-the-loop attachment and `who_is_this`'s direct
+`ollama.chat(...)` face-comparison call) into OpenAI's content-array
+`image_url` format, sniffing the real image format from its magic bytes
+rather than trusting a file extension — `who_is_this` compares a
+`look`-captured PNG against `remember_person`-saved `.jpg` reference
+photos in the same call, so a single hardcoded mime type would be wrong
+for one side of that comparison.
 
-**Known gap:** vision (the `look` tool's photo, sent to Ollama via its own
-`"images"` message field) isn't translated to OpenAI's content-array image
-format — `_to_wire_messages()` silently drops it. `CHAT_PROVIDER=groq`/
-`openai` will work for text + tool-calling, but `look` won't get the model
-an actual photo to describe until this gap is closed.
+Each chat provider also gets its own vision-model override —
+`OLLAMA_VISION_MODEL` / `GROQ_VISION_MODEL` / `OPENAI_VISION_MODEL` —
+used instead of the regular chat model on any turn that actually carries
+an image. This matters because a provider's default chat model isn't
+necessarily vision-capable: `GROQ_CHAT_MODEL`'s default
+(`llama-3.3-70b-versatile`) isn't, so `GROQ_VISION_MODEL` has its own real
+default (`qwen/qwen3.8-27b`, currently Groq's vision + tool-calling
+model); `OPENAI_CHAT_MODEL`'s default (`gpt-4o-mini`) already handles
+vision itself, so `OPENAI_VISION_MODEL` is left empty (falls back) by
+default. Same idea for Ollama — pick a vision-capable `OLLAMA_MODEL`
+directly, or set `OLLAMA_VISION_MODEL` instead if the chat model you want
+for tool-calling isn't vision-capable. The switch checks the whole
+conversation history, not just the latest turn, so once an image has been
+attached the vision model stays selected until that message ages out of
+`CONVERSATION_MAX_MESSAGES` — harmless since a vision-capable model still
+handles plain text/tool-calling turns fine, just not the cheapest choice
+for those turns.
+
+**Not yet verified against a real Groq/OpenAI account** — both the
+tool-calling and vision message translation were unit-checked directly
+(round-tripped sample exchanges through `_to_wire_messages()`, confirmed
+image mime-sniffing against real PNG/JPEG magic bytes, and confirmed the
+vision-model switch picks correctly), and client construction was checked
+against the real `.env` keys, but no live turn has actually been run
+against either endpoint yet.
 
 Model and voice names are **not interchangeable between providers** —
 Groq's Orpheus voices (`austin`, `troy`, ...) don't exist on OpenAI, and
@@ -1142,8 +1166,9 @@ annotated list (it's the source of truth). The essentials:
 | `CHAT_PROVIDER` | Which provider does chat/tool-calling: `ollama` (default), `groq`, or `openai`. |
 | `CHAT_TIMEOUT_S` | Request timeout for `CHAT_PROVIDER`=`groq`/`openai` chat calls (Ollama has its own `OLLAMA_TIMEOUT_S`). |
 | `GROQ_CHAT_MODEL` / `OPENAI_CHAT_MODEL` | Model name for `CHAT_PROVIDER`=`groq`/`openai` — must support tool-calling. |
+| `OLLAMA_VISION_MODEL` / `GROQ_VISION_MODEL` / `OPENAI_VISION_MODEL` | Model used instead, per chat provider, on any turn with an image attached (`look`/`who_is_this`). Empty = fall back to that provider's regular chat model. |
 | `OLLAMA_BASE_URL` | Ollama endpoint chat/tool-calling requests go to. |
-| `OLLAMA_MODEL` | Model name; must support `tools` (and ideally `vision` for `look`). |
+| `OLLAMA_MODEL` | Model name; must support `tools`. Doesn't need `vision` too unless `OLLAMA_VISION_MODEL` is left empty. |
 | `RECORD_SECONDS` / `RECORD_DEVICE` | Push-to-talk recording length and ALSA/PipeWire device. |
 | `AUDIO_OUTPUT` / `PLAYBACK_DEVICE` | Route speech to `cozmo` (default), `system` speaker, or `both` at once. |
 | `GROQ_STT_MODEL` / `GROQ_TTS_MODEL` / `GROQ_TTS_VOICE` | Groq model/voice choices (used when `STT_PROVIDER`/`TTS_PROVIDER`=`groq`). |
@@ -1268,15 +1293,17 @@ Done, via `cozmo_brain/`:
   independently to `groq` or `openai` in `.env`, for when Groq's free-tier
   rate limits get hit (which they did, during actual use), or to mix
   providers per component. See [Switching speech providers](#switching-speech-providers-and-separately-chat).
-- ✅ **Chat provider flexibility** — `CHAT_PROVIDER=groq`/`openai` as an
-  alternative to `ollama`, via `GroqChatClient`/`OpenAIChatClient`
-  (`OpenAICompatibleChatClient` in `openai_compatible_chat.py`, shared
-  since both are the same wire format). **Not yet verified against a real
-  Groq/OpenAI account** — implemented and unit-checked (message
-  translation, client construction) but no live tool-calling turn has
-  actually been run against either endpoint yet. **Known gap:** vision
-  (the `look` tool's photo) still only works with `CHAT_PROVIDER=ollama` —
-  the image-attachment format isn't translated for the other two. See
+- ✅ **Chat provider flexibility, including vision** — `CHAT_PROVIDER=groq`/
+  `openai` as an alternative to `ollama`, via `GroqChatClient`/
+  `OpenAIChatClient` (`OpenAICompatibleChatClient` in
+  `openai_compatible_chat.py`, shared since both are the same wire format),
+  including `look`/`who_is_this`'s image attachments translated to OpenAI's
+  content-array format, and a per-provider `*_VISION_MODEL` override for
+  when the regular chat model isn't itself vision-capable. **Not yet
+  verified against a real Groq/OpenAI account** — implemented and
+  unit-checked directly (message translation, image mime-sniffing,
+  vision-model selection, client construction) but no live turn has
+  actually been run against either endpoint yet. See
   [Switching speech providers](#switching-speech-providers-and-separately-chat).
 - ✅ **Battery indicator** — `BatteryMonitor` shows a face icon + red backpack
   light a few seconds before Cozmo auto-powers-off. See [Battery

@@ -68,5 +68,6 @@ class GroqChatClient(OpenAICompatibleChatClient):
             base_url=_CHAT_BASE_URL,
             api_key=settings.require_groq_key(),
             model=settings.groq_chat_model,
+            vision_model=settings.groq_vision_model or settings.groq_chat_model,
             timeout_s=settings.chat_timeout_s,
         )

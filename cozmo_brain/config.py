@@ -56,6 +56,20 @@ class Settings:
     groq_chat_model: str = field(default_factory=lambda: _env_str("GROQ_CHAT_MODEL", "llama-3.3-70b-versatile"))
     openai_chat_model: str = field(default_factory=lambda: _env_str("OPENAI_CHAT_MODEL", "gpt-4o-mini"))
 
+    # Model used instead, for whichever CHAT_PROVIDER is active, on any turn
+    # that has an image attached (the `look`/`who_is_this` tools) — only
+    # matters when the regular chat model above isn't itself vision-capable.
+    # Left empty, each falls back to its own chat model above.
+    # GROQ_CHAT_MODEL's default (llama-3.3-70b-versatile) is NOT
+    # vision-capable, so GROQ_VISION_MODEL needs its own real default;
+    # OPENAI_CHAT_MODEL's default (gpt-4o-mini) already handles vision
+    # itself, so OPENAI_VISION_MODEL is left empty (falls back) by default.
+    # Same for OLLAMA_MODEL — pick a vision-capable one there directly if
+    # it doesn't already support vision, or set OLLAMA_VISION_MODEL instead.
+    ollama_vision_model: str = field(default_factory=lambda: _env_str("OLLAMA_VISION_MODEL", ""))
+    groq_vision_model: str = field(default_factory=lambda: _env_str("GROQ_VISION_MODEL", "qwen/qwen3.8-27b"))
+    openai_vision_model: str = field(default_factory=lambda: _env_str("OPENAI_VISION_MODEL", ""))
+
     # --- Ollama (tool-calling LLM) ---
     ollama_base_url: str = field(default_factory=lambda: _env_str("OLLAMA_BASE_URL", "http://192.168.1.200:41438"))
     ollama_model: str = field(default_factory=lambda: _env_str("OLLAMA_MODEL", "gemma4:31b-cloud"))

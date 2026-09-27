@@ -85,5 +85,6 @@ class OpenAIChatClient(OpenAICompatibleChatClient):
             base_url=_CHAT_BASE_URL,
             api_key=settings.require_openai_key(),
             model=settings.openai_chat_model,
+            vision_model=settings.openai_vision_model or settings.openai_chat_model,
             timeout_s=settings.chat_timeout_s,
         )

@@ -45,8 +45,18 @@ class OllamaClient:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
     ) -> ChatResponse:
+        # Switch to OLLAMA_VISION_MODEL (if set) for any turn carrying an
+        # image - matters for backends whose regular OLLAMA_MODEL doesn't
+        # itself support vision. Checks the whole history, not just the
+        # latest message, so a vision model stays selected until an old
+        # image-bearing turn ages out of the trimmed history - acceptable
+        # since a vision-capable model still handles plain text/tools fine.
+        model = self._settings.ollama_model
+        if any(m.get("images") for m in messages):
+            model = self._settings.ollama_vision_model or self._settings.ollama_model
+
         payload: dict[str, Any] = {
-            "model": self._settings.ollama_model,
+            "model": model,
             "messages": messages,
             "stream": False,
         }
