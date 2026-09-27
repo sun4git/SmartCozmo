@@ -897,19 +897,24 @@ but it needs its own account and `WITAI_ACCESS_TOKEN` (get one at
 app, then Settings → API Details → Server Access Token). Wit.ai has no
 text-to-speech product at all, so it can only ever be `STT_PROVIDER`;
 setting `TTS_PROVIDER=witai` raises `NotImplementedError` from
-`synthesize()` instead of silently misbehaving. **Not independently
-verified against a real account/token yet** — the request shape
-(`POST https://api.wit.ai/dictation`, `Authorization: Bearer`, a dated
-`Accept: application/vnd.wit.<version>+json` header) is confirmed against
-Wit.ai's own official Python client (`wit-ai/pywit`) source, since Wit.ai's
-own docs site is a JS-rendered app that returned no usable content when
-fetched while writing this — but the exact `Content-Type` for a plain WAV
-file (`audio/wav`, matching community usage and Cozmo's own recorder
-output) and whether responses can arrive as multiple newline-delimited
-JSON objects (partial-then-final) rather than one JSON blob are both
-unconfirmed assumptions, parsed defensively either way in
-`_parse_transcript()`. Worth weighing before committing to it: it's Meta's
-servers processing the audio.
+`synthesize()` instead of silently misbehaving.
+
+**Verified directly against a real account/token** (a synthesized test
+WAV, transcribed accurately): `Content-Type: audio/wav` for a plain WAV
+file is correct, and the response really is multiple JSON objects
+concatenated in one body — but NOT one-object-per-line NDJSON as first
+guessed; each object is itself pretty-printed across several lines
+(partial transcriptions building up word-by-word, ending in one marked
+`"is_final": true`). `_parse_transcript()` decodes each top-level object
+in sequence regardless of internal newlines, rather than naively
+splitting on lines (which fails on every single line, since none are
+valid JSON alone). One anomaly seen during verification, worth knowing
+about: a single call out of ~6 (same audio, surrounding calls all correct)
+returned a completely unrelated transcript with no error — not reproduced
+since, looked like a transient hiccup on Wit.ai's end, not a bug here, but
+a real (if rare) failure mode same as any STT provider can have. Worth
+weighing before committing to it either way: it's Meta's servers
+processing the audio.
 
 `LOCAL_STT_MODEL` also accepts a full Hugging Face repo id directly (any
 string containing a `/`), not just the short size names above — confirmed
