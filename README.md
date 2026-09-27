@@ -1553,13 +1553,11 @@ Done, via `cozmo_brain/`:
   scoped to `say()`'s own mood argument, not `apply_mood()` itself: a
   gesture's own internal mood steps still work exactly as before, since
   those sequences already choreograph their own lift movements
-  deliberately. **Verified against the simulated backend only so far**
-  (confirms `set_lift_height_mm()` then `lower_lift_fully()` fire in that
-  order for `happy`/`excited`, and neither an extra nor a missing call for
-  moods that already set `lower_lift=True`) — not yet confirmed on real
-  hardware that this actually reads right (raised pose visible for the
-  whole reply, arm down right after) rather than looking abrupt or racing
-  a bundled gesture's own lift steps.
+  deliberately. **Confirmed on real hardware:** the lift now visibly comes
+  back down after a `happy`-style reply, matching the simulated-backend
+  check (`set_lift_height_mm()` then `lower_lift_fully()` fire in that
+  order, with neither an extra nor a missing call for moods that already
+  set `lower_lift=True`).
 
   **Raised directly, a real gap in the "guaranteed by construction" claim
   above:** the guarantee is about *start order* only (gesture starts,
