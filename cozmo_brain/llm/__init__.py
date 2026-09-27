@@ -22,7 +22,12 @@ def _build_speech_provider(provider: str, settings: Settings) -> SpeechClient:
 
         return LocalClient(settings)
 
-    raise ValueError(f"Unknown provider '{provider}'. Use 'groq', 'openai', or 'local'.")
+    if provider == "witai":
+        from cozmo_brain.llm.witai_client import WitAIClient
+
+        return WitAIClient(settings)
+
+    raise ValueError(f"Unknown provider '{provider}'. Use 'groq', 'openai', 'local', or 'witai'.")
 
 
 class _SpeechRouter:

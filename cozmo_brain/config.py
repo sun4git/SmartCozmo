@@ -35,12 +35,16 @@ class Settings:
     groq_api_key: str = field(default_factory=lambda: os.environ.get("GROQ_API_KEY", ""))
     openai_api_key: str = field(default_factory=lambda: os.environ.get("OPENAI_API_KEY", ""))
 
+    # Wit.ai (Meta) Server Access Token - free, no billing, STT only (no
+    # TTS product exists). See cozmo_brain/llm/witai_client.py.
+    witai_access_token: str = field(default_factory=lambda: os.environ.get("WITAI_ACCESS_TOKEN", ""))
+
     # Which provider does STT, TTS, and chat/tool-calling — each is
     # independently configurable, so e.g. STT_PROVIDER=groq + TTS_PROVIDER=openai
-    # is valid. "groq" (default), "openai", or "local" (fully offline, no API
-    # key — see the Local STT/TTS section below) for STT/TTS; "ollama"
-    # (default), "groq", or "openai" for chat. See
-    # cozmo_brain/llm/__init__.py's create_speech_client() / create_chat_client().
+    # is valid. "groq" (default), "openai", "local" (fully offline, no API
+    # key — see the Local STT/TTS section below), or "witai" (STT only, see
+    # above) for STT/TTS; "ollama" (default), "groq", or "openai" for chat.
+    # See cozmo_brain/llm/__init__.py's create_speech_client() / create_chat_client().
     stt_provider: str = field(default_factory=lambda: _env_str("STT_PROVIDER", "groq"))
     tts_provider: str = field(default_factory=lambda: _env_str("TTS_PROVIDER", "groq"))
     chat_provider: str = field(default_factory=lambda: _env_str("CHAT_PROVIDER", "ollama"))
@@ -352,6 +356,15 @@ class Settings:
                 "TTS_PROVIDER is 'openai'). Add it to .env."
             )
         return self.openai_api_key
+
+    def require_witai_key(self) -> str:
+        if not self.witai_access_token:
+            raise RuntimeError(
+                "WITAI_ACCESS_TOKEN is not set (needed because STT_PROVIDER is "
+                "'witai'). Get one free at wit.ai (Settings -> API Details -> "
+                "Server Access Token) and add it to .env."
+            )
+        return self.witai_access_token
 
 
 settings = Settings()

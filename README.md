@@ -103,6 +103,7 @@ See [Roadmap](#roadmap--open-work) for what's still open.
     │   ├── groq_client.py       # Groq Whisper STT + Orpheus TTS + GroqChatClient
     │   ├── openai_client.py     # OpenAI Whisper STT + TTS + OpenAIChatClient (STT_PROVIDER/TTS_PROVIDER/CHAT_PROVIDER=openai)
     │   ├── local_client.py      # Offline faster-whisper STT + Piper TTS (STT_PROVIDER/TTS_PROVIDER=local)
+    │   ├── witai_client.py      # Wit.ai (Meta) STT only, free/no billing (STT_PROVIDER=witai)
     │   ├── tts_postprocess.py    # shared voice character + gain, used by both providers
     │   └── stt_postprocess.py    # filters known Whisper hallucination phrases
     ├── audio/
@@ -889,6 +890,27 @@ somewhere else (e.g. a different disk on the Pi). To pre-warm the model
 before a real test, so the first STT call isn't slowed by the download:
 `python3 -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', compute_type='int8')"`.
 
+A fourth option, `witai` (`STT_PROVIDER` only — see
+`cozmo_brain/llm/witai_client.py`), uses Wit.ai (Meta): free, no billing,
+but it needs its own account and `WITAI_ACCESS_TOKEN` (get one at
+[wit.ai](https://wit.ai) — log in with a Facebook/Meta account, create an
+app, then Settings → API Details → Server Access Token). Wit.ai has no
+text-to-speech product at all, so it can only ever be `STT_PROVIDER`;
+setting `TTS_PROVIDER=witai` raises `NotImplementedError` from
+`synthesize()` instead of silently misbehaving. **Not independently
+verified against a real account/token yet** — the request shape
+(`POST https://api.wit.ai/dictation`, `Authorization: Bearer`, a dated
+`Accept: application/vnd.wit.<version>+json` header) is confirmed against
+Wit.ai's own official Python client (`wit-ai/pywit`) source, since Wit.ai's
+own docs site is a JS-rendered app that returned no usable content when
+fetched while writing this — but the exact `Content-Type` for a plain WAV
+file (`audio/wav`, matching community usage and Cozmo's own recorder
+output) and whether responses can arrive as multiple newline-delimited
+JSON objects (partial-then-final) rather than one JSON blob are both
+unconfirmed assumptions, parsed defensively either way in
+`_parse_transcript()`. Worth weighing before committing to it: it's Meta's
+servers processing the audio.
+
 `LOCAL_STT_MODEL` also accepts a full Hugging Face repo id directly (any
 string containing a `/`), not just the short size names above — confirmed
 against `download_model()`'s source: a `/` only changes how the repo id is
@@ -1212,7 +1234,8 @@ annotated list (it's the source of truth). The essentials:
 |---|---|
 | `GROQ_API_KEY` | Required unless both `STT_PROVIDER` and `TTS_PROVIDER` are `openai`. Auth for Groq STT + TTS. |
 | `OPENAI_API_KEY` | Required if `STT_PROVIDER` or `TTS_PROVIDER` is `openai`. |
-| `STT_PROVIDER` / `TTS_PROVIDER` | `groq` (default), `openai`, or `local`, set independently — which provider does STT vs. TTS; they don't have to match. |
+| `WITAI_ACCESS_TOKEN` | Required if `STT_PROVIDER` is `witai`. Free, no billing — Wit.ai (Meta) has no TTS product, so this is STT-only. |
+| `STT_PROVIDER` / `TTS_PROVIDER` | `groq` (default), `openai`, or `local`, set independently — which provider does STT vs. TTS; they don't have to match. `STT_PROVIDER` can also be `witai`. |
 | `CHAT_PROVIDER` | Which provider does chat/tool-calling: `ollama` (default), `groq`, or `openai`. |
 | `VISION_PROVIDER` | Which provider handles image-bearing turns (`look`/`who_is_this`) — independent of `CHAT_PROVIDER`, e.g. `ollama` for chat + `groq` for vision. Empty = same as `CHAT_PROVIDER`. |
 | `CHAT_TIMEOUT_S` | Request timeout for `CHAT_PROVIDER`=`groq`/`openai` chat calls (Ollama has its own `OLLAMA_TIMEOUT_S`). |
