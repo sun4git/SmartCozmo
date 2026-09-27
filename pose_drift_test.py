@@ -66,18 +66,25 @@ load_dotenv()
 # own turn() convention). Kept as a plain, hand-edited list rather than a
 # CLI - this is meant to be tweaked per test run, not a polished tool.
 #
-# Room-scale path (~2.1m total, 2 turns) - the first two runs (see
-# README's roadmap item 6) only used a short ~0.9m/1-turn path, which
-# landed within a few mm/fraction of a degree but isn't representative of
-# an actual multi-meter "return to charger" distance. This is the next
-# real data point: does drift stay that tight over a longer, more
-# realistic path, or does it get meaningfully worse.
+# Desk-scale, turn-heavy path (~800mm total, 4 tighter turns) - two
+# room-scale runs already confirmed dead-reckoning is tight over a longer
+# ~2.1m/2-turn path (see README's roadmap item 6), but Cozmo mostly stays
+# on a desk in actual use, not crossing a room - a smaller area with more
+# frequent, tighter maneuvering. More turns over a *shorter* total distance
+# is actually a different (and in one way harder) stress test: each turn
+# is its own source of calibration error, so this checks whether
+# accumulated *heading* drift becomes the bigger problem here, even though
+# total distance traveled is much smaller than the room-scale test.
 DRIVE_STEPS: list[tuple[float, float] | tuple[str, float]] = [
-    (900.0, 100.0),   # drive forward ~0.9m
+    (200.0, 80.0),    # drive forward ~0.2m
     ("turn", 90.0),   # turn 90 degrees left
-    (700.0, 100.0),   # drive forward ~0.7m
-    ("turn", -60.0),  # turn 60 degrees right
-    (500.0, 100.0),   # drive forward ~0.5m
+    (150.0, 80.0),    # drive forward ~0.15m
+    ("turn", -120.0), # turn 120 degrees right
+    (200.0, 80.0),    # drive forward ~0.2m
+    ("turn", 45.0),   # turn 45 degrees left
+    (150.0, 80.0),    # drive forward ~0.15m
+    ("turn", -90.0),  # turn 90 degrees right
+    (100.0, 80.0),    # drive forward ~0.1m
 ]
 
 # Matches cozmo_brain's own turn() calibration, read from the same .env so
