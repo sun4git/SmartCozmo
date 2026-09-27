@@ -83,15 +83,21 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
         if gesture and not settings.gesture_speech_sync_enabled:
             gesture_note = start_gesture()
 
-        wav_path = speech.synthesize(text, settings.tts_output_wav)
-
-        # GESTURE_SPEECH_SYNC_ENABLED=true: hold the gesture until speech is
-        # actually ready to play, so the overlap is guaranteed regardless of
-        # how long synthesis took - at the cost of no movement (mood/face
-        # already applied above, independent of this) until synthesis
-        # finishes.
-        if gesture and settings.gesture_speech_sync_enabled:
-            gesture_note = start_gesture()
+        try:
+            wav_path = speech.synthesize(text, settings.tts_output_wav)
+        finally:
+            # GESTURE_SPEECH_SYNC_ENABLED=true: hold the gesture until speech
+            # is actually ready to play, so the overlap is guaranteed
+            # regardless of how long synthesis took - at the cost of no
+            # movement (mood/face already applied above, independent of
+            # this) until synthesis finishes. In `finally` specifically so a
+            # synthesis failure (e.g. a local TTS error) still lets the
+            # gesture run instead of silently skipping it entirely - a
+            # gesture that raises the lift and only lowers it again as its
+            # own final step (see gestures.py) would otherwise leave the arm
+            # stuck up with nothing that ever brings it back down.
+            if gesture and settings.gesture_speech_sync_enabled:
+                gesture_note = start_gesture()
 
         output = settings.audio_output.lower()
         if output == "system":

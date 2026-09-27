@@ -1492,6 +1492,25 @@ Done, via `cozmo_brain/`:
   synced alternative, or how often the default genuinely loses overlap in
   practice with a real TTS provider's actual latency.
 
+  **A real bug found while auditing this, before it ever shipped to real
+  use:** with `GESTURE_SPEECH_SYNC_ENABLED=true`, the gesture start was
+  placed straight after the `speech.synthesize()` call - if synthesis
+  raised (a real risk with any provider, `local` included, e.g. a missing
+  Piper voice model or an unhandled Piper/faster-whisper error), the
+  gesture was skipped entirely, not just delayed. For a gesture that
+  raises the lift and only lowers it again as its own final step (see
+  `gestures.py`), that meant the arm could get stuck up with nothing left
+  to bring it back down - the exact failure mode the recent
+  "recover the lift position if a background gesture step fails" fix
+  (above) was built to catch, just via a different path it didn't cover.
+  Fixed by moving the sync-mode gesture start into a `finally` block, so
+  it still runs even when synthesis fails (the original exception still
+  propagates afterward, so the tool call is correctly reported as failed
+  to the model either way). **Verified as call-order logic only** (a
+  scripted test confirms the gesture still starts when a fake speech
+  client's `synthesize()` raises, in sync mode) - not yet confirmed this
+  was the actual cause of any specific real-hardware report.
+
   **Raised directly, a real regression from going async:** the lift
   arm was reportedly not reliably ending up fully down anymore after a
   gesture. Root cause: `run_gesture_async()`'s background thread had *no*
