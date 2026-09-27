@@ -958,8 +958,11 @@ network+synthesis round-trip it followed. The full pipeline (real network
 call → MP3 → PyAV decode → WAV → `tts_postprocess.py`'s resample/pitch/
 gain → file) was run end-to-end through the actual `create_speech_client()`
 factory and produced a correct, correctly-resampled WAV — not just unit
-logic. **Not yet verified on real hardware** — confirmed from a dev
-machine, not the Pi.
+logic. **Confirmed working on real hardware**, including noticeably higher
+latency than the other providers on real testing (consistent with the
+~1.1s network+synthesis round-trip measured from a dev machine above,
+likely compounded by the Pi's own network path and slower MP3 decode) —
+worth factoring in if responsiveness matters more than voice quality/cost.
 
 `LOCAL_STT_MODEL` also accepts a full Hugging Face repo id directly (any
 string containing a `/`), not just the short size names above — confirmed
@@ -1550,10 +1553,12 @@ Done, via `cozmo_brain/`:
   takes, rather than reacting the instant `say` is called. **Verified as
   call-order logic only** (a scripted test with a fake speech client
   confirms `synthesize()` and the gesture start happen in the order this
-  setting implies, in both positions) — not yet observed on real hardware
-  whether the "instant reaction" default actually feels better than the
-  synced alternative, or how often the default genuinely loses overlap in
-  practice with a real TTS provider's actual latency.
+  setting implies, in both positions). **Confirmed on real hardware:**
+  toggling `GESTURE_SPEECH_SYNC_ENABLED` true vs. false produces a real,
+  observable behavior difference (tested alongside `TTS_PROVIDER=edge`,
+  whose higher latency — see below — makes the default's overlap loss
+  easy to notice) — which setting actually feels better is a personal/
+  use-case call, not settled here.
 
   **A real bug found while auditing this, before it ever shipped to real
   use:** with `GESTURE_SPEECH_SYNC_ENABLED=true`, the gesture start was
