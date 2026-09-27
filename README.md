@@ -69,8 +69,9 @@ See [Roadmap](#roadmap--open-work) for what's still open.
 - A Bluetooth mic/speaker (this project used a Bose SoundLink Flex)
 
 **Accounts / services**
-- [Groq](https://console.groq.com) API key — used for both STT (Whisper) and
-  TTS (Orpheus)
+- [Groq](https://console.groq.com) API key — used for STT (Whisper) and TTS
+  (Orpheus) by default; `STT_PROVIDER`/`TTS_PROVIDER` can each independently
+  switch to OpenAI instead (see [Configuration reference](#configuration-reference))
 - An [Ollama](https://ollama.com) endpoint reachable from the deployment
   machine, serving a model that supports **tool-calling** (this project uses
   a cloud-hosted model proxied through a local Ollama instance)
@@ -96,9 +97,10 @@ See [Roadmap](#roadmap--open-work) for what's still open.
     ├── imaging.py             # shared base64 image helper (vision attach, who_is_this)
     ├── llm/
     │   ├── ollama_client.py   # /api/chat wrapper with tool-calling
-    │   ├── speech_client.py    # SpeechClient interface shared by every provider
+    │   ├── chat_client.py      # ChatClient interface (CHAT_PROVIDER), only ollama implemented today
+    │   ├── speech_client.py    # SpeechClient interface shared by every STT/TTS provider
     │   ├── groq_client.py       # Groq Whisper STT + Orpheus TTS
-    │   ├── openai_client.py     # OpenAI Whisper STT + TTS (AUDIO_PROVIDER=openai)
+    │   ├── openai_client.py     # OpenAI Whisper STT + TTS (STT_PROVIDER/TTS_PROVIDER=openai)
     │   ├── tts_postprocess.py    # shared voice character + gain, used by both providers
     │   └── stt_postprocess.py    # filters known Whisper hallucination phrases
     ├── audio/
@@ -695,7 +697,7 @@ tuning `VAD_MIN_RMS`, also worth trying `VAD_AGGRESSIVENESS=3` (stricter
 webrtcvad noise rejection) — untested against this specific environment.
 
 **Found on real hardware, crashed the whole process:** an STT request to
-OpenAI (`AUDIO_PROVIDER=openai`) returned `400 Bad Request` mid-`--mode vad`
+OpenAI (`STT_PROVIDER=openai`) returned `400 Bad Request` mid-`--mode vad`
 session, and nothing caught it — `resp.raise_for_status()` in
 `llm/openai_client.py`/`llm/groq_client.py` raises on any non-2xx response,
 but neither `vad_mode.py` nor `interactive.py` wrapped their
@@ -833,22 +835,36 @@ wasn't before — verified directly: even at `TTS_GAIN=4.0` (the new
 default, up from `3.0`), zero samples come within 90% of full scale on
 real OpenAI output.
 
-### Switching speech providers
+### Switching speech providers (and, separately, chat)
 
 Groq's free-tier rate limits are real — this happened during actual use,
-not just as a theoretical risk. `AUDIO_PROVIDER` in `.env` switches both
-STT and TTS together, `groq` (default) or `openai`:
+not just as a theoretical risk. `STT_PROVIDER` and `TTS_PROVIDER` in `.env`
+each independently pick `groq` (default) or `openai` — they don't have to
+match, e.g. Groq STT + OpenAI TTS is valid:
 
 ```env
-AUDIO_PROVIDER=openai
+STT_PROVIDER=groq
+TTS_PROVIDER=openai
 OPENAI_API_KEY=sk-...
 ```
 
 Both providers implement the same `SpeechClient` interface
 (`transcribe()`/`synthesize()`), so nothing else in the app — `tools/registry.py`,
-every mode — needs to know which one is actually active;
-`create_speech_client()` in `cozmo_brain/llm/__init__.py` picks the right
-one from config.
+every mode — needs to know which one is actually active. `create_speech_client()`
+in `cozmo_brain/llm/__init__.py` builds one client per provider actually needed
+(reusing a single instance if `STT_PROVIDER` and `TTS_PROVIDER` match) and
+returns a small router that sends `transcribe()` to the STT one and
+`synthesize()` to the TTS one.
+
+Chat/tool-calling (the "brain" — see [Architecture](#architecture)) has its
+own independent `CHAT_PROVIDER` setting and a matching `create_chat_client()`
+factory + `ChatClient` interface (`cozmo_brain/llm/chat_client.py`), mirroring
+the STT/TTS setup above. **Only `ollama` is implemented today** — this is
+groundwork, not a working multi-backend chat layer yet. A Groq, OpenAI, or
+local chat backend would need its own adapter class implementing `ChatClient`
+(same `chat()`/`is_reachable()` shape as `OllamaClient`) wired into
+`create_chat_client()`'s `if provider == ...` branches, the same way
+`GroqClient`/`OpenAIClient` already implement `SpeechClient`.
 
 Model and voice names are **not interchangeable between providers** —
 Groq's Orpheus voices (`austin`, `troy`, ...) don't exist on OpenAI, and
@@ -1076,15 +1092,16 @@ annotated list (it's the source of truth). The essentials:
 
 | Variable | Purpose |
 |---|---|
-| `GROQ_API_KEY` | Required unless `AUDIO_PROVIDER=openai`. Auth for Groq STT + TTS. |
-| `OPENAI_API_KEY` | Required only if `AUDIO_PROVIDER=openai`. |
-| `AUDIO_PROVIDER` | `groq` (default) or `openai` — which one actually does STT/TTS. |
+| `GROQ_API_KEY` | Required unless both `STT_PROVIDER` and `TTS_PROVIDER` are `openai`. Auth for Groq STT + TTS. |
+| `OPENAI_API_KEY` | Required if `STT_PROVIDER` or `TTS_PROVIDER` is `openai`. |
+| `STT_PROVIDER` / `TTS_PROVIDER` | `groq` (default) or `openai`, set independently — which provider does STT vs. TTS; they don't have to match. |
+| `CHAT_PROVIDER` | Which provider does chat/tool-calling. Only `ollama` is implemented today. |
 | `OLLAMA_BASE_URL` | Ollama endpoint chat/tool-calling requests go to. |
 | `OLLAMA_MODEL` | Model name; must support `tools` (and ideally `vision` for `look`). |
 | `RECORD_SECONDS` / `RECORD_DEVICE` | Push-to-talk recording length and ALSA/PipeWire device. |
 | `AUDIO_OUTPUT` / `PLAYBACK_DEVICE` | Route speech to `cozmo` (default), `system` speaker, or `both` at once. |
-| `STT_MODEL` / `TTS_MODEL` / `TTS_VOICE` | Groq model/voice choices (used when `AUDIO_PROVIDER=groq`). |
-| `OPENAI_STT_MODEL` / `OPENAI_TTS_MODEL` / `OPENAI_TTS_VOICE` | OpenAI model/voice choices (used when `AUDIO_PROVIDER=openai`). |
+| `GROQ_STT_MODEL` / `GROQ_TTS_MODEL` / `GROQ_TTS_VOICE` | Groq model/voice choices (used when `STT_PROVIDER`/`TTS_PROVIDER`=`groq`). |
+| `OPENAI_STT_MODEL` / `OPENAI_TTS_MODEL` / `OPENAI_TTS_VOICE` | OpenAI model/voice choices (used when `STT_PROVIDER`/`TTS_PROVIDER`=`openai`). |
 | `OPENAI_TTS_SPEED` | OpenAI's native speed control — try ~0.85-0.90 to roughly match Groq's pacing. |
 | `TTS_GAIN` | Max volume boost for TTS output, RMS-targeted with a soft limiter (Cozmo's speaker is quiet). |
 | `TTS_LEADIN_MS` | Silent lead-in before speech, works around the first word often being inaudible. |
@@ -1199,9 +1216,10 @@ Done, via `cozmo_brain/`:
   auto-reconnected, which also re-runs Wi-Fi auto-connect if
   `COZMO_WIFI_SSID` is set. **Untested against a real hardware drop** — this
   environment has no Cozmo to disconnect.
-- ✅ **STT/TTS provider flexibility** — `AUDIO_PROVIDER=groq`/`openai` in
-  `.env`, for when Groq's free-tier rate limits get hit (which they did,
-  during actual use). See [Switching speech providers](#switching-speech-providers).
+- ✅ **STT/TTS provider flexibility** — `STT_PROVIDER`/`TTS_PROVIDER` set
+  independently to `groq` or `openai` in `.env`, for when Groq's free-tier
+  rate limits get hit (which they did, during actual use), or to mix
+  providers per component. See [Switching speech providers](#switching-speech-providers-and-separately-chat).
 - ✅ **Battery indicator** — `BatteryMonitor` shows a face icon + red backpack
   light a few seconds before Cozmo auto-powers-off. See [Battery
   monitor](#battery-monitor).

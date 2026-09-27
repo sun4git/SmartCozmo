@@ -1,7 +1,8 @@
 """OpenAI API wrappers: Whisper speech-to-text and OpenAI TTS, as an
 alternative to Groq (e.g. when Groq's free-tier rate limits are hit).
 Same transcribe()/synthesize() shape as GroqClient — see SpeechClient in
-speech_client.py — so AUDIO_PROVIDER=openai in .env is a drop-in swap.
+speech_client.py — so STT_PROVIDER=openai / TTS_PROVIDER=openai in .env is a
+drop-in swap, independently for STT and TTS.
 
 Confirmed against OpenAI's own Python SDK source (not guessed): the create
 speech (TTS) endpoint has **no `sample_rate` parameter at all**, unlike

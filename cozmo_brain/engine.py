@@ -14,7 +14,7 @@ import requests
 from cozmo_brain.config import Settings
 from cozmo_brain.conversation import Conversation
 from cozmo_brain.imaging import encode_image_b64
-from cozmo_brain.llm.ollama_client import OllamaClient
+from cozmo_brain.llm.chat_client import ChatClient
 from cozmo_brain.llm.speech_client import SpeechClient
 from cozmo_brain.robot.base import RobotBackend
 from cozmo_brain.tools.base import Tool, ToolResult
@@ -27,7 +27,7 @@ class CozmoEngine:
         self,
         settings: Settings,
         robot: RobotBackend,
-        ollama: OllamaClient,
+        ollama: ChatClient,
         speech: SpeechClient,
         tools: list[Tool],
         conversation: Conversation,

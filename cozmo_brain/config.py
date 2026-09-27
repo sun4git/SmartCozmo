@@ -35,10 +35,14 @@ class Settings:
     groq_api_key: str = field(default_factory=lambda: os.environ.get("GROQ_API_KEY", ""))
     openai_api_key: str = field(default_factory=lambda: os.environ.get("OPENAI_API_KEY", ""))
 
-    # Which provider actually does STT+TTS. "groq" (default) or "openai" —
-    # e.g. switch to "openai" if Groq's free-tier rate limits get hit.
-    # See cozmo_brain/llm/__init__.py's create_speech_client().
-    audio_provider: str = field(default_factory=lambda: _env_str("AUDIO_PROVIDER", "groq"))
+    # Which provider does STT, TTS, and chat/tool-calling — each is
+    # independently configurable, so e.g. STT_PROVIDER=groq + TTS_PROVIDER=openai
+    # is valid. "groq" (default) or "openai" for STT/TTS; only "ollama" is
+    # implemented for chat today. See cozmo_brain/llm/__init__.py's
+    # create_speech_client() / create_chat_client().
+    stt_provider: str = field(default_factory=lambda: _env_str("STT_PROVIDER", "groq"))
+    tts_provider: str = field(default_factory=lambda: _env_str("TTS_PROVIDER", "groq"))
+    chat_provider: str = field(default_factory=lambda: _env_str("CHAT_PROVIDER", "ollama"))
 
     # --- Ollama (tool-calling LLM) ---
     ollama_base_url: str = field(default_factory=lambda: _env_str("OLLAMA_BASE_URL", "http://192.168.1.200:41438"))
@@ -59,12 +63,12 @@ class Settings:
     audio_output: str = field(default_factory=lambda: _env_str("AUDIO_OUTPUT", "cozmo"))
     playback_device: str = field(default_factory=lambda: _env_str("PLAYBACK_DEVICE", "pipewire"))
 
-    # --- Groq STT/TTS (used when AUDIO_PROVIDER=groq) ---
-    stt_model: str = field(default_factory=lambda: _env_str("STT_MODEL", "whisper-large-v3-turbo"))
-    tts_model: str = field(default_factory=lambda: _env_str("TTS_MODEL", "canopylabs/orpheus-v1-english"))
-    tts_voice: str = field(default_factory=lambda: _env_str("TTS_VOICE", "austin"))
+    # --- Groq STT/TTS (used when STT_PROVIDER/TTS_PROVIDER=groq) ---
+    groq_stt_model: str = field(default_factory=lambda: _env_str("GROQ_STT_MODEL", "whisper-large-v3-turbo"))
+    groq_tts_model: str = field(default_factory=lambda: _env_str("GROQ_TTS_MODEL", "canopylabs/orpheus-v1-english"))
+    groq_tts_voice: str = field(default_factory=lambda: _env_str("GROQ_TTS_VOICE", "austin"))
 
-    # --- OpenAI STT/TTS (used when AUDIO_PROVIDER=openai) ---
+    # --- OpenAI STT/TTS (used when STT_PROVIDER/TTS_PROVIDER=openai) ---
     # Model/voice names are OpenAI's own, not interchangeable with Groq's.
     openai_stt_model: str = field(default_factory=lambda: _env_str("OPENAI_STT_MODEL", "whisper-1"))
     openai_tts_model: str = field(default_factory=lambda: _env_str("OPENAI_TTS_MODEL", "tts-1"))
@@ -263,8 +267,8 @@ class Settings:
     def require_openai_key(self) -> str:
         if not self.openai_api_key:
             raise RuntimeError(
-                "OPENAI_API_KEY is not set (needed because AUDIO_PROVIDER=openai). "
-                "Add it to .env."
+                "OPENAI_API_KEY is not set (needed because STT_PROVIDER or "
+                "TTS_PROVIDER is 'openai'). Add it to .env."
             )
         return self.openai_api_key
 

@@ -1,6 +1,6 @@
 """Shared TTS post-processing, used by every STT/TTS provider client so
 Cozmo's voice character and Cozmo-required output format stay consistent
-regardless of which one is active (AUDIO_PROVIDER in .env).
+regardless of which one is active (TTS_PROVIDER in .env).
 
 Pipeline: resample to TTS_SAMPLE_RATE (only if the provider's raw output
 isn't already at that rate) -> pitch/tempo shift -> ring modulation ->

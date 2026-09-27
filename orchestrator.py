@@ -38,9 +38,9 @@ OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:31b-cloud")
 
 RECORD_SECONDS = int(os.environ.get("RECORD_SECONDS", "5"))
 RECORD_DEVICE = os.environ.get("RECORD_DEVICE", "pipewire")
-STT_MODEL = os.environ.get("STT_MODEL", "whisper-large-v3-turbo")
-TTS_MODEL = os.environ.get("TTS_MODEL", "canopylabs/orpheus-v1-english")
-TTS_VOICE = os.environ.get("TTS_VOICE", "austin")  # troy, austin, daniel, autumn, diana, hannah
+STT_MODEL = os.environ.get("GROQ_STT_MODEL", "whisper-large-v3-turbo")
+TTS_MODEL = os.environ.get("GROQ_TTS_MODEL", "canopylabs/orpheus-v1-english")
+TTS_VOICE = os.environ.get("GROQ_TTS_VOICE", "austin")  # troy, austin, daniel, autumn, diana, hannah
 
 RAW_INPUT_WAV = os.environ.get("RAW_INPUT_WAV", "input.wav")
 TTS_OUTPUT_WAV = os.environ.get("TTS_OUTPUT_WAV", "cozmo_reply.wav")

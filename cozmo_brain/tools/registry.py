@@ -1,5 +1,5 @@
 """The concrete tool set exposed to the LLM, bound to a robot backend + a
-speech (STT/TTS) client — whichever provider AUDIO_PROVIDER selects.
+speech (STT/TTS) client — whichever providers STT_PROVIDER/TTS_PROVIDER select.
 
 Handlers raise plain exceptions (ValueError, RuntimeError, TimeoutError, ...)
 on failure; the orchestrator's dispatch loop catches those and turns them
@@ -16,7 +16,7 @@ import threading
 from cozmo_brain.audio.player import play_wav
 from cozmo_brain.config import Settings
 from cozmo_brain.imaging import encode_image_b64
-from cozmo_brain.llm.ollama_client import OllamaClient
+from cozmo_brain.llm.chat_client import ChatClient
 from cozmo_brain.llm.speech_client import SpeechClient
 from cozmo_brain.robot.base import RobotBackend
 from cozmo_brain.robot.gestures import GESTURES
@@ -48,7 +48,7 @@ def _sanitize_name(name: str) -> str:
     return cleaned.lower() or "unnamed"
 
 
-def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: OllamaClient, settings: Settings) -> list[Tool]:
+def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, settings: Settings) -> list[Tool]:
     def handle_say(text: str, mood: str = "neutral", gesture: str | None = None) -> ToolResult:
         # "neutral" now resets pose (see moods.py) rather than being a
         # no-op, so it must actually run, not be skipped like other moods

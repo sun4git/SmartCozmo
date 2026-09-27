@@ -27,7 +27,7 @@ class GroqClient:
                 _STT_URL,
                 headers=self._headers,
                 files={"file": f},
-                data={"model": self._settings.stt_model},
+                data={"model": self._settings.groq_stt_model},
                 timeout=30,
             )
         resp.raise_for_status()
@@ -39,8 +39,8 @@ class GroqClient:
             _TTS_URL,
             headers={**self._headers, "Content-Type": "application/json"},
             json={
-                "model": self._settings.tts_model,
-                "voice": voice or self._settings.tts_voice,
+                "model": self._settings.groq_tts_model,
+                "voice": voice or self._settings.groq_tts_voice,
                 "input": text,
                 "response_format": "wav",
                 "sample_rate": self._settings.tts_sample_rate,

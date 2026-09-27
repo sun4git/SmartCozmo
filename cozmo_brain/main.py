@@ -11,8 +11,7 @@ from cozmo_brain.config import settings
 from cozmo_brain.conversation import Conversation
 from cozmo_brain.engine import CozmoEngine
 from cozmo_brain.idle_fidget import IdleFidgeter
-from cozmo_brain.llm import create_speech_client
-from cozmo_brain.llm.ollama_client import OllamaClient
+from cozmo_brain.llm import create_chat_client, create_speech_client
 from cozmo_brain.personality import SYSTEM_PROMPT
 from cozmo_brain.robot import create_robot
 from cozmo_brain.robot.battery_monitor import BatteryMonitor
@@ -79,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         pickup_reactor.start()
 
         speech = create_speech_client(settings)
-        ollama = OllamaClient(settings)
+        ollama = create_chat_client(settings)
         tools = build_tools(robot, speech, ollama, settings)
 
         conversation = Conversation(
