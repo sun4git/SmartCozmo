@@ -1,7 +1,7 @@
 """Fully local, offline STT/TTS: faster-whisper (CTranslate2) for
 transcription, Piper for speech synthesis. No network call, no API key — see
 LOCAL_STT_MODEL / LOCAL_STT_DEVICE / LOCAL_STT_COMPUTE_TYPE /
-LOCAL_TTS_VOICE_PATH in .env.example. Requires `pip install faster-whisper
+LOCAL_TTS_VOICE_PATH / LOCAL_TTS_SPEED in .env.example. Requires `pip install faster-whisper
 piper-tts` (commented out in requirements.txt by default, like
 webrtcvad/openwakeword) and a downloaded Piper voice
 (`python3 -m piper.download_voices <name>`).
@@ -57,9 +57,20 @@ class LocalClient:
 
     def synthesize(self, text: str, out_path: str, voice: str | None = None) -> str:
         """Generate speech for `text`, apply voice effects + gain, and write a Cozmo-ready WAV to out_path."""
+        # Only built (and only touches Piper's other synthesis defaults -
+        # noise_scale etc.) when a non-default speed is actually configured,
+        # so LOCAL_TTS_SPEED=1.0 (the default) leaves synthesize_wav() exactly
+        # as it was before this setting existed.
+        syn_config = None
+        speed = self._settings.local_tts_speed
+        if speed != 1.0:
+            from piper import SynthesisConfig
+
+            syn_config = SynthesisConfig(length_scale=1.0 / speed if speed > 0 else 1.0)
+
         buffer = io.BytesIO()
         with wave.open(buffer, "wb") as wav_file:
-            self._piper().synthesize_wav(text, wav_file)
+            self._piper().synthesize_wav(text, wav_file, syn_config=syn_config)
 
         audio_bytes = apply_cozmo_voice_character(buffer.getvalue(), self._settings)
         with open(out_path, "wb") as f:

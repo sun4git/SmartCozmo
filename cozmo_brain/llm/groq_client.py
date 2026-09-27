@@ -47,6 +47,7 @@ class GroqClient:
                 "input": text,
                 "response_format": "wav",
                 "sample_rate": self._settings.tts_sample_rate,
+                "speed": self._settings.groq_tts_speed,
             },
             timeout=30,
         )

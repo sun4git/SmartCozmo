@@ -103,6 +103,10 @@ class Settings:
     groq_tts_model: str = field(default_factory=lambda: _env_str("GROQ_TTS_MODEL", "canopylabs/orpheus-v1-english"))
     groq_tts_voice: str = field(default_factory=lambda: _env_str("GROQ_TTS_VOICE", "austin"))
 
+    # Groq's own native speed control (confirmed in its API reference:
+    # 0.5-5.0, default 1.0), same idea as OPENAI_TTS_SPEED below.
+    groq_tts_speed: float = field(default_factory=lambda: _env_float("GROQ_TTS_SPEED", 1.0))
+
     # --- OpenAI STT/TTS (used when STT_PROVIDER/TTS_PROVIDER=openai) ---
     # Model/voice names are OpenAI's own, not interchangeable with Groq's.
     openai_stt_model: str = field(default_factory=lambda: _env_str("OPENAI_STT_MODEL", "whisper-1"))
@@ -136,6 +140,11 @@ class Settings:
     local_tts_voice_path: str = field(
         default_factory=lambda: _env_str("LOCAL_TTS_VOICE_PATH", "en_US-lessac-medium.onnx")
     )
+
+    # Speed, same direction/semantics as GROQ_TTS_SPEED/OPENAI_TTS_SPEED
+    # (>1.0 = faster, 1.0 = default). Piper's own SynthesisConfig takes the
+    # inverse as "length_scale" (>1.0 = slower) - local_client.py converts.
+    local_tts_speed: float = field(default_factory=lambda: _env_float("LOCAL_TTS_SPEED", 1.0))
 
     # OpenAI's own speed control (0.25-4.0, native to their TTS API).
     # Measured directly: the default "alloy" voice speaks ~14% faster than

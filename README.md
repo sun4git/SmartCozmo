@@ -872,6 +872,22 @@ noting: the currently maintained `piper-tts` package is GPL-3.0-or-later
 (the original MIT-licensed `rhasspy/piper` repo was archived in favor of
 a GPL fork) — see the note in `requirements.txt`.
 
+`LOCAL_STT_MODEL`'s first use downloads a model from Hugging Face — nothing
+in `local_client.py` overrides where to, so it lands in `faster-whisper`'s
+own default cache (confirmed against its source, `faster_whisper/utils.py`:
+`"base"` resolves to the repo `Systran/faster-whisper-base`, fetched via
+`huggingface_hub.snapshot_download()`):
+
+| OS | Default cache path |
+|---|---|
+| Linux (the Pi) | `~/.cache/huggingface/hub/models--Systran--faster-whisper-<size>/` |
+| Windows | `%USERPROFILE%\.cache\huggingface\hub\models--Systran--faster-whisper-<size>\` |
+
+Override the location with the `HF_HOME` env var if it needs to go
+somewhere else (e.g. a different disk on the Pi). To pre-warm the model
+before a real test, so the first STT call isn't slowed by the download:
+`python3 -c "from faster_whisper import WhisperModel; WhisperModel('base', device='cpu', compute_type='int8')"`.
+
 Chat/tool-calling (the "brain" — see [Architecture](#architecture)) has its
 own independent `CHAT_PROVIDER` setting and a matching `create_chat_client()`
 factory + `ChatClient` interface (`cozmo_brain/llm/chat_client.py`), mirroring
@@ -1189,10 +1205,12 @@ annotated list (it's the source of truth). The essentials:
 | `RECORD_SECONDS` / `RECORD_DEVICE` | Push-to-talk recording length and ALSA/PipeWire device. |
 | `AUDIO_OUTPUT` / `PLAYBACK_DEVICE` | Route speech to `cozmo` (default), `system` speaker, or `both` at once. |
 | `GROQ_STT_MODEL` / `GROQ_TTS_MODEL` / `GROQ_TTS_VOICE` | Groq model/voice choices (used when `STT_PROVIDER`/`TTS_PROVIDER`=`groq`). |
+| `GROQ_TTS_SPEED` | Groq's native speed control (0.5-5.0, default 1.0). |
 | `OPENAI_STT_MODEL` / `OPENAI_TTS_MODEL` / `OPENAI_TTS_VOICE` | OpenAI model/voice choices (used when `STT_PROVIDER`/`TTS_PROVIDER`=`openai`). |
+| `OPENAI_TTS_SPEED` | OpenAI's native speed control — try ~0.85-0.90 to roughly match Groq's pacing. |
 | `LOCAL_STT_MODEL` / `LOCAL_STT_DEVICE` / `LOCAL_STT_COMPUTE_TYPE` | faster-whisper model size/device/compute type (used when `STT_PROVIDER`=`local`). No key, no network after the first model download. |
 | `LOCAL_TTS_VOICE_PATH` | Path to a downloaded Piper `.onnx` voice model (used when `TTS_PROVIDER`=`local`). |
-| `OPENAI_TTS_SPEED` | OpenAI's native speed control — try ~0.85-0.90 to roughly match Groq's pacing. |
+| `LOCAL_TTS_SPEED` | Speed, same `>1.0`=faster direction as `GROQ_TTS_SPEED`/`OPENAI_TTS_SPEED` (Piper's own `length_scale` is the inverse — converted in `local_client.py`). |
 | `TTS_GAIN` | Max volume boost for TTS output, RMS-targeted with a soft limiter (Cozmo's speaker is quiet). |
 | `TTS_LEADIN_MS` | Silent lead-in before speech, works around the first word often being inaudible. |
 | `TTS_PITCH_SHIFT` | Pitch+tempo shift for a smaller/more childlike/robotic voice. 1.0 = off. |
