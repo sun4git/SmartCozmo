@@ -16,8 +16,11 @@ either today.
 
 Protocol:
 1. Connect. Mark Cozmo's exact starting position/heading physically (tape
-   on the floor works well), then print the starting pose (should read
-   ~0,0,0/0deg - it's always zeroed at connect).
+   on the floor works well), then print the starting pose. Position reads
+   ~0,0 reliably (confirmed across every run so far), but heading is NOT
+   guaranteed to be exactly 0deg (confirmed on real hardware: one run
+   started at 3.7deg) - the actual reading is captured and used as the
+   real target for steps 5-6 below, not assumed to be 0.
 2. Drive the test path below (edit DRIVE_STEPS for your own test).
 3. Print what `cli.pose` *believes* happened.
 4. You physically measure where Cozmo actually is/facing and compare
@@ -117,6 +120,13 @@ def main() -> None:
     with pycozmo.connect() as cli:
         input("Mark Cozmo's exact starting position and heading (e.g. tape on the floor), then press Enter > ")
         print_pose(cli, "Start")
+        # Position is reliably exactly (0,0) at a fresh pose origin (confirmed
+        # across every run so far), but heading is NOT guaranteed to reset to
+        # exactly 0deg (confirmed on real hardware: one run started at 3.7deg) -
+        # a hardcoded (0,0,0deg) target here would silently return Cozmo to the
+        # wrong heading rather than his real starting one. Read the actual
+        # starting heading back instead of assuming it.
+        start_heading_deg = cli.pose.rotation.angle_z.degrees
 
         print("\nDriving the test path...")
         for step in DRIVE_STEPS:
@@ -133,7 +143,7 @@ def main() -> None:
         )
 
         input("Press Enter to command go_to_pose() back to the exact start pose > ")
-        start_pose = pycozmo.util.Pose(0.0, 0.0, 0.0, angle_z=pycozmo.util.Angle(degrees=0.0))
+        start_pose = pycozmo.util.Pose(0.0, 0.0, 0.0, angle_z=pycozmo.util.Angle(degrees=start_heading_deg))
         cli.go_to_pose(start_pose)
         time.sleep(_SETTLE_S)
         print_pose(cli, "After go_to_pose() back to start")
@@ -157,9 +167,8 @@ def main() -> None:
         # turn_in_place() for it, regardless of whether go_to_pose() already got
         # it right (in which case this ends up a negligible near-zero correction)
         # or didn't (in which case this does the real work).
-        target_heading_deg = 0.0
         current_heading_deg = cli.pose.rotation.angle_z.degrees
-        heading_error_deg = (target_heading_deg - current_heading_deg + 180) % 360 - 180
+        heading_error_deg = (start_heading_deg - current_heading_deg + 180) % 360 - 180
         print(f"Heading error after go_to_pose(): {heading_error_deg:.1f}deg - correcting with our own turn()...")
         turn_in_place(cli, heading_error_deg)
         print_pose(cli, "After corrective turn")

@@ -2013,15 +2013,32 @@ Still open, roughly in priority order:
      real fix when it didn't. **Verified end-to-end on real hardware**:
      landed within a few mm and a fraction of a degree of true origin
      after a two-leg ~300mm+turn+~300mm test path.
-   - **Not yet tested: a longer, room-scale path.** Both runs so far used
-     a short, simple path (two ~300mm legs and one turn) — encouraging,
-     but not yet representative of an actual multi-meter "return to
-     charger" distance with more turns. Real accumulated drift over that
-     scale is still the single open unknown before deciding whether
-     dead-reckoning + this heading correction is tight enough on its own,
-     or needs a vision-loop correction step (reusing the existing `look()`
-     + vision-capable-chat pipeline, no new PyCozmo capability needed) for
-     final fine alignment before handing off to `dock()`.
+   - ✅ **Room-scale path tested — genuinely promising.** A ~2.1m path with
+     two turns (900mm → turn 90° → 700mm → turn −60° → 500mm) accumulated
+     only **~64mm of position drift (~3% of distance traveled) and ~5.6°
+     of heading drift** from the ideal expected pose — confirmed on real
+     hardware, computed directly against the logged numbers, not
+     estimated. Notably better than the earlier research's worst-case
+     caution ("could plausibly leave Cozmo... well over half a meter
+     off"). After `go_to_pose()` + the heading correction, position landed
+     within ~5mm of the true start.
+   - **A real bug found and fixed while checking these numbers:** the test
+     script hardcoded the return target's heading to exactly `0°`, but a
+     fresh pose origin's heading isn't guaranteed to actually be `0°`
+     (confirmed on real hardware: one run's true starting heading was
+     `3.7°`, not `0°` — position reliably reads exactly `(0,0)` at a fresh
+     origin, confirmed across every run, but heading doesn't get the same
+     guarantee). This made one run's "landed within 0.1°" result look
+     better than it actually was — the true drift from the *real* starting
+     heading was closer to 3.6°, not 0.1°. Fixed: the script now reads the
+     actual starting heading back and uses it as the real target for both
+     `go_to_pose()` and the corrective turn, instead of assuming `0°`.
+   - **Remaining open question:** whether this ~3% position drift holds up
+     over an even longer path (a real cross-room return could exceed
+     2.1m), and whether it's tight enough on its own to hand off directly
+     to `dock()`, or still needs a vision-loop correction step (reusing
+     the existing `look()` + vision-capable-chat pipeline, no new PyCozmo
+     capability needed) for final fine alignment first.
    - **PyCozmo has no built-in charger/marker vision at all — confirmed
      absent, not just unused.** The charger has a printed visual marker
      (same mechanism as the light cubes, confirmed via the official Anki
