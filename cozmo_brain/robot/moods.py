@@ -7,7 +7,12 @@ Every field here maps to a real, confirmed PyCozmo primitive:
 - `head_deg` is an optional pose accent, clamped to the robot's real range
   (-25..44.5 degrees) by the backend.
 - `lift_mm` is an optional specific raised height (32..92 mm, clamped by the
-  backend) for the four deliberately "arms up" moods only.
+  backend) for the four deliberately "arms up" moods only. `apply_mood()`
+  itself leaves it raised (that's the whole visual point, still true for
+  gesture-internal mood steps) - it's specifically `tools/registry.py`'s
+  `handle_say()` that resets it back down after the reply finishes,
+  checking this same field, confirmed on real hardware to otherwise read
+  as a stuck arm rather than an intentional flourish once the turn is over.
 - `lower_lift` (every other mood) drives the lift as low as it will
   physically go via `RobotBackend.lower_lift_fully()`, rather than a
   specific numeric height - confirmed on real hardware that the documented

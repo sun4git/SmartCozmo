@@ -53,8 +53,7 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
         # "neutral" now resets pose (see moods.py) rather than being a
         # no-op, so it must actually run, not be skipped like other moods
         # used to be for efficiency.
-        if mood:
-            robot.apply_mood(mood)
+        applied_mood = robot.apply_mood(mood) if mood else None
 
         # Bundled into this one call, rather than relying on the model
         # calling the separate `gesture` tool right before/after, because
@@ -112,6 +111,19 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
             system_thread.join()
         else:
             robot.say_wav(wav_path)
+
+        # "Arms up" moods (happy/excited/proud/smug - see moods.py) raise
+        # the lift and deliberately don't lower it as part of apply_mood()
+        # itself, so the pose is still visible for the whole reply. Left
+        # alone, nothing brings it back down until the next mood/turn
+        # resets it, or idle_fidget.py eventually does after
+        # IDLE_FIDGET_AFTER_S (default 5 min) - confirmed on real hardware
+        # to read as a stuck arm, not an intentional flourish, once the
+        # turn is actually over. Checking mood.lift_mm here (rather than a
+        # hardcoded mood-name list) stays correct automatically if a future
+        # mood adds this same "raised, not auto-lowered" shape.
+        if applied_mood is not None and applied_mood.lift_mm is not None:
+            robot.lower_lift_fully()
 
         return ToolResult(True, f"Said (mood={mood}){gesture_note}: {text}")
 

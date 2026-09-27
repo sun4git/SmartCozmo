@@ -485,7 +485,7 @@ why this ended up folded into `--mode vad` instead of a standalone mode.
 
 | Tool | Does |
 |---|---|
-| `say(text, mood, gesture)` | Speaks via Groq TTS (routed per `AUDIO_OUTPUT`), striking a matching facial expression + backpack light color first. The optional `gesture` plays a choreography concurrently with the speech (guaranteed overlap — see below), rather than before or after it. |
+| `say(text, mood, gesture)` | Speaks via Groq TTS (routed per `AUDIO_OUTPUT`), striking a matching facial expression + backpack light color first. The optional `gesture` plays a choreography concurrently with the speech (guaranteed overlap — see below), rather than before or after it. A mood that raises the lift (`happy`/`excited`/`proud`/`smug`) is lowered again automatically once the reply finishes. |
 | `gesture(name)` | Plays a curated multi-step choreography (face + lights + head/arm + wheels) **on its own, with no speech** — pairs with `say` only sequentially, never simultaneously (use `say`'s own `gesture` argument for that). |
 | `play_animation(name)` | Plays a **real** Anki animation clip or group by exact name. |
 | `list_animations()` | Lists the real animation/group names actually loaded on this robot. |
@@ -1535,6 +1535,31 @@ Done, via `cozmo_brain/`:
   mood step and a concurrent `say()`'s mood-setting land around the same
   moment remains unverified either way (same class of accepted trade-off
   as `pickup_reactor`'s note above, not new).
+
+  **Raised directly, a separate stuck-arm case — not a gesture failure this
+  time, just the mood system working exactly as designed:** `happy`/
+  `excited`/`proud`/`smug` are deliberately "arms up" (see `moods.py`) —
+  `apply_mood()` raises the lift and leaves it there on purpose, since
+  that's the whole visual point while the reply plays. Nothing brought it
+  back down afterward, though: confirmed on real hardware that a plain
+  "Hi" getting a `happy` reply left the arm raised indefinitely once the
+  turn was over — not a bug, exactly the documented behavior, but read as
+  a stuck arm rather than an intentional flourish once the moment had
+  passed. `handle_say()` (`tools/registry.py`) now checks the same
+  `Mood.lift_mm` field `apply_mood()` itself keys off — not a hardcoded
+  mood-name list, so it stays correct automatically if a future mood adds
+  this same "raised, not auto-lowered" shape — and calls
+  `lower_lift_fully()` once the reply finishes if it's set. Deliberately
+  scoped to `say()`'s own mood argument, not `apply_mood()` itself: a
+  gesture's own internal mood steps still work exactly as before, since
+  those sequences already choreograph their own lift movements
+  deliberately. **Verified against the simulated backend only so far**
+  (confirms `set_lift_height_mm()` then `lower_lift_fully()` fire in that
+  order for `happy`/`excited`, and neither an extra nor a missing call for
+  moods that already set `lower_lift=True`) — not yet confirmed on real
+  hardware that this actually reads right (raised pose visible for the
+  whole reply, arm down right after) rather than looking abrupt or racing
+  a bundled gesture's own lift steps.
 
   **Raised directly, a real gap in the "guaranteed by construction" claim
   above:** the guarantee is about *start order* only (gesture starts,
