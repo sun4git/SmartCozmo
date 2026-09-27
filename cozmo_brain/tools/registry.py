@@ -64,19 +64,34 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
         # audio regardless of gesture's async-ness), so speech and
         # movement never actually happened together despite gesture()
         # itself being non-blocking. This guarantees the order instead.
-        gesture_note = ""
-        if gesture:
+        def start_gesture() -> str:
             if settings.gesture_async_enabled:
                 description = robot.run_gesture_async(gesture)
-                gesture_note = f" while performing '{gesture}' ({description})"
-            else:
-                # Same fallback GESTURE_ASYNC_ENABLED=false gives the
-                # standalone `gesture` tool: fully sequential, gesture
-                # finishes before speech starts.
-                description = robot.run_gesture(gesture)
-                gesture_note = f" after performing '{gesture}' ({description})"
+                return f" while performing '{gesture}' ({description})"
+            # Same fallback GESTURE_ASYNC_ENABLED=false gives the
+            # standalone `gesture` tool: fully sequential, gesture
+            # finishes before speech starts either way, regardless of
+            # GESTURE_SPEECH_SYNC_ENABLED below.
+            description = robot.run_gesture(gesture)
+            return f" after performing '{gesture}' ({description})"
+
+        gesture_note = ""
+        # Default: start the gesture immediately, before synthesis - Cozmo
+        # reacts the instant `say` is called. Overlap with speech isn't
+        # guaranteed if synthesis takes longer than the gesture itself
+        # (see GESTURE_SPEECH_SYNC_ENABLED's config.py comment).
+        if gesture and not settings.gesture_speech_sync_enabled:
+            gesture_note = start_gesture()
 
         wav_path = speech.synthesize(text, settings.tts_output_wav)
+
+        # GESTURE_SPEECH_SYNC_ENABLED=true: hold the gesture until speech is
+        # actually ready to play, so the overlap is guaranteed regardless of
+        # how long synthesis took - at the cost of no movement (mood/face
+        # already applied above, independent of this) until synthesis
+        # finishes.
+        if gesture and settings.gesture_speech_sync_enabled:
+            gesture_note = start_gesture()
 
         output = settings.audio_output.lower()
         if output == "system":

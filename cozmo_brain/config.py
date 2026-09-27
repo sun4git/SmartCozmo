@@ -339,6 +339,22 @@ class Settings:
     # sequential behavior if it misbehaves.
     gesture_async_enabled: bool = field(default_factory=lambda: _env_bool("GESTURE_ASYNC_ENABLED", True))
 
+    # `say`'s bundled gesture (see tools/registry.py's handle_say()) starts
+    # before speech is synthesized by default (False) - Cozmo reacts the
+    # instant `say` is called, but the overlap with speech isn't guaranteed
+    # if synthesis (TTS_PROVIDER/network/CPU-dependent) takes longer than
+    # the gesture itself, which can happen with a slower TTS backend (e.g.
+    # local). Set true to synthesize first and only start the gesture once
+    # speech is actually ready to play - overlap is then guaranteed
+    # regardless of synthesis speed, at the cost of Cozmo appearing to
+    # pause (mood/face still update immediately either way, just no
+    # movement) for however long synthesis takes. Only matters when
+    # GESTURE_ASYNC_ENABLED is also true - gesture is fully sequential
+    # either way when it's false.
+    gesture_speech_sync_enabled: bool = field(
+        default_factory=lambda: _env_bool("GESTURE_SPEECH_SYNC_ENABLED", False)
+    )
+
     # --- Vision ---
     vision_enabled: bool = field(default_factory=lambda: _env_bool("VISION_ENABLED", True))
 

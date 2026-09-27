@@ -1290,6 +1290,7 @@ annotated list (it's the source of truth). The essentials:
 | `TAP_THRESHOLD` / `TAP_DEBOUNCE_MS` | `--mode vad`'s tap-activation tuning — accelerometer-spike threshold and minimum time between accepted taps (real backend only; alternate trigger alongside the wake word). |
 | `IDLE_FIDGET_ENABLED` / `IDLE_FIDGET_AFTER_S` | Whether Cozmo plays a small idle gesture after this many quiet seconds with no real conversation turn. |
 | `GESTURE_ASYNC_ENABLED` | Whether `gesture` runs in the background so `say` can overlap with it, instead of blocking until the gesture finishes. |
+| `GESTURE_SPEECH_SYNC_ENABLED` | `false` (default) starts `say`'s bundled gesture before synthesizing speech (instant reaction, overlap not guaranteed if synthesis is slow). `true` synthesizes first and starts the gesture right as playback begins (overlap guaranteed regardless of synthesis speed, at the cost of a pause before Cozmo reacts). |
 | `VISION_ENABLED` | Whether `look()`'s photo gets attached to the next LLM turn. |
 | `KNOWN_PEOPLE_DIR` | Where `remember_person`'s reference photos are stored (experimental). |
 
@@ -1468,6 +1469,28 @@ Done, via `cozmo_brain/`:
   mood step and a concurrent `say()`'s mood-setting land around the same
   moment remains unverified either way (same class of accepted trade-off
   as `pickup_reactor`'s note above, not new).
+
+  **Raised directly, a real gap in the "guaranteed by construction" claim
+  above:** the guarantee is about *start order* only (gesture starts,
+  *then* synthesis begins) — nothing ties the gesture's actual duration to
+  how long synthesis takes. Most gestures run only ~1-3s total (see their
+  step durations in `gestures.py`); if synthesis takes longer than that —
+  plausible with a slower `TTS_PROVIDER` (e.g. `local` on constrained
+  hardware, or just a slow network to a cloud provider) — the gesture can
+  finish *before* audio even starts playing, silently degrading back to
+  sequential despite the code's intent. `GESTURE_SPEECH_SYNC_ENABLED`
+  (default `false`, preserves the behavior above unchanged) flips the
+  order instead: synthesize first, then start the gesture right as
+  playback begins, so the overlap no longer depends on synthesis speed at
+  all — at the cost of Cozmo appearing to pause (mood/face still update
+  immediately either way, independent of this) for however long synthesis
+  takes, rather than reacting the instant `say` is called. **Verified as
+  call-order logic only** (a scripted test with a fake speech client
+  confirms `synthesize()` and the gesture start happen in the order this
+  setting implies, in both positions) — not yet observed on real hardware
+  whether the "instant reaction" default actually feels better than the
+  synced alternative, or how often the default genuinely loses overlap in
+  practice with a real TTS provider's actual latency.
 
   **Raised directly, a real regression from going async:** the lift
   arm was reportedly not reliably ending up fully down anymore after a
