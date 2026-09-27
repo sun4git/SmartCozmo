@@ -101,6 +101,7 @@ See [Roadmap](#roadmap--open-work) for what's still open.
     │   ├── speech_client.py    # SpeechClient interface shared by every STT/TTS provider
     │   ├── groq_client.py       # Groq Whisper STT + Orpheus TTS
     │   ├── openai_client.py     # OpenAI Whisper STT + TTS (STT_PROVIDER/TTS_PROVIDER=openai)
+    │   ├── local_client.py      # Offline faster-whisper STT + Piper TTS (STT_PROVIDER/TTS_PROVIDER=local)
     │   ├── tts_postprocess.py    # shared voice character + gain, used by both providers
     │   └── stt_postprocess.py    # filters known Whisper hallucination phrases
     ├── audio/
@@ -848,13 +849,27 @@ TTS_PROVIDER=openai
 OPENAI_API_KEY=sk-...
 ```
 
-Both providers implement the same `SpeechClient` interface
+All three providers implement the same `SpeechClient` interface
 (`transcribe()`/`synthesize()`), so nothing else in the app — `tools/registry.py`,
 every mode — needs to know which one is actually active. `create_speech_client()`
 in `cozmo_brain/llm/__init__.py` builds one client per provider actually needed
 (reusing a single instance if `STT_PROVIDER` and `TTS_PROVIDER` match) and
 returns a small router that sends `transcribe()` to the STT one and
 `synthesize()` to the TTS one.
+
+A third option, `local`, runs fully offline — no API key, no rate limits,
+no network after a one-time model download: `faster-whisper` (CTranslate2)
+for STT, `Piper` for TTS (`cozmo_brain/llm/local_client.py`). Both engines
+load lazily on first actual use, so picking `local` for only one of
+STT/TTS never loads the other engine. Trade-off is latency, not
+correctness: CPU-only Whisper inference on a Pi is slower than Groq's
+cloud Whisper on dedicated hardware — **untested here how much slower**,
+since there's no Pi available to benchmark on; `LOCAL_STT_MODEL` and
+`LOCAL_TTS_VOICE_PATH` are both easy to drop to a smaller/faster
+model/voice via `.env` alone if it's not responsive enough. Also worth
+noting: the currently maintained `piper-tts` package is GPL-3.0-or-later
+(the original MIT-licensed `rhasspy/piper` repo was archived in favor of
+a GPL fork) — see the note in `requirements.txt`.
 
 Chat/tool-calling (the "brain" — see [Architecture](#architecture)) has its
 own independent `CHAT_PROVIDER` setting and a matching `create_chat_client()`
@@ -1094,7 +1109,7 @@ annotated list (it's the source of truth). The essentials:
 |---|---|
 | `GROQ_API_KEY` | Required unless both `STT_PROVIDER` and `TTS_PROVIDER` are `openai`. Auth for Groq STT + TTS. |
 | `OPENAI_API_KEY` | Required if `STT_PROVIDER` or `TTS_PROVIDER` is `openai`. |
-| `STT_PROVIDER` / `TTS_PROVIDER` | `groq` (default) or `openai`, set independently — which provider does STT vs. TTS; they don't have to match. |
+| `STT_PROVIDER` / `TTS_PROVIDER` | `groq` (default), `openai`, or `local`, set independently — which provider does STT vs. TTS; they don't have to match. |
 | `CHAT_PROVIDER` | Which provider does chat/tool-calling. Only `ollama` is implemented today. |
 | `OLLAMA_BASE_URL` | Ollama endpoint chat/tool-calling requests go to. |
 | `OLLAMA_MODEL` | Model name; must support `tools` (and ideally `vision` for `look`). |
@@ -1102,6 +1117,8 @@ annotated list (it's the source of truth). The essentials:
 | `AUDIO_OUTPUT` / `PLAYBACK_DEVICE` | Route speech to `cozmo` (default), `system` speaker, or `both` at once. |
 | `GROQ_STT_MODEL` / `GROQ_TTS_MODEL` / `GROQ_TTS_VOICE` | Groq model/voice choices (used when `STT_PROVIDER`/`TTS_PROVIDER`=`groq`). |
 | `OPENAI_STT_MODEL` / `OPENAI_TTS_MODEL` / `OPENAI_TTS_VOICE` | OpenAI model/voice choices (used when `STT_PROVIDER`/`TTS_PROVIDER`=`openai`). |
+| `LOCAL_STT_MODEL` / `LOCAL_STT_DEVICE` / `LOCAL_STT_COMPUTE_TYPE` | faster-whisper model size/device/compute type (used when `STT_PROVIDER`=`local`). No key, no network after the first model download. |
+| `LOCAL_TTS_VOICE_PATH` | Path to a downloaded Piper `.onnx` voice model (used when `TTS_PROVIDER`=`local`). |
 | `OPENAI_TTS_SPEED` | OpenAI's native speed control — try ~0.85-0.90 to roughly match Groq's pacing. |
 | `TTS_GAIN` | Max volume boost for TTS output, RMS-targeted with a soft limiter (Cozmo's speaker is quiet). |
 | `TTS_LEADIN_MS` | Silent lead-in before speech, works around the first word often being inaudible. |
@@ -1554,26 +1571,30 @@ Still open, roughly in priority order:
 5. **A fully key-free STT+TTS provider**, on top of the existing Groq/OpenAI
    split — for running with literally no API account at all, not just as a
    Groq-rate-limit fallback. Two different properties are easy to conflate
-   here, worth being precise about when this gets built:
-   - **No key, but still needs the internet** — `edge-tts` (confirmed real,
-     maintained package): uses Microsoft Edge's own cloud TTS over an
-     unofficial, reverse-engineered API (no account, but it's not a
-     published/supported Microsoft product — it has periodically broken
-     when Microsoft changes something internally, historically fixed
-     upstream but not guaranteed). Good natural-sounding voices for free,
-     at the cost of that reliability risk and still needing a network.
-   - **No key AND no network** — genuinely local models, run on the Pi
-     itself: `faster-whisper` (CTranslate2, real CPU speedups over plain
-     Whisper) or `whisper.cpp` for STT; **Piper** for TTS — confirmed real
-     and specifically built/validated for Raspberry Pi-class hardware
-     (used throughout the Home Assistant/Rhasspy voice-assistant
-     ecosystem), and already ONNX-based like `openwakeword`, so it'd fit
-     the existing dependency pattern. The real cost is latency: local
-     Whisper inference on a Pi 5's CPU (no GPU) will be slower than Groq's
-     cloud Whisper running on dedicated hardware — untested here how much
-     slower, since there's no Pi to benchmark on.
-   Either fits the existing `SpeechClient` interface as a third provider,
-   same shape as `GroqClient`/`OpenAIClient`.
+   here, worth being precise about:
+   - ✅ **No key AND no network — done.** `STT_PROVIDER`/`TTS_PROVIDER=local`
+     (`cozmo_brain/llm/local_client.py`): `faster-whisper` (CTranslate2,
+     real CPU speedups over plain Whisper) for STT, **Piper** for TTS —
+     confirmed real and specifically built/validated for Raspberry
+     Pi-class hardware (used throughout the Home Assistant/Rhasspy
+     voice-assistant ecosystem), and already ONNX-based like
+     `openwakeword`, so it fits the existing dependency pattern. See
+     [Switching speech providers](#switching-speech-providers-and-separately-chat).
+     **The real cost is latency, untested against real hardware:** CPU-only
+     Whisper inference on a Pi 5 (no GPU) will be slower than Groq's cloud
+     Whisper on dedicated hardware, and by how much is unmeasured — no Pi
+     was available here to benchmark on. `LOCAL_STT_MODEL`/
+     `LOCAL_TTS_VOICE_PATH` are both easy to drop to a smaller/faster
+     model/voice from `.env` alone once real latency is known.
+   - **No key, but still needs the internet** — not built. `edge-tts`
+     (confirmed real, maintained package): uses Microsoft Edge's own cloud
+     TTS over an unofficial, reverse-engineered API (no account, but it's
+     not a published/supported Microsoft product — it has periodically
+     broken when Microsoft changes something internally, historically
+     fixed upstream but not guaranteed). Good natural-sounding voices for
+     free, at the cost of that reliability risk and still needing a
+     network. Would fit the same `SpeechClient` interface as a fourth
+     provider if this is ever wanted.
 
 ---
 

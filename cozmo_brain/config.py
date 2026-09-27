@@ -37,8 +37,9 @@ class Settings:
 
     # Which provider does STT, TTS, and chat/tool-calling — each is
     # independently configurable, so e.g. STT_PROVIDER=groq + TTS_PROVIDER=openai
-    # is valid. "groq" (default) or "openai" for STT/TTS; only "ollama" is
-    # implemented for chat today. See cozmo_brain/llm/__init__.py's
+    # is valid. "groq" (default), "openai", or "local" (fully offline, no API
+    # key — see the Local STT/TTS section below) for STT/TTS; only "ollama"
+    # is implemented for chat today. See cozmo_brain/llm/__init__.py's
     # create_speech_client() / create_chat_client().
     stt_provider: str = field(default_factory=lambda: _env_str("STT_PROVIDER", "groq"))
     tts_provider: str = field(default_factory=lambda: _env_str("TTS_PROVIDER", "groq"))
@@ -73,6 +74,34 @@ class Settings:
     openai_stt_model: str = field(default_factory=lambda: _env_str("OPENAI_STT_MODEL", "whisper-1"))
     openai_tts_model: str = field(default_factory=lambda: _env_str("OPENAI_TTS_MODEL", "tts-1"))
     openai_tts_voice: str = field(default_factory=lambda: _env_str("OPENAI_TTS_VOICE", "alloy"))
+
+    # --- Local STT/TTS (used when STT_PROVIDER/TTS_PROVIDER=local) ---
+    # Fully offline, no API key, no rate limits — faster-whisper (CTranslate2)
+    # for STT, Piper for TTS. Requires `pip install faster-whisper piper-tts`
+    # (commented out in requirements.txt by default) and, for TTS, a
+    # downloaded Piper voice (`python3 -m piper.download_voices <name>`).
+    # See cozmo_brain/llm/local_client.py.
+
+    # Whisper model size: "tiny"/"base"/"small"/"medium"/"large-v3". Bigger =
+    # more accurate but slower on the Pi's CPU-only hardware — "base" is a
+    # starting guess to tune from real latency on real hardware, not a
+    # measured choice (no Pi available here to benchmark on). First run
+    # downloads the model from Hugging Face into a local cache — that
+    # one-time step needs internet, every run after that is fully offline.
+    local_stt_model: str = field(default_factory=lambda: _env_str("LOCAL_STT_MODEL", "base"))
+
+    # "cpu" — the Pi has no GPU. "int8" quantization is CTranslate2's
+    # fastest CPU compute type, at some accuracy cost vs "float32"/"int8_float16".
+    local_stt_device: str = field(default_factory=lambda: _env_str("LOCAL_STT_DEVICE", "cpu"))
+    local_stt_compute_type: str = field(default_factory=lambda: _env_str("LOCAL_STT_COMPUTE_TYPE", "int8"))
+
+    # Path to a downloaded Piper voice's .onnx file (its sibling .onnx.json
+    # must sit alongside it). "medium" quality voices are Piper's own
+    # recommended tier for Raspberry Pi-class hardware; drop to a "low"
+    # quality voice instead if it's not fast enough on the real Pi.
+    local_tts_voice_path: str = field(
+        default_factory=lambda: _env_str("LOCAL_TTS_VOICE_PATH", "en_US-lessac-medium.onnx")
+    )
 
     # OpenAI's own speed control (0.25-4.0, native to their TTS API).
     # Measured directly: the default "alloy" voice speaks ~14% faster than

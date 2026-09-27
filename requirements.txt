@@ -20,3 +20,20 @@ pycozmo
 # Also for --mode vad: wake-word detection. NOT a plain `pip install
 # openwakeword` — see cozmo_brain/audio/wakeword.py for the exact install
 # command (it has a broken dependency on Python 3.12/Linux otherwise).
+
+# Only required if STT_PROVIDER or TTS_PROVIDER=local in .env — fully
+# offline STT/TTS, no API key, no rate limits. See cozmo_brain/llm/local_client.py.
+# faster-whisper (CTranslate2 Whisper reimplementation, real CPU speedups) for STT:
+# faster-whisper
+#
+# Piper (fast local neural TTS, validated for Raspberry Pi-class hardware)
+# for TTS. NOTE: the currently maintained `piper-tts` package (published
+# from the OHF-Voice/piper1-gpl fork, since the original rhasspy/piper repo
+# was archived) is GPL-3.0-or-later, not the original's MIT license — worth
+# confirming that's acceptable for this project before installing.
+# piper-tts
+#
+# Piper also needs a voice model downloaded once (creates <name>.onnx +
+# <name>.onnx.json in the current directory) before LOCAL_TTS_VOICE_PATH in
+# .env can point at it:
+# python3 -m piper.download_voices en_US-lessac-medium

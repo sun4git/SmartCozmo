@@ -17,7 +17,12 @@ def _build_speech_provider(provider: str, settings: Settings) -> SpeechClient:
 
         return OpenAIClient(settings)
 
-    raise ValueError(f"Unknown provider '{provider}'. Use 'groq' or 'openai'.")
+    if provider == "local":
+        from cozmo_brain.llm.local_client import LocalClient
+
+        return LocalClient(settings)
+
+    raise ValueError(f"Unknown provider '{provider}'. Use 'groq', 'openai', or 'local'.")
 
 
 class _SpeechRouter:
