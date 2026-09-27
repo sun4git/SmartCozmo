@@ -1328,7 +1328,7 @@ annotated list (it's the source of truth). The essentials:
 | `VAD_MIN_RMS` | Loudness floor a frame must also clear (in addition to webrtcvad) to count as speech — the actual quota-saving filter, rejects noise before it ever reaches the STT API. |
 | `WAKE_WORD_MODEL` / `WAKE_WORD_THRESHOLD` | Wake word gating `--mode vad` — stock name or path to a custom `.onnx`. |
 | `TAP_THRESHOLD` / `TAP_DEBOUNCE_MS` | `--mode vad`'s tap-activation tuning — accelerometer-spike threshold and minimum time between accepted taps (real backend only; alternate trigger alongside the wake word). |
-| `IDLE_FIDGET_ENABLED` / `IDLE_FIDGET_AFTER_S` | Whether Cozmo plays a small idle gesture after this many quiet seconds with no real conversation turn. |
+| `IDLE_FIDGET_ENABLED` / `IDLE_FIDGET_AFTER_S` | Whether Cozmo plays a small idle gesture after this many quiet seconds with no real conversation turn. Default 30s — kept short since Cozmo's own hardware-level inactivity disconnect/power-off happens well before the original 5min default ever fired. |
 | `GESTURE_ASYNC_ENABLED` | Whether `gesture` runs in the background so `say` can overlap with it, instead of blocking until the gesture finishes. |
 | `GESTURE_SPEECH_SYNC_ENABLED` | `false` (default) starts `say`'s bundled gesture before synthesizing speech (instant reaction, overlap not guaranteed if synthesis is slow). `true` synthesizes first and starts the gesture right as playback begins (overlap guaranteed regardless of synthesis speed, at the cost of a pause before Cozmo reacts). |
 | `VISION_ENABLED` | Whether `look()`'s photo gets attached to the next LLM turn. |
@@ -1865,9 +1865,18 @@ Still open, roughly in priority order:
      `CozmoEngine`, not just a `RobotBackend`) plays a random pick from
      `("peek", "shrug")` — deliberately calm, no-drive gestures, so idle
      Cozmo doesn't go rolling off somewhere on its own — every
-     `IDLE_FIDGET_AFTER_S` (default 300s) of continued quiet, resetting
-     the moment a real turn happens. `IDLE_FIDGET_ENABLED=false` disables
-     it entirely.
+     `IDLE_FIDGET_AFTER_S` (default 30s — see below) of continued quiet,
+     resetting the moment a real turn happens. `IDLE_FIDGET_ENABLED=false`
+     disables it entirely.
+
+     **Raised directly on real hardware:** the original 300s (5 min)
+     default never actually got a chance to fire — Cozmo disconnects/
+     powers off (its own hardware-level inactivity behavior, not anything
+     in this codebase) well before 5 minutes of quiet elapses, so idle
+     fidgeting was effectively dead in practice, never once observed.
+     Dropped the default to 30s — roughly `VAD_FOLLOWUP_TIMEOUT_S`'s 15s
+     wake-word window plus another 15s — specifically so it gets a real
+     chance to run before whatever cuts the session short does.
 
      **Auditing this surfaced a real, separate bug, found by request:**
      checked every existing gesture/mood for whether any of them raise the

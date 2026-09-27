@@ -336,8 +336,17 @@ class Settings:
     # gesture plays every interval this long while the quiet continues -
     # purely cosmetic personality, not sensor-driven, so no calibration
     # concern like the tap/cliff thresholds above. See idle_fidget.py.
+    #
+    # Raised directly on real hardware: the original 300s (5 min) default
+    # never actually got a chance to fire - Cozmo disconnects/powers off
+    # (its own hardware-level inactivity behavior, not anything in this
+    # codebase) well before 5 minutes of quiet elapses, so idle fidgeting
+    # was effectively dead in practice. 30s is a deliberately short
+    # replacement - roughly VAD_FOLLOWUP_TIMEOUT_S's 15s wake-word window
+    # plus another 15s - specifically so it gets a real chance to run
+    # before whatever cuts the session short does.
     idle_fidget_enabled: bool = field(default_factory=lambda: _env_bool("IDLE_FIDGET_ENABLED", True))
-    idle_fidget_after_s: int = field(default_factory=lambda: _env_int("IDLE_FIDGET_AFTER_S", 300))
+    idle_fidget_after_s: int = field(default_factory=lambda: _env_int("IDLE_FIDGET_AFTER_S", 30))
 
     # --- Gesture/speech concurrency ---
     # Whether the `gesture` tool runs asynchronously (starts the
