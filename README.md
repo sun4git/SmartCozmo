@@ -1307,7 +1307,7 @@ annotated list (it's the source of truth). The essentials:
 | `TTS_ROBOT_MOD_DEPTH` / `TTS_ROBOT_MOD_HZ` | Optional ring-modulation robotic timbre. Depth 0.0 = off. |
 | `ROBOT_BACKEND` | `real` or `simulated` (cozmo_brain/ only; `--simulate` overrides it). |
 | `ROBOT_STALE_AFTER_S` | Seconds without robot telemetry before auto-reconnect kicks in. |
-| `BATTERY_LOW_VOLTAGE` / `BATTERY_CRITICAL_VOLTAGE` | Voltage thresholds for the face battery-warning icon (real backend only). |
+| `BATTERY_LOW_VOLTAGE` / `BATTERY_CRITICAL_VOLTAGE` | Voltage thresholds for the face battery-warning icon; `BATTERY_LOW_VOLTAGE` also gates whether `drive`/`turn` refuse to move while charging (real backend only). |
 | `BATTERY_CHECK_INTERVAL_S` | How often the battery monitor polls voltage. |
 | `COZMO_WIFI_SSID` / `COZMO_WIFI_PASSWORD` | Optional Wi-Fi auto-connect (Linux/nmcli only). Password only needed for the first connect. |
 | `TURN_SPEED_MMPS` / `TURN_SECONDS_PER_DEGREE` | `turn()` calibration — tune with `--mode calibrate`. |
@@ -1764,6 +1764,26 @@ Still open, roughly in priority order:
      and discards the sample instead of quietly recording a bogus
      degrees-per-second reading if you calibrate while it's still charging.
      **Not yet verified against real hardware.**
+
+     **Raised directly, a real usability gap:** blocking movement for the
+     *entire* time `IS_CHARGING` was true — regardless of how much charge
+     was already there — made an explicit request ("can you come out?")
+     honored too late to matter: the model doesn't see `drive()`'s blocked
+     result until *after* it already committed to a `say` in the same
+     turn, so "I'm coming!" played and Cozmo never actually moved,
+     observed directly on real hardware. `_must_stay_on_charger()`
+     (`robot/real.py`) now only blocks while genuinely charging **and**
+     the battery is at or below `BATTERY_LOW_VOLTAGE` — above that,
+     an explicit drive/turn request is honored even mid-charge, not just
+     once `IS_CHARGING` flips off entirely. Unknown voltage (no
+     `RobotState` packet read yet) stays conservative and blocks, same as
+     before this existed. Still deliberately not autonomous — this only
+     changes what an *explicit* request is allowed to do, nothing decides
+     to leave the charger on its own. **Verified as boundary-condition
+     logic only** (checked `_must_stay_on_charger()` directly against
+     every combination of on-charger/charging/voltage, including the
+     unknown-voltage and exactly-at-threshold cases) — not yet observed
+     against a real battery actually crossing that threshold on hardware.
    - ✅ **Startle reaction on pickup — done.** `RobotBackend.is_picked_up()`
      (real backend: `IS_PICKED_UP`, already read for tap-gating; simulated:
      always `False`) is polled by a small background thread,

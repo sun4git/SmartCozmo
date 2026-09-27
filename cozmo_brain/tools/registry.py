@@ -141,7 +141,7 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
     def handle_drive(distance_mm: float, speed_mmps: float) -> ToolResult:
         result = robot.drive(distance_mm, speed_mmps)
         if not result.moved:
-            return ToolResult(True, "Didn't drive - still charging. I'll be able to once I'm fully charged.")
+            return ToolResult(True, "Didn't drive - battery's still low, need to charge a bit more first.")
         if result.hazard:
             return ToolResult(True, f"Only drove partway toward {distance_mm:.0f}mm - {_HAZARD_MESSAGES[result.hazard]}.")
         return ToolResult(True, f"Drove {distance_mm:.0f}mm at {speed_mmps:.0f}mm/s.")
@@ -149,7 +149,7 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
     def handle_turn(angle_degrees: float) -> ToolResult:
         result = robot.turn(angle_degrees)
         if not result.moved:
-            return ToolResult(True, "Didn't turn - still charging. I'll be able to once I'm fully charged.")
+            return ToolResult(True, "Didn't turn - battery's still low, need to charge a bit more first.")
         if result.hazard:
             return ToolResult(True, f"Only turned partway - {_HAZARD_MESSAGES[result.hazard]}.")
         return ToolResult(True, f"Turned {angle_degrees:.0f} degrees.")

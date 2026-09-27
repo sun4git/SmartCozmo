@@ -288,6 +288,26 @@ class PyCozmoRobot(RobotBackend):
     def is_charging(self) -> bool:
         return bool(self._latest_status & pycozmo.RobotStatusFlag.IS_CHARGING)
 
+    def _must_stay_on_charger(self) -> bool:
+        """Whether drive()/spin_wheels_for() should refuse to move Cozmo
+        right now. Only true while actively charging AND the battery still
+        genuinely needs it (at/below BATTERY_LOW_VOLTAGE) - previously this
+        blocked *any* movement for the entire time is_charging() was true,
+        even with a mostly-full battery and an explicit request (a
+        conversational reply, a tool call) to come out. Raised directly:
+        that made Cozmo's own spoken reply ("I'm coming!") a lie whenever
+        the model bundled `say` with `drive` in the same turn - `say`
+        already ran and played audio before the model ever saw drive()'s
+        blocked result, so the mismatch couldn't be caught after the fact.
+        Unknown voltage (None - not yet read a real RobotState packet)
+        stays conservative and blocks, same as before this existed."""
+        if not (self.is_on_charger() and self.is_charging()):
+            return False
+        voltage = self.get_battery_voltage()
+        if voltage is None:
+            return True
+        return voltage <= self._settings.battery_low_voltage
+
     def is_picked_up(self) -> bool:
         return bool(self._latest_status & pycozmo.RobotStatusFlag.IS_PICKED_UP)
 
@@ -304,16 +324,17 @@ class PyCozmoRobot(RobotBackend):
     # completely unrelated next).
 
     def drive(self, distance_mm: float, speed_mmps: float, *, suppress_cliff: bool = False) -> MoveResult:
-        # Blocked only while actively *charging*, not merely resting on the
-        # charger - once full (is_on_charger() and not is_charging()), a
-        # normal drive/turn is allowed to proceed like any other, and drives
-        # Cozmo off the dock as a side effect of whatever actually asked for
-        # movement. Deliberately not an autonomous "leave the charger once
-        # full" behavior of its own - that decision stays with whatever
-        # ordinarily triggers a drive (conversation, a tool call), not a
-        # background reactor deciding to move Cozmo unprompted.
-        if self.is_on_charger() and self.is_charging():
-            logger.info("Ignoring drive() - Cozmo is still charging.")
+        # Blocked only while actively *charging* AND the battery still
+        # needs it (see _must_stay_on_charger()) - once full, or once above
+        # BATTERY_LOW_VOLTAGE even mid-charge, a normal drive/turn is
+        # allowed to proceed like any other, and drives Cozmo off the dock
+        # as a side effect of whatever actually asked for movement.
+        # Deliberately not an autonomous "leave the charger" behavior of
+        # its own - that decision stays with whatever ordinarily triggers a
+        # drive (conversation, a tool call), not a background reactor
+        # deciding to move Cozmo unprompted.
+        if self._must_stay_on_charger():
+            logger.info("Ignoring drive() - still charging and battery is low.")
             return MoveResult(moved=False)
 
         # Serializes against spin_wheels_for()/another drive() so a
@@ -372,8 +393,8 @@ class PyCozmoRobot(RobotBackend):
         return self.spin_wheels_for(duration, turn_speed * direction)
 
     def spin_wheels_for(self, seconds: float, speed_mmps: float) -> MoveResult:
-        if self.is_on_charger() and self.is_charging():
-            logger.info("Ignoring spin_wheels_for() - Cozmo is still charging.")
+        if self._must_stay_on_charger():
+            logger.info("Ignoring spin_wheels_for() - still charging and battery is low.")
             return MoveResult(moved=False)
 
         # See drive()'s matching comment. Reentrant because the charger-exit
