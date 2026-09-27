@@ -76,6 +76,21 @@ class RobotBackend(abc.ABC):
         """
 
     @abc.abstractmethod
+    def dock(self) -> MoveResult:
+        """Reverse toward the charger to dock, with the charger platform's
+        own known false "cliff detected" trigger suppressed for this move
+        only (see real.py's drive()/leaving-charger comments — same
+        firmware-level quirk, just encountered in the opposite direction
+        here). `moved=False` if already on the charger — nothing to do.
+
+        Not an autonomous "find and align to the charger" behavior —
+        PyCozmo has no beacon/vision-based charger detection here, so this
+        only helps once Cozmo is already lined up close to and facing away
+        from it. Distance/speed are fixed, not model-supplied, specifically
+        so getting the reverse direction/magnitude right doesn't depend on
+        the model remembering to pass a negative drive() distance."""
+
+    @abc.abstractmethod
     def set_head_angle_deg(self, angle_deg: float, duration: float = 0.4) -> None: ...
 
     @abc.abstractmethod

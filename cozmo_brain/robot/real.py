@@ -303,7 +303,7 @@ class PyCozmoRobot(RobotBackend):
     # and the model - never told anything happened - said something
     # completely unrelated next).
 
-    def drive(self, distance_mm: float, speed_mmps: float) -> MoveResult:
+    def drive(self, distance_mm: float, speed_mmps: float, *, suppress_cliff: bool = False) -> MoveResult:
         # Blocked only while actively *charging*, not merely resting on the
         # charger - once full (is_on_charger() and not is_charging()), a
         # normal drive/turn is allowed to proceed like any other, and drives
@@ -328,10 +328,13 @@ class PyCozmoRobot(RobotBackend):
             # platform/edge reads as a false CLIFF_DETECTED, both at the
             # firmware level (EnableStopOnCliff) and ours, so left as-is
             # this drive stopped itself and backed right back onto the
-            # charger it was leaving. IS_FALLING protection is unrelated
-            # and stays active regardless.
-            leaving_charger = self.is_on_charger()
-            if leaving_charger:
+            # charger it was leaving. Also suppressed on explicit request
+            # (suppress_cliff=True) - dock() below hits the exact same false
+            # trigger approaching the charger from the other direction,
+            # where is_on_charger() can't tell us it's about to happen.
+            # IS_FALLING protection is unrelated and stays active regardless.
+            ignore_cliff = self.is_on_charger() or suppress_cliff
+            if ignore_cliff:
                 self._set_cliff_protection(enabled=False)
 
             cli = self._client
@@ -343,14 +346,23 @@ class PyCozmoRobot(RobotBackend):
             duration = abs(distance_mm) / speed
 
             cli.drive_wheels(lwheel_speed=signed_speed, rwheel_speed=signed_speed)
-            hazard = self._sleep_unless_cliff(duration, ignore_cliff=leaving_charger)
+            hazard = self._sleep_unless_cliff(duration, ignore_cliff=ignore_cliff)
             cli.stop_all_motors()
 
-            if leaving_charger:
+            if ignore_cliff:
                 self._set_cliff_protection(enabled=True)
             if hazard:
                 self._react_to_hazard(hazard, backup_away_from_sign=signed_speed)
             return MoveResult(moved=True, hazard=hazard)
+
+    def dock(self) -> MoveResult:
+        if self.is_on_charger():
+            logger.info("Ignoring dock() - Cozmo is already on the charger.")
+            return MoveResult(moved=False)
+
+        distance_mm = -abs(self._settings.charger_dock_distance_mm)
+        speed = self._settings.charger_dock_speed_mmps
+        return self.drive(distance_mm, speed, suppress_cliff=True)
 
     def turn(self, angle_degrees: float) -> MoveResult:
         turn_speed = self._settings.turn_speed_mmps

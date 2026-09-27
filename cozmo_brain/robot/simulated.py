@@ -76,6 +76,12 @@ class SimulatedRobot(RobotBackend):
             time.sleep(min(seconds, 0.3))
             return MoveResult(moved=True)
 
+    def dock(self) -> MoveResult:
+        with self._wheel_lock:
+            logger.info("[sim] \U0001f50c docking (reversing toward charger)")
+            time.sleep(0.1)
+            return MoveResult(moved=True)
+
     def set_head_angle_deg(self, angle_deg: float, duration: float = 0.4) -> None:
         logger.info("[sim] \U0001f440 head angle -> %.1f deg", angle_deg)
 

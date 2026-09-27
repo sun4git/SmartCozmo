@@ -229,10 +229,19 @@ class Settings:
     # resting (full) on the charger, before performing that turn - confirmed
     # on real hardware that turning in place on/near the dock risks
     # catching on it, and its platform/edge falsely trips CLIFF_DETECTED
-    # anyway (see robot/real.py). Guessed distance/speed, not yet tuned
-    # against the real dock's actual geometry.
-    charger_exit_distance_mm: float = field(default_factory=lambda: _env_float("CHARGER_EXIT_DISTANCE_MM", 100.0))
+    # anyway (see robot/real.py). 150mm confirmed on real hardware as
+    # actually enough to clear the dock - 100mm (the original guess) was
+    # observed not reliably clearing it.
+    charger_exit_distance_mm: float = field(default_factory=lambda: _env_float("CHARGER_EXIT_DISTANCE_MM", 150.0))
     charger_exit_speed_mmps: float = field(default_factory=lambda: _env_float("CHARGER_EXIT_SPEED_MMPS", 60.0))
+
+    # How far/fast to reverse for dock() (RobotBackend.dock(), see
+    # robot/base.py) - the same false-CLIFF_DETECTED platform/edge geometry
+    # as above, just approached from the opposite direction. Same magnitude
+    # as the confirmed exit distance, since it's the same physical
+    # platform/edge - not itself independently confirmed on real hardware yet.
+    charger_dock_distance_mm: float = field(default_factory=lambda: _env_float("CHARGER_DOCK_DISTANCE_MM", 150.0))
+    charger_dock_speed_mmps: float = field(default_factory=lambda: _env_float("CHARGER_DOCK_SPEED_MMPS", 60.0))
 
     # --- Agentic loop / conversation ---
     max_tool_iterations: int = field(default_factory=lambda: _env_int("MAX_TOOL_ITERATIONS", 4))

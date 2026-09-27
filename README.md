@@ -489,6 +489,7 @@ why this ended up folded into `--mode vad` instead of a standalone mode.
 | `list_animations()` | Lists the real animation/group names actually loaded on this robot. |
 | `drive(distance_mm, speed_mmps)` | Drives straight, clamped to safe limits. |
 | `turn(angle_degrees)` | Turns in place (calibrated via `TURN_SECONDS_PER_DEGREE`). |
+| `dock()` | Reverses onto the charger, with the platform's known false cliff-detection trigger suppressed. Doesn't search for/align to the charger — only works already close and facing away from it. **Not yet verified against real hardware.** |
 | `look()` | Captures a camera frame and attaches it to the next LLM turn for vision. |
 | `remember_person(name)` | Captures a reference photo, stored under that name. |
 | `who_is_this()` | Captures a photo and asks the vision LLM if it matches anyone remembered. **Experimental.** |
@@ -1240,6 +1241,7 @@ annotated list (it's the source of truth). The essentials:
 | `TURN_SPEED_MMPS` / `TURN_SECONDS_PER_DEGREE` | `turn()` calibration — tune with `--mode calibrate`. |
 | `MAX_DRIVE_SPEED_MMPS` / `MAX_DRIVE_DISTANCE_MM` | Safety clamps on the `drive` tool. |
 | `CHARGER_EXIT_DISTANCE_MM` / `CHARGER_EXIT_SPEED_MMPS` | How far/fast to drive straight off the charger before performing a requested turn, if still docked (real backend only). |
+| `CHARGER_DOCK_DISTANCE_MM` / `CHARGER_DOCK_SPEED_MMPS` | How far/fast the `dock` tool reverses onto the charger (real backend only). |
 | `MAX_TOOL_ITERATIONS` | Cap on LLM↔tool round-trips per user turn. |
 | `CONVERSATION_MAX_MESSAGES` / `CONVERSATION_HISTORY_PATH` | Memory size and persistence path. |
 | `VAD_AGGRESSIVENESS` / `VAD_SILENCE_MS` / `VAD_MAX_UTTERANCE_S` | Hands-free listening tuning. |
@@ -1593,18 +1595,36 @@ Still open, roughly in priority order:
      separately from the cliff-suppression issue above. `spin_wheels_for()`
      (so `turn()`, and any gesture step that turns) now checks
      `is_on_charger()` first and, if still docked, drives straight off
-     (`CHARGER_EXIT_DISTANCE_MM`/`CHARGER_EXIT_SPEED_MMPS`, default 100mm
-     at 60mm/s — guessed, not tuned against the real dock) via `drive()`
-     itself before performing the requested turn at all, rather than
-     turning in place on top of the dock with cliff detection merely
-     suppressed. If that straight exit hits a real hazard (a fall — cliff
-     is already covered by `drive()`'s own suppression), the turn is
-     skipped entirely and that hazard is reported instead, rather than
-     compounding it with more movement. **Verified as control-flow logic
-     only** (a mocked test confirms `drive()` is called first with the
-     exit distance/speed, the turn is skipped on an exit hazard, and
-     neither happens when not on the charger) — the actual distance/speed
-     needed to clear the real dock is unverified.
+     (`CHARGER_EXIT_DISTANCE_MM`/`CHARGER_EXIT_SPEED_MMPS`, now 150mm at
+     60mm/s — **confirmed on real hardware**: the original 100mm guess
+     wasn't reliably clearing the dock) via `drive()` itself before
+     performing the requested turn at all, rather than turning in place on
+     top of the dock with cliff detection merely suppressed. If that
+     straight exit hits a real hazard (a fall — cliff is already covered by
+     `drive()`'s own suppression), the turn is skipped entirely and that
+     hazard is reported instead, rather than compounding it with more
+     movement.
+
+   - **Same false cliff trigger, the other direction — found directly on
+     real hardware:** reversing *toward* the charger to dock (e.g. "go back
+     15cm") hit the identical false `CLIFF_DETECTED` the exit fix above
+     already diagnoses, just approached from the opposite side of the same
+     platform/edge. The existing fix couldn't cover this — it keys off
+     `is_on_charger()` being `true` at the *start* of the drive, which is
+     exactly backwards for an approach: Cozmo isn't on the charger yet at
+     that point, there's no sensor to say "about to be." Rather than
+     suppress cliff detection for *every* reverse drive (which would remove
+     real protection backing toward an actual ledge that has nothing to do
+     with the charger), added a dedicated `dock()` primitive
+     (`RobotBackend.dock()`, a new `dock` tool) that only ever performs one
+     specific, intentional action — reverse a fixed distance
+     (`CHARGER_DOCK_DISTANCE_MM`/`CHARGER_DOCK_SPEED_MMPS`) with cliff
+     suppression on — so the model only takes that trade-off when
+     explicitly asked to return Cozmo to the charger, not for arbitrary
+     backward movement. `drive()`'s suppression logic was generalized (a
+     new `suppress_cliff` parameter) rather than duplicated. **Not yet
+     verified against real hardware** — implemented directly from the log/
+     diagnosis above, no live redocking attempt confirmed yet.
    - ✅ **Charger-safe wheels — done, gated on "fully charged" not just
      "docked".** `drive()`/`spin_wheels_for()` (so `turn()` too) skip the
      wheel command entirely — returning `MoveResult(moved=False)` instead

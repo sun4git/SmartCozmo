@@ -133,6 +133,14 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
             return ToolResult(True, f"Only turned partway - {_HAZARD_MESSAGES[result.hazard]}.")
         return ToolResult(True, f"Turned {angle_degrees:.0f} degrees.")
 
+    def handle_dock() -> ToolResult:
+        result = robot.dock()
+        if not result.moved:
+            return ToolResult(True, "Already on the charger - no need to dock.")
+        if result.hazard:
+            return ToolResult(True, f"Only made partway back to the charger - {_HAZARD_MESSAGES[result.hazard]}.")
+        return ToolResult(True, "Backed onto the charger to dock.")
+
     def handle_look() -> ToolResult:
         path = robot.capture_photo(settings.camera_snapshot_path)
         return ToolResult(True, "Took a photo.", extra={"image_path": path})
@@ -273,6 +281,20 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
                 "required": ["angle_degrees"],
             },
             handler=lambda args: handle_turn(args["angle_degrees"]),
+        ),
+        Tool(
+            name="dock",
+            description=(
+                "Reverse onto the charger to dock. Use this specifically when asked to return "
+                "to the charger/dock/base, instead of drive() with a negative distance - a plain "
+                "reverse drive() gets falsely stopped early by the charger platform's own edge "
+                "(it looks like a cliff/dropoff to Cozmo's sensors right before actually touching "
+                "it), which this works around. Only reverses in a straight line - it does not "
+                "search for or align to the charger on its own, so it only works when Cozmo is "
+                "already reasonably close to and facing away from it."
+            ),
+            parameters={"type": "object", "properties": {}},
+            handler=lambda _args: handle_dock(),
         ),
         Tool(
             name="look",
