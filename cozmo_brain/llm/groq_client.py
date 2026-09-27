@@ -1,4 +1,5 @@
-"""Groq API wrappers: Whisper speech-to-text and Orpheus text-to-speech.
+"""Groq API wrappers: Whisper speech-to-text, Orpheus text-to-speech, and
+(GroqChatClient) chat/tool-calling.
 
 Voice character (pitch/tone) and gain are applied in tts_postprocess.py,
 shared with every other provider client (e.g. openai_client.py).
@@ -9,10 +10,12 @@ from __future__ import annotations
 import requests
 
 from cozmo_brain.config import Settings
+from cozmo_brain.llm.openai_compatible_chat import OpenAICompatibleChatClient
 from cozmo_brain.llm.tts_postprocess import apply_cozmo_voice_character
 
 _STT_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 _TTS_URL = "https://api.groq.com/openai/v1/audio/speech"
+_CHAT_BASE_URL = "https://api.groq.com/openai/v1"
 
 
 class GroqClient:
@@ -53,3 +56,17 @@ class GroqClient:
         with open(out_path, "wb") as f:
             f.write(audio_bytes)
         return out_path
+
+
+class GroqChatClient(OpenAICompatibleChatClient):
+    """Groq's chat-completions endpoint is OpenAI-compatible - identical
+    request/response shape, just a different base URL, key, and model name
+    space (Groq's own hosted models, not gpt-*). See openai_compatible_chat.py."""
+
+    def __init__(self, settings: Settings):
+        super().__init__(
+            base_url=_CHAT_BASE_URL,
+            api_key=settings.require_groq_key(),
+            model=settings.groq_chat_model,
+            timeout_s=settings.chat_timeout_s,
+        )

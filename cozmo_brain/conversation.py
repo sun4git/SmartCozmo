@@ -39,8 +39,12 @@ class Conversation:
         self.messages.append(msg)
         self._trim()
 
-    def add_tool_result(self, tool_name: str, result: str) -> None:
-        self.messages.append({"role": "tool", "name": tool_name, "content": result})
+    def add_tool_result(self, tool_name: str, result: str, tool_call_id: str = "") -> None:
+        # "name" is Ollama's own convention; "tool_call_id" is what
+        # OpenAI-compatible endpoints (Groq, OpenAI) require instead - see
+        # openai_compatible_chat.py's _to_wire_messages(), which picks
+        # whichever field its target API actually needs.
+        self.messages.append({"role": "tool", "name": tool_name, "tool_call_id": tool_call_id, "content": result})
         self._trim()
 
     def reset(self) -> None:

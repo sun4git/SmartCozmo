@@ -57,7 +57,17 @@ def create_chat_client(settings: Settings) -> ChatClient:
     if provider == "ollama":
         return OllamaClient(settings)
 
-    raise ValueError(f"Unknown CHAT_PROVIDER '{provider}'. Only 'ollama' is implemented today.")
+    if provider == "groq":
+        from cozmo_brain.llm.groq_client import GroqChatClient
+
+        return GroqChatClient(settings)
+
+    if provider == "openai":
+        from cozmo_brain.llm.openai_client import OpenAIChatClient
+
+        return OpenAIChatClient(settings)
+
+    raise ValueError(f"Unknown CHAT_PROVIDER '{provider}'. Use 'ollama', 'groq', or 'openai'.")
 
 
 __all__ = [

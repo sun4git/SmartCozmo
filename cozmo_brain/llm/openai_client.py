@@ -1,5 +1,6 @@
 """OpenAI API wrappers: Whisper speech-to-text and OpenAI TTS, as an
-alternative to Groq (e.g. when Groq's free-tier rate limits are hit).
+alternative to Groq (e.g. when Groq's free-tier rate limits are hit), plus
+(OpenAIChatClient) chat/tool-calling.
 Same transcribe()/synthesize() shape as GroqClient — see SpeechClient in
 speech_client.py — so STT_PROVIDER=openai / TTS_PROVIDER=openai in .env is a
 drop-in swap, independently for STT and TTS.
@@ -27,10 +28,12 @@ from __future__ import annotations
 import requests
 
 from cozmo_brain.config import Settings
+from cozmo_brain.llm.openai_compatible_chat import OpenAICompatibleChatClient
 from cozmo_brain.llm.tts_postprocess import apply_cozmo_voice_character
 
 _STT_URL = "https://api.openai.com/v1/audio/transcriptions"
 _TTS_URL = "https://api.openai.com/v1/audio/speech"
+_CHAT_BASE_URL = "https://api.openai.com/v1"
 
 
 class OpenAIClient:
@@ -71,3 +74,16 @@ class OpenAIClient:
         with open(out_path, "wb") as f:
             f.write(audio_bytes)
         return out_path
+
+
+class OpenAIChatClient(OpenAICompatibleChatClient):
+    """OpenAI's own chat-completions endpoint — the reference shape
+    OpenAICompatibleChatClient is built against. See openai_compatible_chat.py."""
+
+    def __init__(self, settings: Settings):
+        super().__init__(
+            base_url=_CHAT_BASE_URL,
+            api_key=settings.require_openai_key(),
+            model=settings.openai_chat_model,
+            timeout_s=settings.chat_timeout_s,
+        )

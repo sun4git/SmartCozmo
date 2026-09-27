@@ -18,6 +18,12 @@ logger = logging.getLogger(__name__)
 class ToolCall:
     name: str
     arguments: dict[str, Any]
+    # Ollama's own tool_calls don't carry one; OpenAI-compatible endpoints
+    # (Groq, OpenAI) require one on every tool_call, echoed back on the
+    # matching "tool" role reply. Generated here if the backend didn't send
+    # one, so callers (engine.py) can thread it through uniformly regardless
+    # of which chat provider is active.
+    id: str = ""
 
 
 @dataclass
@@ -70,7 +76,7 @@ class OllamaClient:
                 except json.JSONDecodeError:
                     logger.warning("Could not parse tool arguments as JSON: %r", args)
                     args = {}
-            tool_calls.append(ToolCall(name=name, arguments=args))
+            tool_calls.append(ToolCall(name=name, arguments=args, id=tc.get("id") or f"call_{len(tool_calls)}"))
 
         return ChatResponse(content=content, tool_calls=tool_calls, raw=data)
 

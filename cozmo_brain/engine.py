@@ -78,7 +78,8 @@ class CozmoEngine:
                 summary_lines.append(f"(couldn't reach the LLM at {self._settings.ollama_base_url}: {e})")
                 break
             tool_calls_raw = [
-                {"function": {"name": tc.name, "arguments": tc.arguments}} for tc in response.tool_calls
+                {"id": tc.id, "function": {"name": tc.name, "arguments": tc.arguments}}
+                for tc in response.tool_calls
             ]
             self.conversation.add_assistant(response.content, tool_calls=tool_calls_raw or None)
 
@@ -95,7 +96,7 @@ class CozmoEngine:
             for tc in response.tool_calls:
                 result = self._call_tool(tc.name, tc.arguments)
                 summary_lines.append(f"[{tc.name}] {result.to_tool_message()}")
-                self.conversation.add_tool_result(tc.name, result.to_tool_message())
+                self.conversation.add_tool_result(tc.name, result.to_tool_message(), tool_call_id=tc.id)
                 if result.ok and result.extra and result.extra.get("image_path"):
                     image_to_attach = result.extra["image_path"]
                     image_caption = result.extra.get("image_caption", image_caption)

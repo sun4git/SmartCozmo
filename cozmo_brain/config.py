@@ -38,12 +38,23 @@ class Settings:
     # Which provider does STT, TTS, and chat/tool-calling — each is
     # independently configurable, so e.g. STT_PROVIDER=groq + TTS_PROVIDER=openai
     # is valid. "groq" (default), "openai", or "local" (fully offline, no API
-    # key — see the Local STT/TTS section below) for STT/TTS; only "ollama"
-    # is implemented for chat today. See cozmo_brain/llm/__init__.py's
-    # create_speech_client() / create_chat_client().
+    # key — see the Local STT/TTS section below) for STT/TTS; "ollama"
+    # (default), "groq", or "openai" for chat. See
+    # cozmo_brain/llm/__init__.py's create_speech_client() / create_chat_client().
     stt_provider: str = field(default_factory=lambda: _env_str("STT_PROVIDER", "groq"))
     tts_provider: str = field(default_factory=lambda: _env_str("TTS_PROVIDER", "groq"))
     chat_provider: str = field(default_factory=lambda: _env_str("CHAT_PROVIDER", "ollama"))
+
+    # Request timeout in seconds for GroqChatClient/OpenAIChatClient (Ollama
+    # has its own OLLAMA_TIMEOUT_S below).
+    chat_timeout_s: int = field(default_factory=lambda: _env_int("CHAT_TIMEOUT_S", 60))
+
+    # Model name for CHAT_PROVIDER=groq/openai — must support tool-calling.
+    # Defaults are current, tool-capable, cost-efficient models as of when
+    # this was written; check each provider's own model list if either 404s
+    # or gets deprecated.
+    groq_chat_model: str = field(default_factory=lambda: _env_str("GROQ_CHAT_MODEL", "llama-3.3-70b-versatile"))
+    openai_chat_model: str = field(default_factory=lambda: _env_str("OPENAI_CHAT_MODEL", "gpt-4o-mini"))
 
     # --- Ollama (tool-calling LLM) ---
     ollama_base_url: str = field(default_factory=lambda: _env_str("OLLAMA_BASE_URL", "http://192.168.1.200:41438"))
