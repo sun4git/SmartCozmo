@@ -1968,6 +1968,72 @@ Still open, roughly in priority order:
      different trade-off (needs its own account, but no billing) rather
      than this exact "no key, needs internet" STT combination; nothing
      currently fills that specific gap.
+6. **Autonomous return-to-charger on critical battery** — investigated, not
+   yet built. `BatteryMonitor` already reads real voltage and `dock()`
+   already handles the final blind approach, but neither knows *where* the
+   charger actually is; this only matters once Cozmo is somewhere else
+   entirely.
+   - **PyCozmo already tracks real pose — confirmed via source, unused
+     until now.** Every `RobotState` packet (~33Hz) includes `pose_x`/
+     `pose_y`/`pose_angle_rad`, computed by Cozmo's own firmware from
+     wheel/tread monitoring (confirmed via the official, deprecated Anki
+     SDK's own docstring: *"the robot understands position by monitoring
+     its tread movement"* — not pure IMU integration).
+     `pycozmo.Client` also already has a working `go_to_pose()` navigation
+     primitive (`client.py`) — nothing to build at the protocol level, just
+     a `RobotBackend` wrapper. `cozmo_brain/robot/real.py` reads none of
+     this today (only `status`/`battery_voltage`/raw `accel_x/y/z`).
+     **Real gotcha, confirmed in source:** pose silently resets (new
+     `pose_frame_id`/`origin_id`) every time Cozmo is picked up and set
+     back down — any "remember where the charger was" scheme has to treat
+     that as "last known position is gone," not stale-but-usable.
+   - **`go_to_pose()`'s heading correction is unreliable — confirmed on
+     real hardware, across two separate runs of `pose_drift_test.py`
+     (project root — a standalone diagnostic script, not part of
+     `cozmo_brain`, same spirit as `orchestrator.py`).** One run: the point-turn segment never rotated
+     at all — Cozmo ended up facing exactly the straight-line segment's
+     own direction of travel (matched to within 0.5°, and physically
+     confirmed: *"it turned and came back to the point it started... it
+     didn't turn after it stopped"*), with zero contribution from the
+     commanded point-turn. The very next run, with an almost identical
+     path: the point-turn corrected the heading correctly on its own.
+     Likely a race condition in how PyCozmo's multi-segment path
+     completion event fires relative to when each segment actually
+     finishes, not a deterministic failure — `pycozmo`'s own official
+     `examples/path.py` uses the identical single-event-wait pattern with
+     an even longer path (4 lines + 1 point turn), so this isn't obviously
+     a `go_to_pose()`-specific bug either. **Position accuracy itself was
+     excellent both times** (within a few mm of the true origin), and
+     `cli.pose`'s own heading *readback* tracked physical reality correctly
+     in both runs — trustworthy even when the point-turn *command* wasn't.
+     Fixed pragmatically: read the actual heading back after `go_to_pose()`,
+     compute the delta to the desired heading, and issue a separate,
+     already-calibrated `turn()` for it regardless — a negligible
+     near-zero correction when `go_to_pose()` already got it right, the
+     real fix when it didn't. **Verified end-to-end on real hardware**:
+     landed within a few mm and a fraction of a degree of true origin
+     after a two-leg ~300mm+turn+~300mm test path.
+   - **Not yet tested: a longer, room-scale path.** Both runs so far used
+     a short, simple path (two ~300mm legs and one turn) — encouraging,
+     but not yet representative of an actual multi-meter "return to
+     charger" distance with more turns. Real accumulated drift over that
+     scale is still the single open unknown before deciding whether
+     dead-reckoning + this heading correction is tight enough on its own,
+     or needs a vision-loop correction step (reusing the existing `look()`
+     + vision-capable-chat pipeline, no new PyCozmo capability needed) for
+     final fine alignment before handing off to `dock()`.
+   - **PyCozmo has no built-in charger/marker vision at all — confirmed
+     absent, not just unused.** The charger has a printed visual marker
+     (same mechanism as the light cubes, confirmed via the official Anki
+     SDK's `Charger`/`ObservableObject` docstrings), but that marker
+     *recognition* ran on the paired phone app in the original product,
+     never reimplemented by PyCozmo (confirmed: PyCozmo's own docs
+     explicitly split "on-board firmware" functions it reimplements from
+     "off-board engine" functions — including object/marker recognition —
+     it doesn't). Camera streaming itself works fine (confirmed: QVGA
+     320×240 at ~15fps), just with zero built-in CV. Light-cube BLE
+     discovery also exists but is proximity-only (`rssi`, no bearing/
+     distance) — confirmed no use for navigation.
 
 ---
 

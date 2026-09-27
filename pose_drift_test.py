@@ -25,13 +25,16 @@ Protocol:
    tracking itself is accurate.
 5. Command `go_to_pose()` back to the exact starting pose, then measure
    position accuracy.
-6. Correct heading ourselves: confirmed directly on real hardware that
-   go_to_pose()'s point-turn segment doesn't actually rotate Cozmo to the
-   target heading at all - the line segment drives to position and just
-   ends up facing whichever way it drove, then nothing further happens.
-   cli.pose's own heading readback does track physical reality correctly
-   though, so this reads it back, computes the delta to the desired
-   heading, and issues our own already-calibrated turn() for it instead
+6. Correct heading ourselves: confirmed directly on real hardware, across
+   two runs, that go_to_pose()'s point-turn segment is *unreliable* -
+   one run it never rotated at all (Cozmo just ended up facing whichever
+   way the line segment drove), the next run it corrected the heading
+   correctly on its own, likely a race condition rather than a
+   deterministic failure. cli.pose's own heading readback tracked physical
+   reality correctly both times though, so this reads it back, computes
+   the delta to the desired heading, and issues our own already-calibrated
+   turn() for it regardless - a negligible correction if go_to_pose()
+   already got it right, or the real fix if it didn't - instead
    of trusting go_to_pose()'s built-in turn.
 7. You physically measure how close he actually lands to the real start
    mark/heading after the correction - this is the number that decides
@@ -130,17 +133,21 @@ def main() -> None:
             "starting mark - go_to_pose()'s position accuracy is what this checks.\n"
         )
 
-        # Confirmed directly on real hardware: go_to_pose()'s AppendPathSegPointTurn
-        # segment doesn't actually rotate Cozmo to the target heading - the line
-        # segment drives to position and naturally ends up facing whichever way it
-        # just drove (that's inherent to driving a straight line, not a commanded
-        # turn), and nothing further happens after it stops. cli.pose's own heading
-        # *readback* does track physical reality correctly though (confirmed
-        # separately by comparing it against the line segment's own direction of
-        # travel) - so use it as a trustworthy feedback signal instead of trusting
-        # go_to_pose()'s built-in point-turn: read the actual heading back, compute
-        # the delta to the desired heading ourselves, and issue our own
-        # already-calibrated turn_in_place() for it.
+        # Confirmed directly on real hardware, across two runs: go_to_pose()'s
+        # AppendPathSegPointTurn segment is *unreliable*, not consistently broken -
+        # one run left Cozmo facing exactly the line segment's own direction of
+        # travel (the point-turn never happened at all: heading matched the
+        # straight-line drive's bearing to within 0.5deg, and no rotation was
+        # observed after stopping), the next run it corrected the heading
+        # correctly on its own. Likely a race condition in how pycozmo's
+        # multi-segment path completion event fires relative to when each
+        # segment actually finishes, not a deterministic failure. Either way,
+        # cli.pose's own heading *readback* tracks physical reality correctly in
+        # both cases - so this reads the actual heading back, computes the delta
+        # to the desired heading ourselves, and issues our own already-calibrated
+        # turn_in_place() for it, regardless of whether go_to_pose() already got
+        # it right (in which case this ends up a negligible near-zero correction)
+        # or didn't (in which case this does the real work).
         target_heading_deg = 0.0
         current_heading_deg = cli.pose.rotation.angle_z.degrees
         heading_error_deg = (target_heading_deg - current_heading_deg + 180) % 360 - 180
