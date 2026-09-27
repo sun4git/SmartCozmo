@@ -314,7 +314,12 @@ class Settings:
     # sample event (picked up off the charger, carried, set back down) was
     # separately and more reliably rejected via the IS_PICKED_UP status flag
     # below, not this threshold — so this only needs to clear noise, not
-    # distinguish a tap from a pickup.
+    # distinguish a tap from a pickup. A third self-caused source is
+    # rejected separately too: Cozmo's own lift motor starting/stopping
+    # (e.g. the "shrug" idle-fidget gesture, confirmed on real hardware to
+    # register as a false tap) — set_lift_height_mm()/lower_lift_fully()
+    # suppress tap detection for their own duration, not via this threshold
+    # either, since we always know exactly when that's happening.
     tap_threshold: float = field(default_factory=lambda: _env_float("TAP_THRESHOLD", 150.0))
 
     # Minimum time between two accepted taps - without this, a single tap's

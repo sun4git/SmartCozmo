@@ -1327,7 +1327,7 @@ annotated list (it's the source of truth). The essentials:
 | `VAD_MIN_SPEECH_MS` | Onset debounce (consecutive ms of speech needed to start recording, not a minimum utterance length) — filters out noise-triggered hallucinated transcriptions. |
 | `VAD_MIN_RMS` | Loudness floor a frame must also clear (in addition to webrtcvad) to count as speech — the actual quota-saving filter, rejects noise before it ever reaches the STT API. |
 | `WAKE_WORD_MODEL` / `WAKE_WORD_THRESHOLD` | Wake word gating `--mode vad` — stock name or path to a custom `.onnx`. |
-| `TAP_THRESHOLD` / `TAP_DEBOUNCE_MS` | `--mode vad`'s tap-activation tuning — accelerometer-spike threshold and minimum time between accepted taps (real backend only; alternate trigger alongside the wake word). |
+| `TAP_THRESHOLD` / `TAP_DEBOUNCE_MS` | `--mode vad`'s tap-activation tuning — accelerometer-spike threshold and minimum time between accepted taps (real backend only; alternate trigger alongside the wake word). Cozmo's own lift movements (e.g. the `shrug` idle-fidget gesture) are suppressed separately, not via this threshold. |
 | `IDLE_FIDGET_ENABLED` / `IDLE_FIDGET_AFTER_S` | Whether Cozmo plays a small idle gesture after this many quiet seconds with no real conversation turn. Default 30s — kept short since Cozmo's own hardware-level inactivity disconnect/power-off happens well before the original 5min default ever fired. |
 | `GESTURE_ASYNC_ENABLED` | Whether `gesture` runs in the background so `say` can overlap with it, instead of blocking until the gesture finishes. |
 | `GESTURE_SPEECH_SYNC_ENABLED` | `false` (default) starts `say`'s bundled gesture before synthesizing speech (instant reaction, overlap not guaranteed if synthesis is slow). `true` synthesizes first and starts the gesture right as playback begins (overlap guaranteed regardless of synthesis speed, at the cost of a pause before Cozmo reacts). |
@@ -1675,6 +1675,26 @@ Still open, roughly in priority order:
      multi-sample event, not a single blip — resolved by gating on Cozmo's
      own `IS_PICKED_UP` status flag rather than trying to infer "tap vs.
      pickup" from accelerometer shape alone.
+
+     **A third self-caused source, found the same way — raised directly on
+     real hardware:** the `shrug` idle-fidget gesture (lift up, then down)
+     was registering as a false tap. Unlike a pickup, there's no firmware
+     status flag for "our own lift motor is moving" to gate on — but unlike
+     an externally-caused spike, *we* always know exactly when it's
+     happening, since we're the ones commanding it. `set_lift_height_mm()`/
+     `lower_lift_fully()` (`robot/real.py`) now set a suppression deadline
+     (their own commanded duration, plus a small `_LIFT_TAP_SUPPRESS_GRACE_S`
+     grace period for residual motor vibration/settling after it stops) that
+     `_update_tap_detection()` checks alongside `IS_PICKED_UP`, rather than
+     raising `TAP_THRESHOLD` globally — which would've traded away
+     sensitivity to genuine light taps everywhere, not just during a lift
+     move, and might not have fully solved it if the motor jolt and a real
+     tap turn out to be comparable in magnitude. **Verified directly**
+     against real accelerometer-shaped test packets: a genuine tap-sized
+     spike registers normally on its own, the same spike is suppressed
+     immediately after a commanded lift move, and detection resumes
+     normally once the suppression window passes — not yet confirmed this
+     was the sole cause of the real-hardware false taps observed.
 
      First built as its own `--mode tap` with fixed-duration recording, like
      push-to-talk. Dropped that once it raised a real question: how do you
