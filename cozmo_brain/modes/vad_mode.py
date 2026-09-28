@@ -73,6 +73,7 @@ def run(engine: CozmoEngine, robot: RobotBackend, speech: SpeechClient, settings
         f"Listening for the wake word ('{settings.wake_word_model}') or a tap. "
         "Press Ctrl+C to exit.\n"
     )
+    engine.log_steps_live = True
     while True:
         _wait_for_wake_word_or_tap(robot, settings)
         print("Wake word or tap heard - listening...")
@@ -161,7 +162,10 @@ def _run_listening_window(engine: CozmoEngine, robot: RobotBackend, speech: Spee
             print("(that's a known Whisper artifact from background noise, not real speech - ignoring)\n")
             continue
 
-        summary = engine.handle_turn(text, allow_async_followup=True)
-        print(summary, "\n")
+        # Each step and tool result is logged live, in order, by the engine
+        # (log_steps_live, set in run()), so the end-of-turn summary isn't
+        # printed again here - it would repeat those lines out of order.
+        engine.handle_turn(text, allow_async_followup=True)
+        print()
 
         listen_timeout = settings.vad_followup_timeout_s

@@ -105,6 +105,14 @@ class CozmoEngine:
         # started; mic_active is --mode vad saying a recording is running.
         self.followup_interrupt = threading.Event()
         self.mic_active = False
+        # When True, each tool's result is logged the moment it finishes
+        # (with how long it took), instead of only appearing in the
+        # end-of-turn summary. --mode vad turns this on and stops printing
+        # that summary: printed after the whole turn, the `[say] OK: ...`
+        # recap used to land *after* "LLM step 2", reading as if Cozmo spoke
+        # last. Text/push-to-talk modes leave it off - their printed summary
+        # is the reply itself.
+        self.log_steps_live = False
         self._followup_thread: threading.Thread | None = None
 
     def set_listening_window(self, is_open: bool) -> None:
@@ -313,6 +321,8 @@ class CozmoEngine:
 
             if response.content:
                 turn.lines.append(f"(thinking) {response.content}")
+                if self.log_steps_live:
+                    logger.info("thinking: %s", response.content)
 
             # Every step is logged, the final "done" one included (it used to
             # be silent, so a sync turn looked like it only ever had one
@@ -337,7 +347,12 @@ class CozmoEngine:
             image_caption = "[Cozmo just looked around and captured a photo of what's in front of him.]"
             batch: list[tuple[str, ToolResult]] = []
             for tc in response.tool_calls:
+                tool_started = time.monotonic()
                 result = self._call_tool(tc.name, tc.arguments)
+                if self.log_steps_live:
+                    logger.info(
+                        "tool %s (%.1fs): %s", tc.name, time.monotonic() - tool_started, result.to_tool_message()
+                    )
                 batch.append((tc.name, result))
                 turn.lines.append(f"[{tc.name}] {result.to_tool_message()}")
                 self.conversation.add_tool_result(tc.name, result.to_tool_message(), tool_call_id=tc.id)
@@ -374,8 +389,9 @@ class CozmoEngine:
         try:
             self._run_steps(schema, turn, first_step, can_end_early=False, before_tools=self._take_floor)
             self._finish_turn(turn)
-            for line in turn.lines[already_shown:]:
-                logger.info("Follow-up: %s", line)
+            if not self.log_steps_live:  # already logged live, as it happened
+                for line in turn.lines[already_shown:]:
+                    logger.info("Follow-up: %s", line)
         except Exception:  # noqa: BLE001 - a background thread must never die silently
             logger.exception("Background follow-up LLM call failed.")
         finally:
@@ -394,6 +410,8 @@ class CozmoEngine:
             if self.speak(_CHARGER_BLOCKED_FALLBACK, mood="sleepy"):
                 self.conversation.add_assistant(f"[I said this out loud:] {_CHARGER_BLOCKED_FALLBACK}")
                 turn.lines.append(f"[say] {_CHARGER_BLOCKED_FALLBACK}")
+                if self.log_steps_live:
+                    logger.info("tool say (fallback): %s", _CHARGER_BLOCKED_FALLBACK)
         self._wait_for_gestures()
         self.conversation.save()
 

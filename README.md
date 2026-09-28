@@ -603,20 +603,29 @@ the mic was closed:
 ```
 # sync (default) - a plain reply
 LLM step 1 (1.10s): say
+tool say (11.2s): OK: Said (mood=proud) while performing 'nod_yes' ...: I feel POWERFUL!
 LLM step 2 (0.90s): no tool calls - turn done        <- mic closed for this
 
 # async - same reply
 LLM step 1 (1.10s): say
+tool say (11.2s): OK: Said ...
 LLM step 2 (background) (0.90s): no tool calls - turn done   <- listening meanwhile
 
 # async - a model that says first, then acts
 LLM step 1 (1.10s): say
+tool say (2.4s): OK: Said ...: Sure, turning!
 Model continued its reply - pausing listening while it runs.
 LLM step 2 (background) (0.95s): turn
+tool turn (1.8s): OK: Turned 90 degrees.
 LLM step 3 (background) (0.80s): no tool calls - turn done
 ```
 
-(Timings are illustrative.) If step 1 shows only `say` right after you asked
+(Timings are illustrative.) In `--mode vad` each tool's result is logged
+the moment it finishes (`CozmoEngine.log_steps_live`), and the old
+end-of-turn `[say] OK: ...` recap isn't printed. Printed after the whole
+turn, that recap used to appear *after* `LLM step 2`, which read as if
+Cozmo spoke last. Text and push-to-talk modes still print the recap, since
+there it's the reply itself. If step 1 shows only `say` right after you asked
 for a movement, and step 2 shows the movement, that model is one of the
 "one-tool-per-step" kind above. `sync` and `async` handle it; `skip` would
 not.
