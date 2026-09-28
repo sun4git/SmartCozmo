@@ -65,16 +65,21 @@ class Settings:
     # Model name for CHAT_PROVIDER=groq/openai — must support tool-calling.
     # Defaults are current, tool-capable, cost-efficient models as of when
     # this was written; check each provider's own model list if either 404s
-    # or gets deprecated.
-    groq_chat_model: str = field(default_factory=lambda: _env_str("GROQ_CHAT_MODEL", "llama-3.3-70b-versatile"))
+    # or gets deprecated. The Groq default was llama-3.3-70b-versatile until
+    # it disappeared from Groq (model_not_found, confirmed 2026-09-28).
+    # qwen/qwen3.8-27b replaced it: in a live test it batched `say` with
+    # actions in one step, while openai/gpt-oss-120b (the other tool-capable
+    # option) did one tool per step and said "sure!" alone before acting.
+    groq_chat_model: str = field(default_factory=lambda: _env_str("GROQ_CHAT_MODEL", "qwen/qwen3.8-27b"))
     openai_chat_model: str = field(default_factory=lambda: _env_str("OPENAI_CHAT_MODEL", "gpt-4o-mini"))
 
     # Model used instead, for whichever CHAT_PROVIDER is active, on any turn
     # that has an image attached (the `look`/`who_is_this` tools) — only
     # matters when the regular chat model above isn't itself vision-capable.
     # Left empty, each falls back to its own chat model above.
-    # GROQ_CHAT_MODEL's default (llama-3.3-70b-versatile) is NOT
-    # vision-capable, so GROQ_VISION_MODEL needs its own real default;
+    # GROQ_VISION_MODEL keeps its own explicit default (the same model as
+    # GROQ_CHAT_MODEL's today, which is vision-capable) so that switching
+    # GROQ_CHAT_MODEL to a text-only model doesn't silently break `look`;
     # OPENAI_CHAT_MODEL's default (gpt-4o-mini) already handles vision
     # itself, so OPENAI_VISION_MODEL is left empty (falls back) by default.
     # Same for OLLAMA_MODEL — pick a vision-capable one there directly if
@@ -291,12 +296,19 @@ class Settings:
 
     # --- Agentic loop / conversation ---
     max_tool_iterations: int = field(default_factory=lambda: _env_int("MAX_TOOL_ITERATIONS", 4))
-    # End a turn right after a final successful `say` instead of asking the
-    # model again just to hear "done" - saves one LLM round trip (mic closed
-    # meanwhile) per reply. Still asks again after anything the model needs
-    # to see (errors, hazards, refused moves, photos) - see engine.py's
-    # _turn_is_done(). false = the old always-ask-again behavior.
-    end_turn_after_final_say: bool = field(default_factory=lambda: _env_bool("END_TURN_AFTER_FINAL_SAY", True))
+    # What to do with the LLM call that follows a reply ending in a clean
+    # `say` (the model usually answers "done" - see engine.py's
+    # _turn_is_done()):
+    #   sync  - wait for it before listening again (default: safe with every
+    #           model, costs one round trip of mic-closed time per reply)
+    #   async - reopen the mic right away and make the call in the
+    #           background; if the model continues (more actions/speech), the
+    #           recording is paused while that runs (--mode vad only; other
+    #           modes treat it as sync)
+    #   skip  - don't make it at all. Fastest, but confirmed live: a model
+    #           that says "sure!" alone and acts in its *next* step
+    #           (openai/gpt-oss-120b on Groq) loses the action entirely.
+    final_llm_call: str = field(default_factory=lambda: _env_str("FINAL_LLM_CALL", "sync").lower())
     conversation_max_messages: int = field(default_factory=lambda: _env_int("CONVERSATION_MAX_MESSAGES", 40))
     conversation_history_path: str = field(
         default_factory=lambda: _env_str("CONVERSATION_HISTORY_PATH", "conversation_history.json")

@@ -101,9 +101,9 @@ class CozmoEngine:
         (extra["needs_attention"], tools/registry.py), or a photo to look at.
         That last check matters because the model writes every call in a
         batch up front: `drive` then `say` means it spoke *before* knowing
-        the drive hit a cliff. END_TURN_AFTER_FINAL_SAY=false restores the
-        old always-ask-again behavior."""
-        if not self._settings.end_turn_after_final_say or not batch or image_attached:
+        the drive hit a cliff. Only acted on when FINAL_LLM_CALL=skip (see
+        config.py)."""
+        if self._settings.final_llm_call != "skip" or not batch or image_attached:
             return False
         last_name, last_result = batch[-1]
         if last_name != "say" or not last_result.ok:
@@ -206,8 +206,11 @@ class CozmoEngine:
             try:
                 response = self._ollama.chat(self.conversation.messages, tools=schema)
             except requests.RequestException as e:
-                logger.error("Ollama request failed: %s", e)
-                summary_lines.append(f"(couldn't reach the LLM at {self._settings.ollama_base_url}: {e})")
+                # Named by CHAT_PROVIDER, not a hardcoded Ollama URL - a
+                # failed Groq/OpenAI call used to be reported as
+                # "couldn't reach the LLM at <the Ollama URL>".
+                logger.error("Chat request (%s) failed: %s", self._settings.chat_provider, e)
+                summary_lines.append(f"(chat request to {self._settings.chat_provider} failed: {e})")
                 break
             tool_calls_raw = [
                 {"id": tc.id, "function": {"name": tc.name, "arguments": tc.arguments}}

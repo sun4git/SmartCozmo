@@ -1022,10 +1022,12 @@ Each chat provider also gets its own vision-model override —
 `OLLAMA_VISION_MODEL` / `GROQ_VISION_MODEL` / `OPENAI_VISION_MODEL` —
 used instead of the regular chat model on any turn that actually carries
 an image. This matters because a provider's default chat model isn't
-necessarily vision-capable: `GROQ_CHAT_MODEL`'s default
-(`llama-3.3-70b-versatile`) isn't, so `GROQ_VISION_MODEL` has its own real
-default (`qwen/qwen3.8-27b`, currently Groq's vision + tool-calling
-model); `OPENAI_CHAT_MODEL`'s default (`gpt-4o-mini`) already handles
+necessarily vision-capable. `GROQ_CHAT_MODEL`'s old default
+(`llama-3.3-70b-versatile`) wasn't, and has since been removed from Groq
+entirely (`model_not_found`, confirmed 2026-09-28). Its default is now
+`qwen/qwen3.8-27b`, which does both. `GROQ_VISION_MODEL` still has its own
+explicit default (the same model), so that pointing `GROQ_CHAT_MODEL` at a
+text-only model doesn't silently break `look`; `OPENAI_CHAT_MODEL`'s default (`gpt-4o-mini`) already handles
 vision itself, so `OPENAI_VISION_MODEL` is left empty (falls back) by
 default. Same idea for Ollama — pick a vision-capable `OLLAMA_MODEL`
 directly, or set `OLLAMA_VISION_MODEL` instead if the chat model you want
@@ -1333,7 +1335,7 @@ annotated list (it's the source of truth). The essentials:
 | `AUTO_RETURN_TO_CHARGER_ENABLED` | Low-battery return-to-charger: offer at `BATTERY_LOW_VOLTAGE`, go on its own at `BATTERY_CRITICAL_VOLTAGE`, ask for help if the charger location isn't known (default `true`). |
 | `RETURN_TO_POSE_TIMEOUT_S` | Upper bound on one `go_to_pose()` navigation leg before it's aborted (pycozmo's own has no timeout). |
 | `MAX_TOOL_ITERATIONS` | Cap on LLM↔tool round-trips per user turn. |
-| `END_TURN_AFTER_FINAL_SAY` | End a turn right after Cozmo's final successful `say` instead of one more LLM round trip just to hear "done" (default `true`). Only when every tool in that batch is a pure action (`Tool.safe_to_end_turn`, opt-in per tool, so new tools default to asking again) and nothing needs the model's attention (errors, hazards, refused moves, photos). Either way, a turn doesn't return until background gestures finish, so the mic never reopens mid-`spin`. Known risk: a model that says something alone and plans to act in a *later* step would skip the action. The system prompt tells it to batch, and the `LLM step N: ...` log lines show what it actually does. |
+| `FINAL_LLM_CALL` | The LLM call after a reply ending in a clean `say` (usually just "done"): `sync` (default) waits for it before listening again; `async` reopens the mic right away and makes it in the background, pausing the recording if the model continues (`--mode vad` only); `skip` drops it (fastest, but a model that says "sure!" alone and acts in its *next* step, confirmed live with Groq's `openai/gpt-oss-120b`, loses the action). Early end only happens when every tool in the batch is a pure action (`Tool.safe_to_end_turn`, opt-in per tool, so new tools default to asking again) and nothing needs the model's attention (errors, hazards, refused moves, photos). A turn never returns until background gestures finish, so the mic doesn't reopen mid-`spin`. |
 | `CONVERSATION_MAX_MESSAGES` / `CONVERSATION_HISTORY_PATH` | Memory size and persistence path. |
 | `VAD_AGGRESSIVENESS` / `VAD_SILENCE_MS` / `VAD_MAX_UTTERANCE_S` | Hands-free listening tuning. |
 | `VAD_FOLLOWUP_TIMEOUT_S` | How long a conversation stays open after a reply before the wake word is needed again. |
