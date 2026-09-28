@@ -291,6 +291,12 @@ class Settings:
 
     # --- Agentic loop / conversation ---
     max_tool_iterations: int = field(default_factory=lambda: _env_int("MAX_TOOL_ITERATIONS", 4))
+    # End a turn right after a final successful `say` instead of asking the
+    # model again just to hear "done" - saves one LLM round trip (mic closed
+    # meanwhile) per reply. Still asks again after anything the model needs
+    # to see (errors, hazards, refused moves, photos) - see engine.py's
+    # _turn_is_done(). false = the old always-ask-again behavior.
+    end_turn_after_final_say: bool = field(default_factory=lambda: _env_bool("END_TURN_AFTER_FINAL_SAY", True))
     conversation_max_messages: int = field(default_factory=lambda: _env_int("CONVERSATION_MAX_MESSAGES", 40))
     conversation_history_path: str = field(
         default_factory=lambda: _env_str("CONVERSATION_HISTORY_PATH", "conversation_history.json")

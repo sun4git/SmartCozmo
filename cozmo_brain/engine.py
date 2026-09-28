@@ -87,6 +87,28 @@ class CozmoEngine:
         if not is_open:
             self.last_interaction_monotonic = time.monotonic()
 
+    def _turn_is_done(self, batch: list[tuple[str, ToolResult]], image_attached: bool) -> bool:
+        """Whether to end the turn now instead of asking the model again.
+
+        The generic tool-calling loop only stops when the model replies with
+        no tool calls - but here Cozmo's actual answer is itself a tool call
+        (`say`), so even a one-line reply cost a second LLM round trip just
+        to hear "done", with the mic closed the whole time (estimated ~2-3s
+        from real-hardware logs). So: stop once the batch's *last* call was a
+        successful `say`, unless something in the batch needs the model to
+        see it first - an error, a hazard/refused move/failed return
+        (extra["needs_attention"], tools/registry.py), or a photo to look at.
+        That last check matters because the model writes every call in a
+        batch up front: `drive` then `say` means it spoke *before* knowing
+        the drive hit a cliff. END_TURN_AFTER_FINAL_SAY=false restores the
+        old always-ask-again behavior."""
+        if not self._settings.end_turn_after_final_say or not batch or image_attached:
+            return False
+        last_name, last_result = batch[-1]
+        if last_name != "say" or not last_result.ok:
+            return False
+        return all(r.ok and not (r.extra and r.extra.get("needs_attention")) for _, r in batch)
+
     def _charger_status_note(self) -> str | None:
         """A one-line status note whenever Cozmo's on/off-charger (or
         charging) state differs from what the model was last told - and on
@@ -192,8 +214,10 @@ class CozmoEngine:
 
             image_to_attach: str | None = None
             image_caption = "[Cozmo just looked around and captured a photo of what's in front of him.]"
+            batch: list[tuple[str, ToolResult]] = []
             for tc in response.tool_calls:
                 result = self._call_tool(tc.name, tc.arguments)
+                batch.append((tc.name, result))
                 summary_lines.append(f"[{tc.name}] {result.to_tool_message()}")
                 self.conversation.add_tool_result(tc.name, result.to_tool_message(), tool_call_id=tc.id)
                 if result.extra and result.extra.get("blocked_by_charger"):
@@ -210,6 +234,9 @@ class CozmoEngine:
                     self.conversation.add_user(image_caption, images=[b64])
                 except OSError as e:
                     logger.warning("Could not attach captured photo: %s", e)
+
+            if self._turn_is_done(batch, image_attached=bool(image_to_attach)):
+                break
         else:
             logger.warning("Hit max_tool_iterations (%d) without a final reply.", self._settings.max_tool_iterations)
 

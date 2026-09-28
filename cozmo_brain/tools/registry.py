@@ -66,6 +66,14 @@ def charger_return_message(result: MoveResult) -> str:
     return "Didn't move - still charging and the battery's low."
 
 
+# extra flag on a ToolResult meaning "this didn't go as planned - the model
+# must see it before the turn ends" (a hazard cut a move short, a move was
+# refused, a charger return failed). engine.py only ends a turn early after
+# a final `say` when no result in that batch carries this - see
+# CozmoEngine._turn_is_done().
+_ATTENTION = {"needs_attention": True}
+
+
 def _charger_blocked_result(verb: str) -> ToolResult:
     # extra["blocked_by_charger"] lets the engine guarantee the human hears
     # why nothing happened, even if the model never says so itself (see
@@ -74,7 +82,7 @@ def _charger_blocked_result(verb: str) -> ToolResult:
         True,
         f"Didn't {verb} - still charging on the dock and the battery's too low to come off yet. "
         "Tell them out loud you can't move yet because you need to charge more.",
-        extra={"blocked_by_charger": True},
+        extra={"blocked_by_charger": True, **_ATTENTION},
     )
 
 
@@ -190,7 +198,9 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
         if not result.moved:
             return _charger_blocked_result("drive")
         if result.hazard:
-            return ToolResult(True, f"Only drove partway toward {distance_mm:.0f}mm - {_HAZARD_MESSAGES[result.hazard]}.")
+            return ToolResult(
+                True, f"Only drove partway toward {distance_mm:.0f}mm - {_HAZARD_MESSAGES[result.hazard]}.", extra=_ATTENTION
+            )
         return ToolResult(True, f"Drove {distance_mm:.0f}mm at {speed_mmps:.0f}mm/s.")
 
     def handle_turn(angle_degrees: float) -> ToolResult:
@@ -198,7 +208,7 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
         if not result.moved:
             return _charger_blocked_result("turn")
         if result.hazard:
-            return ToolResult(True, f"Only turned partway - {_HAZARD_MESSAGES[result.hazard]}.")
+            return ToolResult(True, f"Only turned partway - {_HAZARD_MESSAGES[result.hazard]}.", extra=_ATTENTION)
         return ToolResult(True, f"Turned {angle_degrees:.0f} degrees.")
 
     def handle_dock() -> ToolResult:
@@ -209,12 +219,15 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
         # staging point first, then dock. Otherwise fall back to the plain
         # blind reverse, which only works if he's already lined up.
         if robot.has_charger_pose():
-            return ToolResult(True, charger_return_message(robot.return_to_charger()))
+            result = robot.return_to_charger()
+            return ToolResult(True, charger_return_message(result), extra=None if result.completed else _ATTENTION)
         result = robot.dock()
         if not result.moved:
             return ToolResult(True, "Already on the charger - no need to dock.")
         if result.hazard:
-            return ToolResult(True, f"Only made partway back to the charger - {_HAZARD_MESSAGES[result.hazard]}.")
+            return ToolResult(
+                True, f"Only made partway back to the charger - {_HAZARD_MESSAGES[result.hazard]}.", extra=_ATTENTION
+            )
         return ToolResult(True, "Backed onto the charger to dock.")
 
     def handle_look() -> ToolResult:
