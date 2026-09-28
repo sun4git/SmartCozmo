@@ -95,8 +95,45 @@ _POSE_SETTLE_S = 0.3
 _PATHING_CLEAR_TIMEOUT_S = 5.0
 
 
+# Closer than this to a navigation target, return_to_pose() skips the drive
+# and only corrects heading - the bearing to a point a few mm away is
+# meaningless, and "facing" it could mean a pointless large turn.
+_MIN_NAV_DISTANCE_MM = 10.0
+
+
 def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
+
+
+class _RotationTracker:
+    """Sums heading changes across successive readings, unwrapping the
+    +/-180 seam, so the result is the real rotation performed: net (signed,
+    + = counterclockwise), plus how far it swung each way."""
+
+    def __init__(self, start_deg: float):
+        self._last = start_deg
+        self.net = 0.0
+        self.ccw = 0.0
+        self.cw = 0.0
+
+    def update(self, heading_deg: float) -> None:
+        step = _shortest_turn(heading_deg - self._last)
+        self._last = heading_deg
+        self.net += step
+        if step > 0:
+            self.ccw += step
+        else:
+            self.cw -= step
+
+    def describe(self) -> str:
+        direction = "counterclockwise" if self.net > 0 else "clockwise"
+        return f"net {self.net:+.0f}deg ({direction}; swung {self.ccw:.0f}deg ccw, {self.cw:.0f}deg cw)"
+
+
+def _shortest_turn(delta_deg: float) -> float:
+    """Normalize an angle difference to [-180, 180): the shortest signed turn
+    (positive = counterclockwise/left, same convention as turn())."""
+    return (delta_deg + 180) % 360 - 180
 
 
 class PyCozmoRobot(RobotBackend):
@@ -629,10 +666,19 @@ class PyCozmoRobot(RobotBackend):
         deadline = time.monotonic() + self._settings.return_to_pose_timeout_s
         hazard: str | None = None
         reason: str | None = None
+        # Diagnostic: how much, and which way, the firmware actually rotates
+        # Cozmo during go_to_pose(), summed from successive heading readings
+        # (unwrapped, so a 330deg sweep reads +330, not -30). Raised directly:
+        # he always rotated counterclockwise, even when the other way was
+        # shorter. return_to_pose() now asks for a straight line with no
+        # rotation, so a large number here means the firmware is still
+        # turning on its own.
+        rotation = _RotationTracker(cli.pose.rotation.angle_z.degrees)
         while not done.wait(_CLIFF_POLL_S):
             # Firmware-driven path, duration unknown up front - keep
             # extending tap suppression for as long as it's running.
             self._suppress_taps(_CLIFF_POLL_S)
+            rotation.update(cli.pose.rotation.angle_z.degrees)
             status = self._latest_status
             if status & pycozmo.RobotStatusFlag.IS_FALLING:
                 hazard = "fall"
@@ -652,6 +698,7 @@ class PyCozmoRobot(RobotBackend):
         if hazard or reason:
             logger.warning("Aborting go_to_pose(): %s.", hazard or reason)
             self._abort_path()
+            logger.info("go_to_pose() firmware rotation before abort: %s.", rotation.describe())
             if hazard:
                 # go_to_pose() drives its line segment forward (observed in
                 # every drift-test run), so "back away" means reverse - same
@@ -664,8 +711,11 @@ class PyCozmoRobot(RobotBackend):
 
         pathing_deadline = time.monotonic() + _PATHING_CLEAR_TIMEOUT_S
         while self._latest_status & pycozmo.RobotStatusFlag.IS_PATHING and time.monotonic() < pathing_deadline:
+            rotation.update(cli.pose.rotation.angle_z.degrees)
             time.sleep(_CLIFF_POLL_S)
         time.sleep(_POSE_SETTLE_S)
+        rotation.update(cli.pose.rotation.angle_z.degrees)
+        logger.info("go_to_pose() firmware rotation: %s.", rotation.describe())
         return None
 
     def return_to_pose(self, target: Pose2D) -> MoveResult:
@@ -687,9 +737,37 @@ class PyCozmoRobot(RobotBackend):
                 if exit_result.hazard:
                     return exit_result
 
-            aborted = self._go_to_pose_watched(target)
-            if aborted is not None:
-                return aborted
+            # Every rotation of a return is done by our own turn(), which
+            # always takes the shortest direction - never by the firmware.
+            # Raised directly on real hardware: Cozmo always rotated
+            # counterclockwise during a return, even when clockwise was far
+            # shorter. Suspected cause, unconfirmed: pycozmo's point-turn
+            # packet always sends a positive speed plus an unnamed boolean
+            # ("unknown" in pycozmo) that may be Anki's shortest-direction
+            # flag. So: face the staging point ourselves first, then ask
+            # go_to_pose() to end facing that same direction (a straight
+            # line, near-zero point turn), and do the final heading with the
+            # correction turn below - which works whatever that field means.
+            start = self.get_pose()
+            if start is None:
+                return MoveResult(moved=False, reason="disconnected")
+            dx, dy = target.x_mm - start.x_mm, target.y_mm - start.y_mm
+            if math.hypot(dx, dy) > _MIN_NAV_DISTANCE_MM:
+                bearing = math.degrees(math.atan2(dy, dx))
+                face_error = _shortest_turn(bearing - start.heading_deg)
+                logger.info(
+                    "Facing the target first: turning %+.1fdeg (shortest direction) toward bearing %.1fdeg.",
+                    face_error, bearing,
+                )
+                face_result = self.turn(face_error)
+                if face_result.hazard:
+                    return MoveResult(moved=True, hazard=face_result.hazard)
+                time.sleep(_POSE_SETTLE_S)
+                aborted = self._go_to_pose_watched(Pose2D(target.x_mm, target.y_mm, bearing))
+                if aborted is not None:
+                    return aborted
+            else:
+                logger.info("Already within %.0fmm of the target - only correcting heading.", _MIN_NAV_DISTANCE_MM)
 
             # go_to_pose()'s own point-turn is unreliable (confirmed on real
             # hardware, intermittent - see README roadmap item 6), but
@@ -701,9 +779,9 @@ class PyCozmoRobot(RobotBackend):
             current = self.get_pose()
             if current is None:
                 return MoveResult(moved=True, reason="disconnected")
-            heading_error = (target.heading_deg - current.heading_deg + 180) % 360 - 180
+            heading_error = _shortest_turn(target.heading_deg - current.heading_deg)
             logger.info(
-                "go_to_pose() landed at x=%.1f y=%.1f heading=%.1f (target %.1f, %.1f, %.1f) - correcting %.1fdeg.",
+                "go_to_pose() landed at x=%.1f y=%.1f heading=%.1f (target %.1f, %.1f, %.1f) - correcting %+.1fdeg.",
                 current.x_mm, current.y_mm, current.heading_deg,
                 target.x_mm, target.y_mm, target.heading_deg, heading_error,
             )

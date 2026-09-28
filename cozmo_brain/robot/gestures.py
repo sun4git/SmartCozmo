@@ -19,6 +19,10 @@ class Step:
     kind: str  # "mood" | "expression" | "light" | "head" | "lift" | "lower_lift" | "turn" | "drive" | "pause"
     value: Any
     duration: float = 0.4
+    # "turn" steps only: flip the direction at random each time the gesture
+    # plays (e.g. `spin` going left or right), instead of always the sign
+    # written in `value`.
+    random_direction: bool = False
 
 
 @dataclass(frozen=True)
@@ -90,7 +94,9 @@ GESTURES: dict[str, Gesture] = {
     ),
     "spin": Gesture(
         "A full playful spin in place.",
-        [Step("turn", 360, duration=1.5)],
+        # Raised directly: always spinning counterclockwise (positive) looked
+        # repetitive - picks a direction each time instead.
+        [Step("turn", 360, duration=1.5, random_direction=True)],
     ),
     "flinch": Gesture(
         "Startles backward with a scared face.",

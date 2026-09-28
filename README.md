@@ -2430,6 +2430,31 @@ Still open, roughly in priority order:
      with listening reopened ~1.5s in instead of after the whole turn.
      Cost: `async` still makes the extra call every turn. The live test
      hit Groq's free-tier rate limit (429).
+   - **Always turning counterclockwise, raised directly (2026-09-28).**
+     During a return Cozmo always rotated left, even when right was far
+     shorter. Our own heading correction was never the cause: it already
+     took the shortest signed turn. The suspect is the firmware.
+     pycozmo's `AppendPathSegPointTurn` always sends a positive speed, plus
+     a boolean pycozmo only calls `unknown`, possibly Anki's
+     shortest-direction flag. That's **unconfirmed**: nothing in pycozmo's
+     docs or Anki's published SDKs names it, and the firmware's line
+     segment may also rotate on its own before driving. So
+     `return_to_pose()` now does **every** rotation itself, the shortest
+     way:
+     1. face the target with our own `turn()`;
+     2. ask `go_to_pose()` for a straight line ending in that same
+        direction, so its own point turn is ~0;
+     3. make the final heading with the existing correction turn.
+     Targets within 10mm skip the drive and only correct heading. A new
+     log line reports what the firmware *actually* rotated during
+     `go_to_pose()`, e.g. `go_to_pose() firmware rotation: net +3deg
+     (...)`. A large number there on real hardware would mean the firmware
+     still turns on its own. Separately, `spin` now picks left or right at
+     random each time (`Step.random_direction`); every other gesture is
+     unchanged. **Verified as logic only** (scripted: short-way turns
+     chosen, `go_to_pose()` asked for the travel direction, final heading
+     still exact, tracker unwraps across ±180°, `spin` goes both ways), not
+     yet on real hardware.
    - **Next run (2026-09-28, Pi on `1a9dc6b`): the autonomous CRITICAL
      return fully worked, then an idle fidget undid it.** At 3.26V he
      navigated, docked, and reported success correctly. The contact flag

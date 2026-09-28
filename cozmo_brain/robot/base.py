@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import abc
 import logging
+import random
 import threading
 import time
 from dataclasses import dataclass
@@ -352,7 +353,10 @@ class RobotBackend(abc.ABC):
         elif step.kind == "lower_lift":
             self.lower_lift_fully(duration=step.duration)
         elif step.kind == "turn":
-            self.turn(step.value)
+            angle = step.value
+            if step.random_direction and random.random() < 0.5:
+                angle = -angle
+            self.turn(angle)
         elif step.kind == "drive":
             distance, speed = step.value
             self.drive(distance, speed)
