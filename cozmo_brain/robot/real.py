@@ -371,8 +371,8 @@ class PyCozmoRobot(RobotBackend):
 
     def _must_stay_on_charger(self) -> bool:
         """Whether drive()/spin_wheels_for() should refuse to move Cozmo
-        right now. Only true while actively charging AND the battery still
-        genuinely needs it (at/below BATTERY_LOW_VOLTAGE) - previously this
+        right now. True while docked AND the battery still genuinely needs
+        it (at/below BATTERY_LOW_VOLTAGE) - see below. Previously this
         blocked *any* movement for the entire time is_charging() was true,
         even with a mostly-full battery and an explicit request (a
         conversational reply, a tool call) to come out. Raised directly:
@@ -381,12 +381,22 @@ class PyCozmoRobot(RobotBackend):
         already ran and played audio before the model ever saw drive()'s
         blocked result, so the mismatch couldn't be caught after the fact.
         Unknown voltage (None - not yet read a real RobotState packet)
-        stays conservative and blocks, same as before this existed."""
-        if not (self.is_on_charger() and self.is_charging()):
+        stays conservative and blocks while charging, same as before.
+
+        Deliberately does NOT require is_charging() when the voltage is
+        known and low. Confirmed on real hardware: IS_ON_CHARGER itself
+        lagged ~0.85s behind physically docking, and IS_CHARGING plausibly
+        lags the same way. A drive fired in that window (an idle fidget
+        queued behind the charger return) wasn't blocked, and drove Cozmo
+        back off the charger at 3.2V. Docked + low battery = stay,
+        whether or not charging has registered yet. Trade-off: docked on
+        an unpowered charger with a low battery, an explicit "come out" is
+        refused too - pick him up instead."""
+        if not self.is_on_charger():
             return False
         voltage = self.get_battery_voltage()
         if voltage is None:
-            return True
+            return self.is_charging()
         return voltage <= self._settings.battery_low_voltage
 
     def is_movement_blocked(self) -> bool:
@@ -410,8 +420,8 @@ class PyCozmoRobot(RobotBackend):
     def drive(
         self, distance_mm: float, speed_mmps: float, *, suppress_cliff: bool = False, stop_on_charger: bool = False
     ) -> MoveResult:
-        # Blocked only while actively *charging* AND the battery still
-        # needs it (see _must_stay_on_charger()) - once full, or once above
+        # Blocked only while docked AND the battery still needs it (see
+        # _must_stay_on_charger()) - once full, or once above
         # BATTERY_LOW_VOLTAGE even mid-charge, a normal drive/turn is
         # allowed to proceed like any other, and drives Cozmo off the dock
         # as a side effect of whatever actually asked for movement
@@ -420,7 +430,7 @@ class PyCozmoRobot(RobotBackend):
         # wheel steps while still charging, since there's no reason to come
         # out - see base.py's run_gesture(wheels=...).
         if self._must_stay_on_charger():
-            logger.info("Ignoring drive() - still charging and battery is low.")
+            logger.info("Ignoring drive() - docked with a low battery.")
             return MoveResult(moved=False)
 
         # Serializes against spin_wheels_for()/another drive() so a
@@ -660,7 +670,7 @@ class PyCozmoRobot(RobotBackend):
 
     def return_to_pose(self, target: Pose2D) -> MoveResult:
         if self._must_stay_on_charger():
-            logger.info("Ignoring return_to_pose() - still charging and battery is low.")
+            logger.info("Ignoring return_to_pose() - docked with a low battery.")
             return MoveResult(moved=False)
 
         with self._wheel_lock:
@@ -768,7 +778,7 @@ class PyCozmoRobot(RobotBackend):
 
     def spin_wheels_for(self, seconds: float, speed_mmps: float) -> MoveResult:
         if self._must_stay_on_charger():
-            logger.info("Ignoring spin_wheels_for() - still charging and battery is low.")
+            logger.info("Ignoring spin_wheels_for() - docked with a low battery.")
             return MoveResult(moved=False)
 
         # See drive()'s matching comment. Reentrant because the charger-exit

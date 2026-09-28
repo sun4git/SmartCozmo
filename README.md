@@ -2291,6 +2291,29 @@ Still open, roughly in priority order:
      stopped") so the bound can be tuned. **Verified as logic only**
      (scripted: a flag arriving 1.5s late is now reported as docked, with
      the delay logged). Not yet re-run on real hardware.
+   - **Next run (2026-09-28, Pi on `1a9dc6b`): the autonomous CRITICAL
+     return fully worked, then an idle fidget undid it.** At 3.26V he
+     navigated, docked, and reported success correctly. The contact flag
+     came 0.85s after the reverse stopped, well inside the 10s wait; the
+     staging landing was again ~20mm off, and docking still seated. In
+     the *same millisecond* the return released the wheels, a drive
+     started from the charger. An idle fidget (then unaware of both
+     listening windows and returns) had fired mid-return, and its `peek`
+     turn step queued behind the return's wheel lock. It ran on docking:
+     the fidget's wheels decision predated docking, and the low-battery
+     hold required `IS_CHARGING`, which likely lags like `IS_ON_CHARGER`.
+     He drove off at 3.2V, the model (never told, since the charger note
+     was only sent on a change between turns) insisted "I'm already on
+     my charger", and the battery died (3.00V) during the next return.
+     Three fixes: fidgets only run if they can take
+     `CozmoEngine.turn_lock` without waiting, so they never overlap a
+     turn or a return; `_must_stay_on_charger()` no longer needs
+     `IS_CHARGING` when the voltage is known (docked + low = stay;
+     trade-off: on an unpowered charger with a low battery an explicit
+     "come out" is refused too); and the charger status line goes out on
+     every turn. **Verified as logic only** (scripted reproduction of
+     this exact sequence now stays docked), not yet re-run on real
+     hardware.
 
 ---
 

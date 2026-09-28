@@ -63,7 +63,7 @@ def charger_return_message(result: MoveResult) -> str:
         return f"Only made partway back to the charger - {_HAZARD_MESSAGES[result.hazard]}."
     if result.reason:
         return f"Didn't make it onto the charger - {_CHARGER_RETURN_REASONS.get(result.reason, result.reason)}."
-    return "Didn't move - still charging and the battery's low."
+    return "Didn't move - on the charger and the battery's too low to come off yet."
 
 
 # extra flag on a ToolResult meaning "this didn't go as planned - the model
@@ -80,7 +80,7 @@ def _charger_blocked_result(verb: str) -> ToolResult:
     # engine.py's _CHARGER_BLOCKED_FALLBACK).
     return ToolResult(
         True,
-        f"Didn't {verb} - still charging on the dock and the battery's too low to come off yet. "
+        f"Didn't {verb} - on the charger and the battery's too low to come off yet. "
         "Tell them out loud you can't move yet because you need to charge more.",
         extra={"blocked_by_charger": True, **_ATTENTION},
     )

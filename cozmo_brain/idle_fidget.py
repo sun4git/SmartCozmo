@@ -64,17 +64,29 @@ class IdleFidgeter:
         if now - last_active < self._settings.idle_fidget_after_s:
             return
 
-        self._last_fidget_monotonic = now
-        gesture = random.choice(_IDLE_GESTURES)
+        # Never overlap a conversation turn or an autonomous charger return
+        # (both hold turn_lock) - skip this check instead of waiting.
+        # Confirmed on real hardware: a fidget fired mid-return, its turn
+        # step queued behind the return's wheel lock, and the instant Cozmo
+        # docked it ran and drove him straight back off the charger at 3.2V.
+        if not self._engine.turn_lock.acquire(blocking=False):
+            return
         try:
+            self._last_fidget_monotonic = now
+            gesture = random.choice(_IDLE_GESTURES)
             # A fidget is the one thing that must not leave the charger while
             # it's still charging - there's no reason to come out. Face/head/
             # lift still play so he doesn't look dead on the dock. Once
             # charging finishes (docked but not charging = full), the full
             # gesture runs, and its wheel steps drive him off the dock
             # first like any other movement. Conversation-triggered
-            # movement has no such restriction.
+            # movement has no such restriction. is_movement_blocked() also
+            # covers "just docked, IS_CHARGING not registered yet" (see
+            # real.py's _must_stay_on_charger()).
             charging_on_dock = self._robot.is_on_charger() and self._robot.is_charging()
-            self._robot.run_gesture(gesture, wheels=not charging_on_dock)
+            wheels = not (charging_on_dock or self._robot.is_movement_blocked())
+            self._robot.run_gesture(gesture, wheels=wheels)
         except Exception as e:  # noqa: BLE001 - a cosmetic fidget hiccup shouldn't crash the process
             logger.debug("Idle fidget ('%s') failed: %s", gesture, e)
+        finally:
+            self._engine.turn_lock.release()

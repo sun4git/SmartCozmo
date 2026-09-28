@@ -215,16 +215,17 @@ class RobotBackend(abc.ABC):
         and not is_charging()` means docked but not charging - i.e. full,
         assuming the charge controller stops topping off once full like
         chargers normally do (backends with no such concept always return
-        False). drive()/turn() block only while this is True (and the
-        battery is low - see real.py) - otherwise a normal drive/turn is
+        False). drive()/turn() block while docked with a low battery
+        (see real.py - not gated on this flag, which can lag behind
+        docking) - otherwise a normal drive/turn is
         allowed and drives Cozmo off the dock as a side effect. Idle
         fidgets additionally skip their wheel steps while this is True on
         the dock (idle_fidget.py)."""
 
     def is_movement_blocked(self) -> bool:
         """Whether drive()/turn() (and so any gesture's wheel steps) would
-        currently refuse to move - real backend: still charging on the dock
-        with a low battery (real.py's _must_stay_on_charger()). Checked by
+        currently refuse to move - real backend: on the dock with a low
+        battery (real.py's _must_stay_on_charger()). Checked by
         the engine *before* the model replies, so it can say "I can't come
         out yet" instead of promising to and then not moving. Backends with
         no such concept never block."""

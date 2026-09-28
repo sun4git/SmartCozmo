@@ -78,9 +78,6 @@ class CozmoEngine:
         # in progress or mutates the message list mid-turn - and a turn that
         # starts meanwhile simply waits for it to finish.
         self.turn_lock = threading.Lock()
-        # (is_on_charger, is_charging) as of the last status note sent to
-        # the model - None until the first turn. See _charger_status_note().
-        self._told_charger_state: tuple[bool, bool] | None = None
 
     def set_listening_window(self, is_open: bool) -> None:
         """Called by --mode vad when a listening window opens/closes. Closing
@@ -123,21 +120,20 @@ class CozmoEngine:
         return True
 
     def _charger_status_note(self) -> str | None:
-        """A one-line status note whenever Cozmo's on/off-charger (or
-        charging) state differs from what the model was last told - and on
-        the first turn. Confirmed on real hardware: a gesture drove him off
-        the charger mid-conversation (allowed) and the model, never told,
-        insisted "I'm already here!" when asked to go back. Only sent on a
-        change, so it doesn't pad every turn."""
+        """A one-line charger status note, added to every turn (~10 tokens).
+        Confirmed on real hardware, twice: a gesture drove Cozmo off the
+        charger mid-conversation and the model, never told, insisted "I'm
+        already here!". A first fix only sent this when the state changed
+        between turns - which missed a docked-then-off round trip that
+        happened entirely *between* two turns (an autonomous return, then a
+        fidget drive-off): same state at both turns, so no note, while the
+        history said "docked". Every turn is the only version that can't
+        go stale."""
         try:
-            state = (self._robot.is_on_charger(), self._robot.is_charging())
+            on_charger, charging = self._robot.is_on_charger(), self._robot.is_charging()
         except Exception as e:  # noqa: BLE001 - a status check must never break a turn
             logger.debug("Charger status check failed: %s", e)
             return None
-        if state == self._told_charger_state:
-            return None
-        self._told_charger_state = state
-        on_charger, charging = state
         if not on_charger:
             return "[Status: I'm off my charger right now.]"
         if charging:
@@ -155,6 +151,7 @@ class CozmoEngine:
         """Say something unprompted, through the same `say` tool the model
         uses (same TTS provider, AUDIO_OUTPUT routing, and lift handling).
         Caller must hold turn_lock. Returns whether it succeeded."""
+        self.last_interaction_monotonic = time.monotonic()
         result = self._call_tool("say", {"text": text, "mood": mood})
         if not result.ok:
             logger.warning("Unprompted speech failed: %s", result.to_tool_message())
@@ -164,6 +161,7 @@ class CozmoEngine:
         """Record something Cozmo said/did on his own as an assistant message,
         so the model has context for the human's next reply (e.g. "yes" to a
         low-battery offer it never made itself). Caller must hold turn_lock."""
+        self.last_interaction_monotonic = time.monotonic()
         self.conversation.add_assistant(text)
         self.conversation.save()
 
