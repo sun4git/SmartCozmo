@@ -473,6 +473,8 @@ class PyCozmoRobot(RobotBackend):
         distance_mm = -(abs(self._settings.charger_dock_distance_mm) + abs(self._settings.charger_dock_overshoot_mm))
         speed = self._settings.charger_dock_speed_mmps
         result = self.drive(distance_mm, speed, suppress_cliff=True, stop_on_charger=True)
+        if result.moved and not result.hazard:
+            self._wait_for_charger_contacts()
         final = self.get_pose()
         if final is not None:
             logger.info(
@@ -481,6 +483,24 @@ class PyCozmoRobot(RobotBackend):
                 "engaged" if self.is_on_charger() else "NOT engaged",
             )
         return result
+
+    def _wait_for_charger_contacts(self) -> None:
+        """Confirmed on real hardware: IS_ON_CHARGER can come on only some
+        time *after* Cozmo is physically seated - it wasn't set 0.3s after
+        a dock that visibly succeeded, and was by the next battery check
+        (~40s later). Possibly the firmware waits for the motors to stop or
+        needs the contact to hold for a while; the exact reason is
+        unconfirmed. So wait (bounded by CHARGER_CONTACT_WAIT_S) before
+        anyone treats "not yet" as "missed", and log how long it actually
+        took so the bound can be tuned from real numbers."""
+        wait_s = self._settings.charger_contact_wait_s
+        start = time.monotonic()
+        while not self.is_on_charger():
+            if time.monotonic() - start >= wait_s:
+                logger.info("Charger contacts still not engaged after waiting %.1fs.", wait_s)
+                return
+            time.sleep(_CLIFF_POLL_S)
+        logger.info("Charger contacts engaged %.2fs after the dock reverse stopped.", time.monotonic() - start)
 
     # --- pose tracking / navigation ---
 

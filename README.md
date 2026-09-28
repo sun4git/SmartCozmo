@@ -1329,6 +1329,7 @@ annotated list (it's the source of truth). The essentials:
 | `CHARGER_EXIT_DISTANCE_MM` / `CHARGER_EXIT_SPEED_MMPS` | How far/fast to drive straight off the charger before performing a requested turn, if still docked (real backend only). |
 | `CHARGER_DOCK_DISTANCE_MM` / `CHARGER_DOCK_SPEED_MMPS` | How far/fast the `dock` tool reverses onto the charger (real backend only). The distance also sets how far out from the recorded charger pose the return-to-charger staging point is. |
 | `CHARGER_DOCK_OVERSHOOT_MM` | How much further than `CHARGER_DOCK_DISTANCE_MM` the dock reverse may continue; it stops the moment the charger contacts engage. |
+| `CHARGER_CONTACT_WAIT_S` | How long `dock()` waits after reversing for the charger contacts to read as engaged before calling it a miss (the flag can lag behind actually being seated). |
 | `AUTO_RETURN_TO_CHARGER_ENABLED` | Low-battery return-to-charger: offer at `BATTERY_LOW_VOLTAGE`, go on its own at `BATTERY_CRITICAL_VOLTAGE`, ask for help if the charger location isn't known (default `true`). |
 | `RETURN_TO_POSE_TIMEOUT_S` | Upper bound on one `go_to_pose()` navigation leg before it's aborted (pycozmo's own has no timeout). |
 | `MAX_TOOL_ITERATIONS` | Cap on LLM↔tool round-trips per user turn. |
@@ -2239,6 +2240,24 @@ Still open, roughly in priority order:
      rotated frames; the status note goes out on the first turn and on
      changes only. All earlier scripted checks still pass. **Not yet
      re-run on real hardware.**
+   - **Next real run (2026-09-28): docked correctly, but reported a miss.**
+     The autonomous return seated Cozmo on the charger (visibly), but
+     `IS_ON_CHARGER` wasn't set yet 0.3s after the reverse stopped. So it
+     reported "not_on_charger" and asked for help, and the flag only
+     showed as set at the next 30s battery check. The flag never fired
+     during the reverse either, so stop-on-contact didn't trigger and the
+     full distance + overshoot ran (logged `-16.1mm short`, i.e. 16mm
+     *past* the recorded docked pose: pushed against the charger's back,
+     with some tread slip likely inflating that reading). The flag
+     clearly lags behind the physical contact. Why is unconfirmed
+     (possibly the firmware waits for the motors to stop, or needs the
+     contact to hold). Fixed: `dock()` now waits up to
+     `CHARGER_CONTACT_WAIT_S` (default 10s, returns as soon as the flag
+     appears) before anything treats "not yet" as "missed", and logs the
+     real delay ("Charger contacts engaged X.XXs after the dock reverse
+     stopped") so the bound can be tuned. **Verified as logic only**
+     (scripted: a flag arriving 1.5s late is now reported as docked, with
+     the delay logged). Not yet re-run on real hardware.
 
 ---
 

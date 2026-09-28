@@ -283,6 +283,11 @@ class Settings:
     # acceleration ramp); an extra ~40mm seated it. 50 is a first guess
     # just above that, not tuned.
     charger_dock_overshoot_mm: float = field(default_factory=lambda: _env_float("CHARGER_DOCK_OVERSHOOT_MM", 50.0))
+    # How long dock() waits after reversing for IS_ON_CHARGER before calling
+    # it a miss - confirmed on real hardware that the flag can come on well
+    # after Cozmo is physically seated (not set at 0.3s, set within ~40s).
+    # Returns as soon as it appears; 10 is a guess, tune from the logged delay.
+    charger_contact_wait_s: float = field(default_factory=lambda: _env_float("CHARGER_CONTACT_WAIT_S", 10.0))
 
     # --- Agentic loop / conversation ---
     max_tool_iterations: int = field(default_factory=lambda: _env_int("MAX_TOOL_ITERATIONS", 4))
