@@ -74,11 +74,11 @@ _TAP_BASELINE_ALPHA = 0.02
 # promptly, cheap enough (just an int compare) to not matter performance-wise.
 _CLIFF_POLL_S = 0.05
 
-# Extra grace period (on top of the commanded move's own duration) that
-# set_lift_height_mm()/lower_lift_fully() suppress tap detection for -
-# accounts for residual mechanical vibration/settling after the lift motor
-# stops, not just while it's actively moving.
-_LIFT_TAP_SUPPRESS_GRACE_S = 0.3
+# Extra grace period (on top of a commanded move's own duration) that tap
+# detection stays suppressed for after any self-commanded movement (lift,
+# head, wheels - see _suppress_taps()) - accounts for residual mechanical
+# vibration/settling after the motor stops, not just while it's moving.
+_SELF_MOTION_TAP_GRACE_S = 0.3
 
 # Pause after a navigation move before reading pose back - lets residual
 # momentum settle so the reading reflects where Cozmo actually stopped.
@@ -109,13 +109,18 @@ class PyCozmoRobot(RobotBackend):
         self._tap_event = threading.Event()
         self._last_tap_time: float = 0.0
         # Monotonic deadline until which tap detection is suppressed - set
-        # whenever *we* command a lift movement, since the motor
-        # starting/stopping is a real, self-caused accelerometer jolt that
-        # IS_PICKED_UP doesn't cover (it's not a pickup) and a magnitude
-        # threshold alone can't tell apart from a genuine tap. Raised
-        # directly: the "shrug" idle-fidget gesture (lift up, then down)
-        # was registering as a tap.
-        self._lift_tap_suppress_until: float = 0.0
+        # whenever *we* command a movement (see _suppress_taps()), since a
+        # motor starting/stopping is a real, self-caused accelerometer jolt
+        # that IS_PICKED_UP doesn't cover (it's not a pickup) and a
+        # magnitude threshold alone can't tell apart from a genuine tap.
+        # Raised directly twice: first the "shrug" idle fidget's lift move
+        # registered as a tap; later (2026-09-28) head moves and wheel
+        # turns did too - a "peek" fidget kept starting conversations on
+        # its own. Our own command timing is used rather than the
+        # firmware's IS_MOVING/ARE_WHEELS_MOVING flags, deliberately: what
+        # those report on this robot is unverified, and one stuck on would
+        # silently disable taps for good.
+        self._tap_suppress_until: float = 0.0
         self._latest_status: int = 0
         # Reentrant: spin_wheels_for()'s own charger-exit maneuver calls
         # self.drive() while already holding this (see spin_wheels_for()) -
@@ -239,12 +244,22 @@ class PyCozmoRobot(RobotBackend):
         debounce_s = self._settings.tap_debounce_ms / 1000.0
         if (
             not picked_up
-            and now >= self._lift_tap_suppress_until
+            and now >= self._tap_suppress_until
             and abs(delta) > self._settings.tap_threshold
             and (now - self._last_tap_time) > debounce_s
         ):
             self._last_tap_time = now
             self._tap_event.set()
+
+    def _suppress_taps(self, seconds: float) -> None:
+        """Ignore taps for `seconds` (a movement we're about to command or
+        are in the middle of) plus _SELF_MOTION_TAP_GRACE_S. Only ever
+        extends the current window, never shortens it - overlapping moves
+        (e.g. a background gesture's head step during a drive) can't cut
+        each other's suppression short."""
+        until = time.monotonic() + seconds + _SELF_MOTION_TAP_GRACE_S
+        if until > self._tap_suppress_until:
+            self._tap_suppress_until = until
 
     def wait_for_tap(self, timeout: float | None = None) -> bool:
         self._tap_event.clear()
@@ -341,6 +356,7 @@ class PyCozmoRobot(RobotBackend):
         try:
             back_speed = -80.0 if backup_away_from_sign >= 0 else 80.0
             cli = self._client
+            self._suppress_taps(0.5)
             cli.drive_wheels(lwheel_speed=back_speed, rwheel_speed=back_speed)
             time.sleep(0.5)
             cli.stop_all_motors()
@@ -443,9 +459,11 @@ class PyCozmoRobot(RobotBackend):
             signed_speed = speed if distance_mm >= 0 else -speed
             duration = abs(distance_mm) / speed
 
+            self._suppress_taps(duration)
             cli.drive_wheels(lwheel_speed=signed_speed, rwheel_speed=signed_speed)
             hazard = self._sleep_unless_cliff(duration, ignore_cliff=ignore_cliff, stop_on_charger=stop_on_charger)
             cli.stop_all_motors()
+            self._suppress_taps(0.0)  # grace measured from the actual stop
 
             if ignore_cliff:
                 self._set_cliff_protection(enabled=True)
@@ -602,6 +620,9 @@ class PyCozmoRobot(RobotBackend):
         hazard: str | None = None
         reason: str | None = None
         while not done.wait(_CLIFF_POLL_S):
+            # Firmware-driven path, duration unknown up front - keep
+            # extending tap suppression for as long as it's running.
+            self._suppress_taps(_CLIFF_POLL_S)
             status = self._latest_status
             if status & pycozmo.RobotStatusFlag.IS_FALLING:
                 hazard = "fall"
@@ -770,21 +791,24 @@ class PyCozmoRobot(RobotBackend):
                     return exit_result
 
             cli = self._client
+            self._suppress_taps(seconds)
             cli.drive_wheels(lwheel_speed=-speed_mmps, rwheel_speed=speed_mmps)
             hazard = self._sleep_unless_cliff(seconds)
             cli.stop_all_motors()
+            self._suppress_taps(0.0)  # grace measured from the actual stop
             if hazard:
                 self._react_to_hazard(hazard)
             return MoveResult(moved=True, hazard=hazard)
 
     def set_head_angle_deg(self, angle_deg: float, duration: float = 0.4) -> None:
         angle_deg = _clamp(angle_deg, _MIN_HEAD_DEG, _MAX_HEAD_DEG)
+        self._suppress_taps(duration)
         self._client.set_head_angle(math.radians(angle_deg), duration=duration)
         time.sleep(duration)
 
     def set_lift_height_mm(self, height_mm: float, duration: float = 0.4) -> None:
         height_mm = _clamp(height_mm, _MIN_LIFT_MM, _MAX_LIFT_MM)
-        self._lift_tap_suppress_until = time.monotonic() + duration + _LIFT_TAP_SUPPRESS_GRACE_S
+        self._suppress_taps(duration)
         self._client.set_lift_height(height_mm, duration=duration)
         time.sleep(duration)
 
@@ -797,7 +821,7 @@ class PyCozmoRobot(RobotBackend):
         # so asking for 0.0 directly lets the real mechanical limit decide
         # where "fully down" actually is, instead of trusting a possibly-
         # wrong documented constant.
-        self._lift_tap_suppress_until = time.monotonic() + duration + _LIFT_TAP_SUPPRESS_GRACE_S
+        self._suppress_taps(duration)
         self._client.set_lift_height(0.0, duration=duration)
         time.sleep(duration)
 

@@ -28,10 +28,17 @@ def record_until_silence(
     max_seconds: int,
     min_speech_ms: int = 60,
     min_rms: int = 150,
+    max_utterance_s: int | None = None,
 ) -> bool:
-    """Record from `device` until `silence_ms` of silence follows detected speech,
-    or `max_seconds` is reached. Returns True if any speech was captured, and
+    """Record from `device` until `silence_ms` of silence follows detected speech.
+    `max_seconds` bounds how long to wait for speech to *start*; once it has,
+    the utterance itself may run up to `max_utterance_s` from its onset
+    (defaults to `max_seconds`). Returns True if any speech was captured, and
     writes the captured audio to `path` in that case.
+
+    The two limits are separate because one shared budget cut off speech
+    that began late in the window - confirmed on real hardware: 0.4s
+    captured, stopped by the 15s cap, sent to STT as an unusable fragment.
 
     A frame only counts as "speech" if BOTH `webrtcvad` classifies it as
     speech AND its RMS loudness clears `min_rms` — webrtcvad only looks at
@@ -70,7 +77,9 @@ def record_until_silence(
 
     vad = webrtcvad.Vad(aggressiveness)
     silence_frames_needed = max(1, silence_ms // _FRAME_MS)
-    max_frames = max(1, int(max_seconds * 1000 / _FRAME_MS))
+    wait_frames = max(1, int(max_seconds * 1000 / _FRAME_MS))
+    utterance_s = max_seconds if max_utterance_s is None else max_utterance_s
+    utterance_frames = max(1, int(utterance_s * 1000 / _FRAME_MS))
     onset_frames_needed = max(1, min_speech_ms // _FRAME_MS)
 
     proc = subprocess.Popen(
@@ -88,10 +97,16 @@ def record_until_silence(
     webrtcvad_only_hits = 0  # frames webrtcvad liked but the RMS floor rejected - tuning signal
     # Why the capture stopped - logged with every accepted capture, to tell
     # "you stopped talking" apart from "hit the time cap".
-    end_reason = f"hit the {max_seconds}s cap"
+    end_reason = "unknown"
 
     try:
-        while frame_count < max_frames:
+        while True:
+            if not speech_started and frame_count >= wait_frames:
+                end_reason = f"no speech started within {max_seconds}s"
+                break
+            if speech_started and len(voiced_frames) >= utterance_frames:
+                end_reason = f"hit the {utterance_s}s utterance cap"
+                break
             frame = proc.stdout.read(_FRAME_BYTES)
             if len(frame) < _FRAME_BYTES:
                 end_reason = "mic stream ended"

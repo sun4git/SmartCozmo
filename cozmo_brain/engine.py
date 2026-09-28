@@ -63,6 +63,11 @@ class CozmoEngine:
         # process start rather than looking infinitely idle before the
         # first turn ever happens.
         self.last_interaction_monotonic: float = time.monotonic()
+        # True while --mode vad has a listening window open (after a wake
+        # word/tap, until "no follow-up heard"). idle_fidget.py doesn't
+        # fidget then - confirmed on real hardware that a fidget's motor
+        # noise got recorded and sent to STT as a blank clip mid-window.
+        self.listening_window_open = False
         # Held for the whole of every handle_turn(). Background behavior that
         # speaks, drives, or writes to the conversation on its own
         # (charger_return.py) takes this too, so it never talks over a reply
@@ -72,6 +77,15 @@ class CozmoEngine:
         # (is_on_charger, is_charging) as of the last status note sent to
         # the model - None until the first turn. See _charger_status_note().
         self._told_charger_state: tuple[bool, bool] | None = None
+
+    def set_listening_window(self, is_open: bool) -> None:
+        """Called by --mode vad when a listening window opens/closes. Closing
+        also counts as activity for idle_fidget.py, so a fidget waits a full
+        IDLE_FIDGET_AFTER_S after the window, rather than firing the instant
+        a long wordless window (e.g. a false activation) ends."""
+        self.listening_window_open = is_open
+        if not is_open:
+            self.last_interaction_monotonic = time.monotonic()
 
     def _charger_status_note(self) -> str | None:
         """A one-line status note whenever Cozmo's on/off-charger (or

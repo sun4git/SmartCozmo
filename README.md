@@ -1708,6 +1708,38 @@ Still open, roughly in priority order:
      normally once the suppression window passes — not yet confirmed this
      was the sole cause of the real-hardware false taps observed.
 
+     **It wasn't the sole cause. Confirmed on real hardware (2026-09-28):**
+     head moves and wheel turns trigger it too. An idle `peek` fidget (head
+     up, small turns) kept starting listening windows on its own, and once
+     docked-but-full it drove Cozmo off the charger in the process. Its
+     motor noise then got recorded and sent to STT as blank clips. Three
+     fixes:
+     - The suppression window now covers *every* movement we command
+       (`_suppress_taps()` in `robot/real.py`): head, lift, drive, turn,
+       the hazard back-away, and `go_to_pose()` navigation (extended
+       continuously while the firmware drives). It deliberately relies on
+       our own command timing, not the firmware's
+       `IS_MOVING`/`ARE_WHEELS_MOVING` flags: what those report on this
+       robot is unverified, and one stuck on would silently disable taps
+       for good.
+     - `idle_fidget.py` doesn't fidget while a `--mode vad` listening
+       window is open (`CozmoEngine.listening_window_open`). Listening
+       isn't idle, and the motor noise lands in the recording. Closing a
+       window counts as activity, so the next fidget waits a full
+       `IDLE_FIDGET_AFTER_S`. The wake word is unaffected by either fix.
+     - Unrelated but found in the same logs: `record_until_silence()`'s
+       single time budget covered both waiting for speech to start *and*
+       the utterance itself, so speech starting late in a window was cut
+       off at the window's end ("0.4s captured, hit the 15s cap"). The
+       wait (`VAD_MAX_UTTERANCE_S` first, then `VAD_FOLLOWUP_TIMEOUT_S`)
+       and the utterance cap (`VAD_MAX_UTTERANCE_S` from speech onset) are
+       now separate.
+     **Verified as logic only** (scripted: taps ignored during and just
+     after head/drive/turn/lift moves and registered again after; no
+     fidget while a window is open; late-starting speech captured whole;
+     wait and utterance caps each enforced). Not yet re-run on real
+     hardware.
+
      First built as its own `--mode tap` with fixed-duration recording, like
      push-to-talk. Dropped that once it raised a real question: how do you
      reliably tell "no speech was said" from a tap-triggered capture, to

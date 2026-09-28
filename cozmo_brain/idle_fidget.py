@@ -55,6 +55,10 @@ class IdleFidgeter:
             self._stop.wait(_POLL_INTERVAL_S)
 
     def _check_once(self) -> None:
+        # Listening isn't idle - and a fidget's motor noise would land in
+        # the recording (see CozmoEngine.listening_window_open).
+        if self._engine.listening_window_open:
+            return
         now = time.monotonic()
         last_active = max(self._engine.last_interaction_monotonic, self._last_fidget_monotonic)
         if now - last_active < self._settings.idle_fidget_after_s:

@@ -76,63 +76,78 @@ def run(engine: CozmoEngine, robot: RobotBackend, speech: SpeechClient, settings
     while True:
         _wait_for_wake_word_or_tap(robot, settings)
         print("Wake word or tap heard - listening...")
-        _apply_mood_safely(robot, "curious")
+        engine.set_listening_window(True)
+        try:
+            _run_listening_window(engine, robot, speech, settings)
+        finally:
+            engine.set_listening_window(False)
 
-        # The first capture after the wake word uses the normal per-utterance
-        # cap; every capture after that is a "follow-up" and uses the (often
-        # longer) follow-up window instead, so the conversation can continue
-        # without repeating the wake word until the human actually goes quiet.
-        listen_timeout = settings.vad_max_utterance_s
 
-        while True:
-            got_speech = record_until_silence(
-                settings.raw_input_wav,
-                settings.record_device,
-                settings.vad_aggressiveness,
-                settings.vad_silence_ms,
-                listen_timeout,
-                settings.vad_min_speech_ms,
-                settings.vad_min_rms,
-            )
-            if not got_speech:
-                print("(no follow-up heard - wake word needed again)\n")
-                _apply_mood_safely(robot, "neutral")
-                break
+def _run_listening_window(engine: CozmoEngine, robot: RobotBackend, speech: SpeechClient, settings: Settings) -> None:
+    """One activation's worth of conversation: listen, reply, keep listening
+    for follow-ups, until nothing is heard within the window."""
+    _apply_mood_safely(robot, "curious")
 
-            stt_started = time.monotonic()
-            try:
-                text = speech.transcribe(settings.raw_input_wav)
-            except requests.RequestException as e:
-                # An STT request failure used to crash the whole hands-free
-                # session (confirmed on real hardware: an OpenAI 400 here
-                # took the process down mid-conversation, with nothing above
-                # this catching it) - treated the same as "heard something,
-                # nothing transcribable" instead, since the mic is otherwise
-                # unattended and a transient/edge-case API error shouldn't
-                # end the session. e.response.text carries the provider's
-                # actual error detail (raise_for_status() alone discards
-                # it), logged here since a bare "400 Bad Request" gives no
-                # way to root-cause a repeat.
-                detail = e.response.text.strip() if e.response is not None else str(e)
-                logger.warning("Speech-to-text request failed: %s", detail)
-                print(f"(speech-to-text request failed, try again: {detail})\n")
-                continue
-            # Logged every time, empty results included - the mic is closed
-            # for this whole round trip, and an empty result used to loop
-            # straight back to recording with nothing logged at all
-            # (confirmed on real hardware: 13 silent captures in a row).
-            logger.info(
-                "STT (%s) took %.2fs -> %r", settings.stt_provider, time.monotonic() - stt_started, text
-            )
-            if not text:
-                print("(heard something, but speech-to-text returned nothing - listening again)")
-                continue  # heard something, but nothing transcribable - keep the conversation open
-            print(f"You said: {text}")
-            if is_likely_hallucination(text):
-                print("(that's a known Whisper artifact from background noise, not real speech - ignoring)\n")
-                continue
+    # How long to wait for speech to *start*: VAD_MAX_UTTERANCE_S right
+    # after the wake word, then VAD_FOLLOWUP_TIMEOUT_S for every follow-up,
+    # so the conversation can continue without repeating the wake word until
+    # the human actually goes quiet. Separately, once speech starts, one
+    # utterance may run up to VAD_MAX_UTTERANCE_S from that point
+    # (max_utterance_s below) - it used to share this same budget, so
+    # speech starting late in the window got cut off at the window's end
+    # (confirmed on real hardware: 0.4s captured, "hit the 15s cap").
+    listen_timeout = settings.vad_max_utterance_s
 
-            summary = engine.handle_turn(text)
-            print(summary, "\n")
+    while True:
+        got_speech = record_until_silence(
+            settings.raw_input_wav,
+            settings.record_device,
+            settings.vad_aggressiveness,
+            settings.vad_silence_ms,
+            listen_timeout,
+            settings.vad_min_speech_ms,
+            settings.vad_min_rms,
+            max_utterance_s=settings.vad_max_utterance_s,
+        )
+        if not got_speech:
+            print("(no follow-up heard - wake word needed again)\n")
+            _apply_mood_safely(robot, "neutral")
+            return
 
-            listen_timeout = settings.vad_followup_timeout_s
+        stt_started = time.monotonic()
+        try:
+            text = speech.transcribe(settings.raw_input_wav)
+        except requests.RequestException as e:
+            # An STT request failure used to crash the whole hands-free
+            # session (confirmed on real hardware: an OpenAI 400 here
+            # took the process down mid-conversation, with nothing above
+            # this catching it) - treated the same as "heard something,
+            # nothing transcribable" instead, since the mic is otherwise
+            # unattended and a transient/edge-case API error shouldn't
+            # end the session. e.response.text carries the provider's
+            # actual error detail (raise_for_status() alone discards
+            # it), logged here since a bare "400 Bad Request" gives no
+            # way to root-cause a repeat.
+            detail = e.response.text.strip() if e.response is not None else str(e)
+            logger.warning("Speech-to-text request failed: %s", detail)
+            print(f"(speech-to-text request failed, try again: {detail})\n")
+            continue
+        # Logged every time, empty results included - the mic is closed
+        # for this whole round trip, and an empty result used to loop
+        # straight back to recording with nothing logged at all
+        # (confirmed on real hardware: 13 silent captures in a row).
+        logger.info(
+            "STT (%s) took %.2fs -> %r", settings.stt_provider, time.monotonic() - stt_started, text
+        )
+        if not text:
+            print("(heard something, but speech-to-text returned nothing - listening again)")
+            continue  # heard something, but nothing transcribable - keep the conversation open
+        print(f"You said: {text}")
+        if is_likely_hallucination(text):
+            print("(that's a known Whisper artifact from background noise, not real speech - ignoring)\n")
+            continue
+
+        summary = engine.handle_turn(text)
+        print(summary, "\n")
+
+        listen_timeout = settings.vad_followup_timeout_s
