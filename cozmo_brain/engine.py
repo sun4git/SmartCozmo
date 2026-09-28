@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from dataclasses import dataclass, field
 
 import requests
 
@@ -34,15 +35,35 @@ _CHARGER_BLOCKED_NOTE = (
     "yet because I need to charge more; don't say I'm coming.]"
 )
 
-# Spoken by the engine itself if a drive/turn was refused for that reason
-# and the model never said anything after finding out (e.g. it ran out of
-# MAX_TOOL_ITERATIONS, or ignored the tool result) - the human must never be
-# left with a spoken promise and a Cozmo that silently didn't move.
 # Upper bound on waiting for background gestures at the end of a turn -
 # longest real gesture (spin) is ~7s at the current turn calibration.
 _GESTURE_WAIT_S = 15.0
 
+# How long a background follow-up (FINAL_LLM_CALL=async) waits for an
+# in-progress recording to actually stop before it acts - the recorder
+# checks its stop signal every 30ms frame, so this is generous.
+_MIC_RELEASE_WAIT_S = 1.0
+
+# Spoken by the engine itself if a drive/turn was refused for that reason
+# and the model never said anything after finding out (e.g. it ran out of
+# MAX_TOOL_ITERATIONS, or ignored the tool result) - the human must never be
+# left with a spoken promise and a Cozmo that silently didn't move.
 _CHARGER_BLOCKED_FALLBACK = "Sorry, I can't come out yet - my battery's too low. I need to charge a bit more first."
+
+
+@dataclass
+class _TurnState:
+    """What one user turn has produced so far - shared between the part of
+    the turn run on the caller's thread and, with FINAL_LLM_CALL=async, the
+    follow-up LLM call finished on a background thread."""
+
+    lines: list[str] = field(default_factory=list)
+    # True once a drive/turn got refused by the charger check, until a
+    # successful `say` afterward - i.e. the model has told them why.
+    unexplained_block: bool = False
+
+    def summary(self) -> str:
+        return "\n".join(self.lines) if self.lines else "(no response)"
 
 
 class CozmoEngine:
@@ -78,6 +99,13 @@ class CozmoEngine:
         # in progress or mutates the message list mid-turn - and a turn that
         # starts meanwhile simply waits for it to finish.
         self.turn_lock = threading.Lock()
+        # FINAL_LLM_CALL=async plumbing (see handle_turn()): set by the
+        # background follow-up when the model *continues* its reply (more
+        # actions or speech), so --mode vad stops the recording it already
+        # started; mic_active is --mode vad saying a recording is running.
+        self.followup_interrupt = threading.Event()
+        self.mic_active = False
+        self._followup_thread: threading.Thread | None = None
 
     def set_listening_window(self, is_open: bool) -> None:
         """Called by --mode vad when a listening window opens/closes. Closing
@@ -101,9 +129,10 @@ class CozmoEngine:
         (extra["needs_attention"], tools/registry.py), or a photo to look at.
         That last check matters because the model writes every call in a
         batch up front: `drive` then `say` means it spoke *before* knowing
-        the drive hit a cliff. Only acted on when FINAL_LLM_CALL=skip (see
-        config.py)."""
-        if self._settings.final_llm_call != "skip" or not batch or image_attached:
+        the drive hit a cliff. What happens next depends on FINAL_LLM_CALL
+        (see config.py/handle_turn()): skip ends the turn, async finishes the
+        LLM call in the background."""
+        if not batch or image_attached:
             return False
         last_name, last_result = batch[-1]
         if last_name != "say" or not last_result.ok:
@@ -182,13 +211,44 @@ class CozmoEngine:
             logger.warning("Tool '%s' failed: %s", name, e)
             return ToolResult(False, str(e))
 
-    def handle_turn(self, user_text: str, images: list[str] | None = None) -> str:
+    def handle_turn(
+        self, user_text: str, images: list[str] | None = None, *, allow_async_followup: bool = False
+    ) -> str:
         """Runs one full user turn through the tool-calling loop. Returns a
-        transcript-ish summary of what Cozmo said/did, for logging/display."""
-        with self.turn_lock:
-            return self._handle_turn(user_text, images)
+        transcript-ish summary of what Cozmo said/did, for logging/display.
 
-    def _handle_turn(self, user_text: str, images: list[str] | None) -> str:
+        `allow_async_followup` is passed only by --mode vad: with
+        FINAL_LLM_CALL=async, once the reply ends in a clean `say`, this
+        returns immediately (so the mic can reopen) and the follow-up LLM
+        call finishes on a background thread, which keeps holding turn_lock
+        until it's done - so the next turn, a charger return, or a fidget
+        still can't start until it finishes. Other modes don't reopen a mic
+        on their own, so they always wait for it (plain sync)."""
+        self.turn_lock.acquire()
+        handed_off = False
+        try:
+            summary, handed_off = self._handle_turn(user_text, images, allow_async_followup)
+            return summary
+        finally:
+            if not handed_off:
+                self.turn_lock.release()
+
+    def settle_followup(self) -> bool:
+        """If a background follow-up took the floor (the model continued its
+        reply), wait for it to finish and return True; otherwise return False
+        at once, even if a follow-up is still waiting on the LLM - that's the
+        case async exists for. Called by --mode vad around each recording."""
+        if not self.followup_interrupt.is_set():
+            return False
+        thread = self._followup_thread
+        if thread is not None:
+            thread.join(timeout=120)
+        self.followup_interrupt.clear()
+        return True
+
+    def _handle_turn(
+        self, user_text: str, images: list[str] | None, allow_async_followup: bool
+    ) -> tuple[str, bool]:
         self.last_interaction_monotonic = time.monotonic()
         charger_note = self._charger_status_note()
         if charger_note:
@@ -197,12 +257,43 @@ class CozmoEngine:
             user_text = f"{user_text}\n\n{_CHARGER_BLOCKED_NOTE}"
         self.conversation.add_user(user_text, images=images)
         schema = [t.schema() for t in self._tools]
-        summary_lines: list[str] = []
-        # True once a drive/turn got refused by the charger check, until a
-        # successful `say` afterward - i.e. the model has told them why.
-        unexplained_block = False
+        turn = _TurnState()
 
-        for iteration in range(self._settings.max_tool_iterations):
+        mode = self._settings.final_llm_call
+        run_async = mode == "async" and allow_async_followup
+        ended_early, next_step = self._run_steps(schema, turn, 0, can_end_early=mode == "skip" or run_async)
+
+        if ended_early and run_async and next_step < self._settings.max_tool_iterations:
+            self.followup_interrupt.clear()
+            thread = threading.Thread(
+                target=self._run_followup, args=(schema, turn, next_step), name="llm-followup", daemon=True
+            )
+            self._followup_thread = thread
+            thread.start()
+            # Still wait for gestures here: the mic must not reopen mid-spin,
+            # whatever the follow-up turns out to be.
+            self._wait_for_gestures()
+            return turn.summary(), True
+
+        self._finish_turn(turn)
+        return turn.summary(), False
+
+    def _run_steps(
+        self,
+        schema: list[dict],
+        turn: _TurnState,
+        first_step: int,
+        can_end_early: bool,
+        before_tools=None,
+    ) -> tuple[bool, int]:
+        """The tool-calling loop proper, from step `first_step`. Returns
+        (ended_early, next_step): ended_early means it stopped after a clean
+        final `say` (_turn_is_done()) rather than because the model replied
+        with no tool calls, failed, or hit MAX_TOOL_ITERATIONS.
+        `before_tools` runs once a response turns out to contain tool calls,
+        before any of them execute (the async follow-up uses it to stop the
+        mic first)."""
+        for iteration in range(first_step, self._settings.max_tool_iterations):
             try:
                 response = self._ollama.chat(self.conversation.messages, tools=schema)
             except requests.RequestException as e:
@@ -210,8 +301,8 @@ class CozmoEngine:
                 # failed Groq/OpenAI call used to be reported as
                 # "couldn't reach the LLM at <the Ollama URL>".
                 logger.error("Chat request (%s) failed: %s", self._settings.chat_provider, e)
-                summary_lines.append(f"(chat request to {self._settings.chat_provider} failed: {e})")
-                break
+                turn.lines.append(f"(chat request to {self._settings.chat_provider} failed: {e})")
+                return False, iteration
             tool_calls_raw = [
                 {"id": tc.id, "function": {"name": tc.name, "arguments": tc.arguments}}
                 for tc in response.tool_calls
@@ -219,12 +310,14 @@ class CozmoEngine:
             self.conversation.add_assistant(response.content, tool_calls=tool_calls_raw or None)
 
             if response.content:
-                summary_lines.append(f"(thinking) {response.content}")
+                turn.lines.append(f"(thinking) {response.content}")
 
             if not response.tool_calls:
                 if iteration == 0:
                     logger.info("Model returned no tool calls this turn.")
-                break
+                return False, iteration + 1
+            if before_tools is not None:
+                before_tools()
             # Shows in real-hardware logs whether the model batches actions
             # with its `say`, or speaks first and acts in a later step.
             logger.info("LLM step %d: %s", iteration + 1, ", ".join(tc.name for tc in response.tool_calls))
@@ -235,12 +328,12 @@ class CozmoEngine:
             for tc in response.tool_calls:
                 result = self._call_tool(tc.name, tc.arguments)
                 batch.append((tc.name, result))
-                summary_lines.append(f"[{tc.name}] {result.to_tool_message()}")
+                turn.lines.append(f"[{tc.name}] {result.to_tool_message()}")
                 self.conversation.add_tool_result(tc.name, result.to_tool_message(), tool_call_id=tc.id)
                 if result.extra and result.extra.get("blocked_by_charger"):
-                    unexplained_block = True
+                    turn.unexplained_block = True
                 elif tc.name == "say" and result.ok:
-                    unexplained_block = False
+                    turn.unexplained_block = False
                 if result.ok and result.extra and result.extra.get("image_path"):
                     image_to_attach = result.extra["image_path"]
                     image_caption = result.extra.get("image_caption", image_caption)
@@ -252,25 +345,52 @@ class CozmoEngine:
                 except OSError as e:
                     logger.warning("Could not attach captured photo: %s", e)
 
-            if self._turn_is_done(batch, image_attached=bool(image_to_attach)):
-                break
-        else:
-            logger.warning("Hit max_tool_iterations (%d) without a final reply.", self._settings.max_tool_iterations)
+            if can_end_early and self._turn_is_done(batch, image_attached=bool(image_to_attach)):
+                return True, iteration + 1
 
-        if unexplained_block:
+        logger.warning("Hit max_tool_iterations (%d) without a final reply.", self._settings.max_tool_iterations)
+        return False, self._settings.max_tool_iterations
+
+    def _run_followup(self, schema: list[dict], turn: _TurnState, first_step: int) -> None:
+        """FINAL_LLM_CALL=async: the rest of a turn, on a background thread,
+        while --mode vad is already listening. Usually the model just says
+        "done" and nothing visible happens. If it continues (e.g. a model
+        that said "sure!" alone and acts in its next step - confirmed live
+        with Groq's openai/gpt-oss-120b), the recording is stopped first
+        (_take_floor) so neither motor noise nor Cozmo's own voice lands in
+        it. Releases the turn_lock handle_turn() handed over."""
+        already_shown = len(turn.lines)
+        try:
+            self._run_steps(schema, turn, first_step, can_end_early=False, before_tools=self._take_floor)
+            self._finish_turn(turn)
+            for line in turn.lines[already_shown:]:
+                logger.info("Follow-up: %s", line)
+        except Exception:  # noqa: BLE001 - a background thread must never die silently
+            logger.exception("Background follow-up LLM call failed.")
+        finally:
+            self.turn_lock.release()
+
+    def _take_floor(self) -> None:
+        logger.info("Model continued its reply - pausing listening while it runs.")
+        self.followup_interrupt.set()
+        deadline = time.monotonic() + _MIC_RELEASE_WAIT_S
+        while self.mic_active and time.monotonic() < deadline:
+            time.sleep(0.02)
+
+    def _finish_turn(self, turn: _TurnState) -> None:
+        if turn.unexplained_block:
             logger.info("A move was refused (charging, low battery) and never explained - saying so directly.")
             if self.speak(_CHARGER_BLOCKED_FALLBACK, mood="sleepy"):
                 self.conversation.add_assistant(f"[I said this out loud:] {_CHARGER_BLOCKED_FALLBACK}")
-                summary_lines.append(f"[say] {_CHARGER_BLOCKED_FALLBACK}")
+                turn.lines.append(f"[say] {_CHARGER_BLOCKED_FALLBACK}")
+        self._wait_for_gestures()
+        self.conversation.save()
 
+    def _wait_for_gestures(self) -> None:
         # A turn isn't over while Cozmo is still moving: a `say`'s gesture
         # (GESTURE_ASYNC_ENABLED) keeps running in the background after the
         # speech finishes - `spin` takes ~7s, well past any sentence. The
-        # caller (e.g. --mode vad) reopens the mic as soon as this returns,
-        # and would otherwise record the motor noise. The old extra LLM
-        # round trip used to hide part of this by accident.
+        # caller (e.g. --mode vad) reopens the mic as soon as the turn
+        # returns, and would otherwise record the motor noise.
         if not self._robot.wait_for_background_gestures(_GESTURE_WAIT_S):
             logger.warning("A background gesture was still running after %.0fs - not waiting longer.", _GESTURE_WAIT_S)
-
-        self.conversation.save()
-        return "\n".join(summary_lines) if summary_lines else "(no response)"

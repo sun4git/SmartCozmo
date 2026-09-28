@@ -2293,6 +2293,32 @@ Still open, roughly in priority order:
      stopped") so the bound can be tuned. **Verified as logic only**
      (scripted: a flag arriving 1.5s late is now reported as docked, with
      the delay logged). Not yet re-run on real hardware.
+   - **The post-reply LLM call: `FINAL_LLM_CALL=sync|async|skip`
+     (2026-09-28).** Cozmo's answer is itself a tool call (`say`), so the
+     generic loop always made one more LLM call after it just to hear
+     "done", with the mic closed meanwhile. Skipping that call (`skip`) was
+     tried first, then **live-tested against every provider**. All accept
+     a history ending on a tool result (Ollama gemma, OpenAI gpt-4o-mini,
+     Groq qwen and gpt-oss). But Groq's `openai/gpt-oss-120b` does one tool
+     per step, and on "turn left" it said "sure!" alone and would only
+     have turned in its *next* step, so `skip` lost the action entirely.
+     `async` keeps the call but makes it in the background: in `--mode vad`
+     the mic reopens right after the `say` (`handle_turn(...,
+     allow_async_followup=True)`). If the model continues, the follow-up
+     sets `CozmoEngine.followup_interrupt`, which stops the in-progress
+     recording within one 30ms frame before anything moves or speaks (a
+     capture already under way is discarded). The action runs, then
+     listening resumes in the same window. The follow-up keeps holding
+     `turn_lock`, so the next turn, a charger return, or a fidget waits
+     for it, and history stays in order. Other modes treat `async` as
+     `sync`. **Default is `sync`** until `async` is confirmed on real
+     hardware. **Verified:** scripted (early return, lock hand-off, pause
+     and resume in a simulated listening window, turn ordering, hazards
+     still consulted synchronously, follow-up failure releases the lock)
+     plus live with real models: gpt-oss's "say, then turn" now turns,
+     with listening reopened ~1.5s in instead of after the whole turn.
+     Cost: `async` still makes the extra call every turn. The live test
+     hit Groq's free-tier rate limit (429).
    - **Next run (2026-09-28, Pi on `1a9dc6b`): the autonomous CRITICAL
      return fully worked, then an idle fidget undid it.** At 3.26V he
      navigated, docked, and reported success correctly. The contact flag

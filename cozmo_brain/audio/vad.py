@@ -11,6 +11,7 @@ import audioop
 import contextlib
 import logging
 import subprocess
+import threading
 import wave
 
 logger = logging.getLogger(__name__)
@@ -29,6 +30,7 @@ def record_until_silence(
     min_speech_ms: int = 60,
     min_rms: int = 150,
     max_utterance_s: int | None = None,
+    stop_event: threading.Event | None = None,
 ) -> bool:
     """Record from `device` until `silence_ms` of silence follows detected speech.
     `max_seconds` bounds how long to wait for speech to *start*; once it has,
@@ -39,6 +41,11 @@ def record_until_silence(
     The two limits are separate because one shared budget cut off speech
     that began late in the window - confirmed on real hardware: 0.4s
     captured, stopped by the 15s cap, sent to STT as an unusable fragment.
+
+    `stop_event`, when set by another thread, stops recording within one
+    30ms frame and returns False with nothing written - used when Cozmo
+    continues his previous reply in the background (FINAL_LLM_CALL=async,
+    see engine.py), so his motors/voice never end up in the recording.
 
     A frame only counts as "speech" if BOTH `webrtcvad` classifies it as
     speech AND its RMS loudness clears `min_rms` — webrtcvad only looks at
@@ -98,6 +105,7 @@ def record_until_silence(
     # Why the capture stopped - logged with every accepted capture, to tell
     # "you stopped talking" apart from "hit the time cap".
     end_reason = "unknown"
+    interrupted = False
 
     try:
         while True:
@@ -112,6 +120,9 @@ def record_until_silence(
                 end_reason = "mic stream ended"
                 break
             frame_count += 1
+            if stop_event is not None and stop_event.is_set():
+                interrupted = True
+                break
             frame_rms = audioop.rms(frame, 2)
             peak_rms_seen = max(peak_rms_seen, frame_rms)
             webrtcvad_says_speech = vad.is_speech(frame, _SAMPLE_RATE)
@@ -143,6 +154,14 @@ def record_until_silence(
         proc.terminate()
         with contextlib.suppress(Exception):
             proc.wait(timeout=2)
+
+    if interrupted:
+        logger.info(
+            "Stopped listening after %.1fs - Cozmo is continuing his reply%s.",
+            frame_count * _FRAME_MS / 1000.0,
+            " (discarded a capture already in progress)" if speech_started else "",
+        )
+        return False
 
     if frame_count == 0:
         logger.warning(

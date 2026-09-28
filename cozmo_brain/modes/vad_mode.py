@@ -99,16 +99,30 @@ def _run_listening_window(engine: CozmoEngine, robot: RobotBackend, speech: Spee
     listen_timeout = settings.vad_max_utterance_s
 
     while True:
-        got_speech = record_until_silence(
-            settings.raw_input_wav,
-            settings.record_device,
-            settings.vad_aggressiveness,
-            settings.vad_silence_ms,
-            listen_timeout,
-            settings.vad_min_speech_ms,
-            settings.vad_min_rms,
-            max_utterance_s=settings.vad_max_utterance_s,
-        )
+        # FINAL_LLM_CALL=async: the previous reply's follow-up LLM call may
+        # still be running in the background - that's fine, we listen
+        # meanwhile. If it turned out Cozmo continues his reply (more actions
+        # or speech), it stops this recording via followup_interrupt; wait
+        # for it to finish, then simply listen again with the same window.
+        engine.settle_followup()
+        engine.mic_active = True
+        try:
+            got_speech = record_until_silence(
+                settings.raw_input_wav,
+                settings.record_device,
+                settings.vad_aggressiveness,
+                settings.vad_silence_ms,
+                listen_timeout,
+                settings.vad_min_speech_ms,
+                settings.vad_min_rms,
+                max_utterance_s=settings.vad_max_utterance_s,
+                stop_event=engine.followup_interrupt,
+            )
+        finally:
+            engine.mic_active = False
+        if not got_speech and engine.settle_followup():
+            print("(Cozmo continued his reply - listening again)")
+            continue
         if not got_speech:
             print("(no follow-up heard - wake word needed again)\n")
             _apply_mood_safely(robot, "neutral")
@@ -147,7 +161,7 @@ def _run_listening_window(engine: CozmoEngine, robot: RobotBackend, speech: Spee
             print("(that's a known Whisper artifact from background noise, not real speech - ignoring)\n")
             continue
 
-        summary = engine.handle_turn(text)
+        summary = engine.handle_turn(text, allow_async_followup=True)
         print(summary, "\n")
 
         listen_timeout = settings.vad_followup_timeout_s
