@@ -276,6 +276,13 @@ class Settings:
     # platform/edge - not itself independently confirmed on real hardware yet.
     charger_dock_distance_mm: float = field(default_factory=lambda: _env_float("CHARGER_DOCK_DISTANCE_MM", 150.0))
     charger_dock_speed_mmps: float = field(default_factory=lambda: _env_float("CHARGER_DOCK_SPEED_MMPS", 60.0))
+    # How much further than CHARGER_DOCK_DISTANCE_MM dock() may keep
+    # reversing - it stops the moment the charger contacts engage, so this
+    # is only an upper bound. Confirmed on real hardware that an exact
+    # CHARGER_DOCK_DISTANCE_MM reverse fell short (open-loop timing +
+    # acceleration ramp); an extra ~40mm seated it. 50 is a first guess
+    # just above that, not tuned.
+    charger_dock_overshoot_mm: float = field(default_factory=lambda: _env_float("CHARGER_DOCK_OVERSHOOT_MM", 50.0))
 
     # --- Agentic loop / conversation ---
     max_tool_iterations: int = field(default_factory=lambda: _env_int("MAX_TOOL_ITERATIONS", 4))

@@ -69,6 +69,31 @@ class CozmoEngine:
         # in progress or mutates the message list mid-turn - and a turn that
         # starts meanwhile simply waits for it to finish.
         self.turn_lock = threading.Lock()
+        # (is_on_charger, is_charging) as of the last status note sent to
+        # the model - None until the first turn. See _charger_status_note().
+        self._told_charger_state: tuple[bool, bool] | None = None
+
+    def _charger_status_note(self) -> str | None:
+        """A one-line status note whenever Cozmo's on/off-charger (or
+        charging) state differs from what the model was last told - and on
+        the first turn. Confirmed on real hardware: a gesture drove him off
+        the charger mid-conversation (allowed) and the model, never told,
+        insisted "I'm already here!" when asked to go back. Only sent on a
+        change, so it doesn't pad every turn."""
+        try:
+            state = (self._robot.is_on_charger(), self._robot.is_charging())
+        except Exception as e:  # noqa: BLE001 - a status check must never break a turn
+            logger.debug("Charger status check failed: %s", e)
+            return None
+        if state == self._told_charger_state:
+            return None
+        self._told_charger_state = state
+        on_charger, charging = state
+        if not on_charger:
+            return "[Status: I'm off my charger right now.]"
+        if charging:
+            return "[Status: I'm on my charger and charging.]"
+        return "[Status: I'm on my charger, not currently charging (probably full).]"
 
     def _movement_blocked(self) -> bool:
         try:
@@ -118,6 +143,9 @@ class CozmoEngine:
 
     def _handle_turn(self, user_text: str, images: list[str] | None) -> str:
         self.last_interaction_monotonic = time.monotonic()
+        charger_note = self._charger_status_note()
+        if charger_note:
+            user_text = f"{user_text}\n\n{charger_note}"
         if self._movement_blocked():
             user_text = f"{user_text}\n\n{_CHARGER_BLOCKED_NOTE}"
         self.conversation.add_user(user_text, images=images)

@@ -1328,6 +1328,7 @@ annotated list (it's the source of truth). The essentials:
 | `MAX_DRIVE_SPEED_MMPS` / `MAX_DRIVE_DISTANCE_MM` | Safety clamps on the `drive` tool. |
 | `CHARGER_EXIT_DISTANCE_MM` / `CHARGER_EXIT_SPEED_MMPS` | How far/fast to drive straight off the charger before performing a requested turn, if still docked (real backend only). |
 | `CHARGER_DOCK_DISTANCE_MM` / `CHARGER_DOCK_SPEED_MMPS` | How far/fast the `dock` tool reverses onto the charger (real backend only). The distance also sets how far out from the recorded charger pose the return-to-charger staging point is. |
+| `CHARGER_DOCK_OVERSHOOT_MM` | How much further than `CHARGER_DOCK_DISTANCE_MM` the dock reverse may continue; it stops the moment the charger contacts engage. |
 | `AUTO_RETURN_TO_CHARGER_ENABLED` | Low-battery return-to-charger: offer at `BATTERY_LOW_VOLTAGE`, go on its own at `BATTERY_CRITICAL_VOLTAGE`, ask for help if the charger location isn't known (default `true`). |
 | `RETURN_TO_POSE_TIMEOUT_S` | Upper bound on one `go_to_pose()` navigation leg before it's aborted (pycozmo's own has no timeout). |
 | `MAX_TOOL_ITERATIONS` | Cap on LLM↔tool round-trips per user turn. |
@@ -2204,6 +2205,40 @@ Still open, roughly in priority order:
        matches reality, whether `ClearPath` actually cancels a path,
        whether the 150mm reverse from staging actually lands on the
        contacts, and the real discharge curve against the two thresholds.
+   - **First real-hardware runs (2026-09-28): navigation works, docking
+     fell short.** The staging offset direction is confirmed right: every
+     return headed to the correct spot in front of the charger. Landings
+     against the staging point: `~2mm`/`~5mm` off with `0.2°` heading
+     error, then `~6mm`/`~21mm` (by Cozmo's own pose readback) after a
+     very short leg. The second may mean `go_to_pose()` is less precise
+     over tiny distances; that's one data point, not yet acted on. The
+     final `dock()` reverse missed the contacts every time. In the third
+     run, a `flinch` gesture that happened to reverse ~40mm more seated
+     it immediately, so the reverse itself was falling short: open-loop
+     timing, with the acceleration ramp from standstill (and likely the
+     charger's own ramp) covering less than distance/speed. Raising
+     `CHARGER_DOCK_DISTANCE_MM` couldn't fix that, since the staging
+     offset uses the same setting. Fixed: `dock()` now reverses up to
+     `CHARGER_DOCK_DISTANCE_MM + CHARGER_DOCK_OVERSHOOT_MM` (default 50,
+     a first guess just above the 40mm that worked) and stops the moment
+     `IS_ON_CHARGER` reads true. It also logs its final pose, and
+     `return_to_charger()` logs the offset from the recorded docked pose
+     (mm short, mm sideways, heading) so the next miss says *why*.
+   - **Also found in those runs:** a gesture drove Cozmo off the charger
+     mid-conversation (allowed), but the model was never told, and later
+     insisted "I'm already here!" when asked to go back. `CozmoEngine`
+     now adds a one-line charger status note (off / on and charging / on,
+     not charging) to the user's message on the first turn and whenever
+     that state changes. The conversational side of the return was
+     observed working on real hardware: the model called `dock`, which
+     navigated back on its own. The CRITICAL autonomous return (no
+     model involved) hasn't clearly been observed firing yet.
+   - **Verified as logic only (the fixes above):** stop-on-contact ends
+     the reverse early; with no contact it runs the full distance plus
+     overshoot and logs "NOT engaged"; the offset math is right in
+     rotated frames; the status note goes out on the first turn and on
+     changes only. All earlier scripted checks still pass. **Not yet
+     re-run on real hardware.**
 
 ---
 

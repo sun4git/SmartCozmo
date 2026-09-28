@@ -277,7 +277,9 @@ class PyCozmoRobot(RobotBackend):
     def _set_cliff_protection(self, enabled: bool) -> None:
         self._client.conn.send(pycozmo.protocol_encoder.EnableStopOnCliff(enable=enabled))
 
-    def _sleep_unless_cliff(self, duration: float, ignore_cliff: bool = False) -> str | None:
+    def _sleep_unless_cliff(
+        self, duration: float, ignore_cliff: bool = False, stop_on_charger: bool = False
+    ) -> str | None:
         """Sleeps for `duration` like a plain time.sleep(), but polls
         CLIFF_DETECTED/IS_FALLING every _CLIFF_POLL_S and returns early with
         which one fired ("cliff"/"fall"), or None if the full duration
@@ -293,7 +295,10 @@ class PyCozmoRobot(RobotBackend):
         platform/edge reads as a false CLIFF_DETECTED, which otherwise made
         the exact drive meant to leave the charger reflexively stop and
         back right back onto it. Only drive()/spin_wheels_for() pass this,
-        and only when the drive started while still on the charger."""
+        and only when the drive started while still on the charger.
+
+        `stop_on_charger` returns early (None - not a hazard) the moment
+        IS_ON_CHARGER reads true - dock()'s stop-on-contact, see there."""
         deadline = time.monotonic() + duration
         while True:
             remaining = deadline - time.monotonic()
@@ -303,6 +308,9 @@ class PyCozmoRobot(RobotBackend):
             if status & pycozmo.RobotStatusFlag.IS_FALLING:
                 logger.warning("Fall detected mid-drive - stopping early.")
                 return "fall"
+            if stop_on_charger and status & pycozmo.RobotStatusFlag.IS_ON_CHARGER:
+                logger.info("Charger contacts engaged - stopping the dock reverse.")
+                return None
             if not ignore_cliff and status & pycozmo.RobotStatusFlag.CLIFF_DETECTED:
                 logger.warning("Cliff detected mid-drive - stopping early.")
                 return "cliff"
@@ -383,7 +391,9 @@ class PyCozmoRobot(RobotBackend):
     # and the model - never told anything happened - said something
     # completely unrelated next).
 
-    def drive(self, distance_mm: float, speed_mmps: float, *, suppress_cliff: bool = False) -> MoveResult:
+    def drive(
+        self, distance_mm: float, speed_mmps: float, *, suppress_cliff: bool = False, stop_on_charger: bool = False
+    ) -> MoveResult:
         # Blocked only while actively *charging* AND the battery still
         # needs it (see _must_stay_on_charger()) - once full, or once above
         # BATTERY_LOW_VOLTAGE even mid-charge, a normal drive/turn is
@@ -434,7 +444,7 @@ class PyCozmoRobot(RobotBackend):
             duration = abs(distance_mm) / speed
 
             cli.drive_wheels(lwheel_speed=signed_speed, rwheel_speed=signed_speed)
-            hazard = self._sleep_unless_cliff(duration, ignore_cliff=ignore_cliff)
+            hazard = self._sleep_unless_cliff(duration, ignore_cliff=ignore_cliff, stop_on_charger=stop_on_charger)
             cli.stop_all_motors()
 
             if ignore_cliff:
@@ -448,9 +458,29 @@ class PyCozmoRobot(RobotBackend):
             logger.info("Ignoring dock() - Cozmo is already on the charger.")
             return MoveResult(moved=False)
 
-        distance_mm = -abs(self._settings.charger_dock_distance_mm)
+        # Reverse *past* the nominal distance, but stop the moment the
+        # charger contacts engage. Confirmed on real hardware: an exact
+        # CHARGER_DOCK_DISTANCE_MM reverse fell short of the contacts - this
+        # is open-loop timing, and the acceleration ramp from standstill
+        # (plus climbing the charger's ramp) covers less ground than
+        # distance/speed assumes. An extra ~40mm reverse (a `flinch`
+        # gesture, by accident) seated it immediately. Just raising
+        # CHARGER_DOCK_DISTANCE_MM wouldn't help: return_to_charger()'s
+        # staging point is offset by that same setting, so the shortfall
+        # would move out with it. If the contacts never engage (e.g. too
+        # far off sideways), he pushes against the charger for at most
+        # OVERSHOOT/speed seconds, then the caller reports the miss.
+        distance_mm = -(abs(self._settings.charger_dock_distance_mm) + abs(self._settings.charger_dock_overshoot_mm))
         speed = self._settings.charger_dock_speed_mmps
-        return self.drive(distance_mm, speed, suppress_cliff=True)
+        result = self.drive(distance_mm, speed, suppress_cliff=True, stop_on_charger=True)
+        final = self.get_pose()
+        if final is not None:
+            logger.info(
+                "dock() finished at x=%.1f y=%.1f heading=%.1f - contacts %s.",
+                final.x_mm, final.y_mm, final.heading_deg,
+                "engaged" if self.is_on_charger() else "NOT engaged",
+            )
+        return result
 
     # --- pose tracking / navigation ---
 
@@ -639,6 +669,25 @@ class PyCozmoRobot(RobotBackend):
                 )
             return MoveResult(moved=True)
 
+    def _log_dock_offset(self, charger: Pose2D | None) -> None:
+        """Diagnostic only: where dock() actually ended up relative to the
+        recorded docked pose, split into along-heading (positive = still
+        short, out in front of where he sat docked) and sideways (positive
+        = to his left) components, plus heading error - tells a failed dock
+        apart as "fell short" vs. "came in off to one side"."""
+        final = self.get_pose()
+        if charger is None or final is None:
+            return
+        dx, dy = final.x_mm - charger.x_mm, final.y_mm - charger.y_mm
+        h = math.radians(charger.heading_deg)
+        along = dx * math.cos(h) + dy * math.sin(h)
+        sideways = -dx * math.sin(h) + dy * math.cos(h)
+        heading_error = (final.heading_deg - charger.heading_deg + 180) % 360 - 180
+        logger.info(
+            "Dock offset vs. recorded charger pose: %.1fmm short, %.1fmm sideways, %.1fdeg heading - contacts %s.",
+            along, sideways, heading_error, "engaged" if self.is_on_charger() else "NOT engaged",
+        )
+
     def return_to_charger(self) -> MoveResult:
         with self._wheel_lock:
             if self.is_on_charger():
@@ -656,7 +705,9 @@ class PyCozmoRobot(RobotBackend):
             if self._charger_staging_pose() is None:
                 return MoveResult(moved=True, reason="pose_lost")
 
+            charger = self._charger_pose
             docked = self.dock()
+            self._log_dock_offset(charger)
             if docked.hazard:
                 return docked
             time.sleep(_POSE_SETTLE_S)
