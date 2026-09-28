@@ -82,7 +82,7 @@ _SELF_MOTION_TAP_GRACE_S = 0.3
 
 # Pause after a navigation move before reading pose back - lets residual
 # momentum settle so the reading reflects where Cozmo actually stopped.
-# Same value pose_drift_test.py's validated runs used.
+# Same value standalone/pose_drift_test.py's validated runs used.
 _POSE_SETTLE_S = 0.3
 
 # How long return_to_pose() waits, after go_to_pose() itself returns, for
@@ -775,7 +775,7 @@ class PyCozmoRobot(RobotBackend):
             # time. So correct the heading ourselves with the calibrated
             # turn(), unconditionally: near-zero if go_to_pose() already got
             # it right, the real fix if it didn't. Validated end-to-end in
-            # pose_drift_test.py.
+            # standalone/pose_drift_test.py.
             current = self.get_pose()
             if current is None:
                 return MoveResult(moved=True, reason="disconnected")

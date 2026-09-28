@@ -45,8 +45,8 @@ Protocol:
    "return to charger" behavior on top of, or whether it needs vision-loop
    correction too.
 
-Usage: python3 pose_drift_test.py
-(Same cozmo-env setup as orchestrator.py - this only talks to the robot
+Usage (from the repo root): python3 standalone/pose_drift_test.py
+(Same cozmo-env setup as standalone/orchestrator.py - this only talks to the robot
 directly over PyCozmo, no LLM/STT/TTS/API keys involved at all.)
 """
 

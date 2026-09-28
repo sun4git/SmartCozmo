@@ -22,7 +22,7 @@ PyCozmo  (talks to Cozmo over its own Wi-Fi AP)
 
 **Status:** Two things live here now:
 
-- **`orchestrator.py`** — the original single-file proof of concept. Kept
+- **`standalone/orchestrator.py`** — the original single-file proof of concept. Kept
   as-is on purpose, as a lightweight script for quickly testing mic → STT →
   LLM → PyCozmo → TTS on the Pi without the full app.
 - **`cozmo_brain/`** — the real application: conversation memory, a proper
@@ -82,7 +82,11 @@ See [Roadmap](#roadmap--open-work) for what's still open.
 
 ```
 .
-├── orchestrator.py         # lightweight single-file test script (unchanged, no memory/tools/gestures)
+├── standalone/              # one-off scripts, not part of cozmo_brain (run from the repo root)
+│   ├── orchestrator.py      # lightweight single-file test script (no memory/tools/gestures)
+│   └── pose_drift_test.py   # pose/dead-reckoning drift test behind return-to-charger (roadmap item 6)
+├── tests/                   # offline tests (fakes - no robot/mic/keys): python tests/run_all.py
+│   └── live/                # opt-in tests that call real LLM providers with your .env keys
 ├── run.sh                   # activates cozmo-env + runs cozmo_brain in one step (chmod +x once)
 ├── requirements.txt        # pip install -r requirements.txt (core deps only — see setup step 1 for extras)
 ├── .env.example             # template for every config variable, annotated — copy to .env
@@ -407,7 +411,7 @@ any further.
 
 ```bash
 # Quick test script:
-python3 orchestrator.py
+python3 standalone/orchestrator.py
 
 # Full application:
 ./run.sh --mode voice          # push-to-talk — press Enter, speak, 'quit' to exit
@@ -1399,6 +1403,40 @@ above, just what they're expected to trigger:
 
 ---
 
+## Running the tests
+
+```bash
+python tests/run_all.py        # from the repo root, inside the project's venv
+```
+
+Runs every offline test in `tests/`, each in its own process, and prints one
+line per file (`ok`/`FAIL`, checks passed, time); it exits non-zero on any
+failure. These need **no robot, mic, network, or API keys**. They drive
+the real `cozmo_brain` code against fakes: `tests/fake_pycozmo.py` stands in
+for the robot (a fake `pycozmo.Client`) and `tests/fake_engine.py` for the
+LLM (a scripted chat client). They also **ignore your `.env`**
+(`tests/_harness.py`) and run against the code's built-in defaults, so
+personal settings can't make them fail. A single test runs directly too,
+e.g. `python tests/test_async_followup.py`.
+
+What they cover: charger pose recording and invalidation, navigation and
+docking (`test_return_real`, `test_dock_*`, `test_rotation_direction`), the
+LOW/CRITICAL return policy (`test_return_policy`), fidget and charger
+interplay (`test_fidget_charger`, `test_dock_dropoff`), self-caused-tap
+suppression and VAD limits (`test_abc`), the charger-blocked reply
+(`test_blocked_speech`), and how turns end under every `FINAL_LLM_CALL`
+mode (`test_final_say`, `test_async_*`).
+
+`tests/live/` holds **opt-in** tests that make real API calls with the keys
+in your `.env`: which providers accept the conversation history shape, how
+each model batches tool calls, and `async` end to end. `run_all.py` never
+runs them. Run one yourself, e.g. `python tests/live/test_providers_history.py
+groq`. They cost a few requests each, and Groq's free tier can answer 429.
+
+All of these are logic checks. Anything involving the physical robot
+(docking accuracy, real turn rates, real mic levels) still needs a
+real-hardware run.
+
 ## Configuration reference
 
 All runtime config lives in `.env` — see `.env.example` for the full,
@@ -2178,9 +2216,9 @@ Still open, roughly in priority order:
      back down — any "remember where the charger was" scheme has to treat
      that as "last known position is gone," not stale-but-usable.
    - **`go_to_pose()`'s heading correction is unreliable — confirmed on
-     real hardware, across two separate runs of `pose_drift_test.py`
-     (project root — a standalone diagnostic script, not part of
-     `cozmo_brain`, same spirit as `orchestrator.py`).** One run: the point-turn segment never rotated
+     real hardware, across two separate runs of `standalone/pose_drift_test.py`
+     (a standalone diagnostic script, not part of `cozmo_brain`, same
+     spirit as `standalone/orchestrator.py`).** One run: the point-turn segment never rotated
      at all — Cozmo ended up facing exactly the straight-line segment's
      own direction of travel (matched to within 0.5°, and physically
      confirmed: *"it turned and came back to the point it started... it
