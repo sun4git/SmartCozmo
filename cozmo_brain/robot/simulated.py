@@ -13,7 +13,7 @@ import logging
 import threading
 import time
 
-from cozmo_brain.robot.base import MoveResult, RobotBackend
+from cozmo_brain.robot.base import MoveResult, Pose2D, RobotBackend
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +81,27 @@ class SimulatedRobot(RobotBackend):
             logger.info("[sim] \U0001f50c docking (reversing toward charger)")
             time.sleep(0.1)
             return MoveResult(moved=True)
+
+    def get_pose(self) -> Pose2D | None:
+        # No firmware pose tracking to read.
+        return None
+
+    def return_to_pose(self, target: Pose2D) -> MoveResult:
+        with self._wheel_lock:
+            logger.info(
+                "[sim] \U0001f9ed navigating to x=%.0fmm y=%.0fmm heading=%.0fdeg",
+                target.x_mm, target.y_mm, target.heading_deg,
+            )
+            time.sleep(0.1)
+            return MoveResult(moved=True)
+
+    def has_charger_pose(self) -> bool:
+        # is_on_charger() is always False here, so a charger location is
+        # never recorded - the dock tool falls back to a plain dock().
+        return False
+
+    def return_to_charger(self) -> MoveResult:
+        return MoveResult(moved=False, reason="no_charger_pose")
 
     def set_head_angle_deg(self, angle_deg: float, duration: float = 0.4) -> None:
         logger.info("[sim] \U0001f440 head angle -> %.1f deg", angle_deg)

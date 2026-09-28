@@ -93,6 +93,7 @@ See [Roadmap](#roadmap--open-work) for what's still open.
     ├── config.py             # typed Settings, loaded from .env
     ├── conversation.py       # chat history with trimming + save/load to disk
     ├── engine.py             # the agentic tool-calling loop (CozmoEngine)
+    ├── charger_return.py     # low-battery policy: offer at LOW, return on its own at CRITICAL
     ├── personality.py        # Cozmo's system prompt / persona
     ├── imaging.py             # shared base64 image helper (vision attach, who_is_this)
     ├── llm/
@@ -1145,6 +1146,13 @@ rather than assuming the thresholds are wrong in general.
 value, so the monitor is effectively a no-op with `--simulate` — there's no
 fake battery to drain.
 
+The monitor also skips checks entirely while the connection looks stale
+(`is_healthy()` false) — during a drop, pycozmo keeps reporting the last
+voltage it received, a frozen value that could otherwise falsely trigger
+(or mask) a low-battery reaction. Every valid reading is also handed to
+`charger_return.py`'s `ChargerReturner`, which decides when to offer or start
+a return to the charger — see roadmap item 6 below.
+
 ### Wake word detection (zero-network)
 
 `--mode vad` originally reacted to *any* detected speech — no wake word, so
@@ -1319,7 +1327,9 @@ annotated list (it's the source of truth). The essentials:
 | `TURN_SPEED_MMPS` / `TURN_SECONDS_PER_DEGREE` | `turn()` calibration — tune with `--mode calibrate`. |
 | `MAX_DRIVE_SPEED_MMPS` / `MAX_DRIVE_DISTANCE_MM` | Safety clamps on the `drive` tool. |
 | `CHARGER_EXIT_DISTANCE_MM` / `CHARGER_EXIT_SPEED_MMPS` | How far/fast to drive straight off the charger before performing a requested turn, if still docked (real backend only). |
-| `CHARGER_DOCK_DISTANCE_MM` / `CHARGER_DOCK_SPEED_MMPS` | How far/fast the `dock` tool reverses onto the charger (real backend only). |
+| `CHARGER_DOCK_DISTANCE_MM` / `CHARGER_DOCK_SPEED_MMPS` | How far/fast the `dock` tool reverses onto the charger (real backend only). The distance also sets how far out from the recorded charger pose the return-to-charger staging point is. |
+| `AUTO_RETURN_TO_CHARGER_ENABLED` | Low-battery return-to-charger: offer at `BATTERY_LOW_VOLTAGE`, go on its own at `BATTERY_CRITICAL_VOLTAGE`, ask for help if the charger location isn't known (default `true`). |
+| `RETURN_TO_POSE_TIMEOUT_S` | Upper bound on one `go_to_pose()` navigation leg before it's aborted (pycozmo's own has no timeout). |
 | `MAX_TOOL_ITERATIONS` | Cap on LLM↔tool round-trips per user turn. |
 | `CONVERSATION_MAX_MESSAGES` / `CONVERSATION_HISTORY_PATH` | Memory size and persistence path. |
 | `VAD_AGGRESSIVENESS` / `VAD_SILENCE_MS` / `VAD_MAX_UTTERANCE_S` | Hands-free listening tuning. |
@@ -1832,10 +1842,14 @@ Still open, roughly in priority order:
      confirming it doesn't also happen at some in-between state like a
      thermal cutoff), a normal `drive`/`turn` is allowed to proceed exactly
      like any other, which drives Cozmo off the dock as a side effect of
-     whatever actually asked for movement. **Deliberately not an autonomous
-     "leave the charger once full" behavior of its own** — that decision
-     stays with whatever ordinarily triggers a drive (conversation, a tool
-     call), not a background reactor moving Cozmo unprompted. `is_on_charger()`/
+     whatever actually asked for movement. (This section originally also
+     said leaving the charger should never be a background behavior's
+     decision - that was an assumption written into the code, not a rule
+     the user set. **Clarified directly, 2026-09-28:** conversation-driven
+     movement and gestures may leave the charger freely; the *only*
+     restriction is on idle fidgeting, which skips its wheel steps while
+     docked and still charging - see Idle fidgeting below. Nothing ever
+     spins or moves on the dock without driving straight off first.) `is_on_charger()`/
      `is_charging()` are exposed as their own `RobotBackend` methods (not
      just used internally), so a future `battery_status()` tool can answer
      "are you charged?" without needing new plumbing. The `drive`/`turn`
@@ -1858,13 +1872,28 @@ Still open, roughly in priority order:
      an explicit drive/turn request is honored even mid-charge, not just
      once `IS_CHARGING` flips off entirely. Unknown voltage (no
      `RobotState` packet read yet) stays conservative and blocks, same as
-     before this existed. Still deliberately not autonomous — this only
-     changes what an *explicit* request is allowed to do, nothing decides
-     to leave the charger on its own. **Verified as boundary-condition
+     before this existed. **Verified as boundary-condition
      logic only** (checked `_must_stay_on_charger()` directly against
      every combination of on-charger/charging/voltage, including the
      unknown-voltage and exactly-at-threshold cases) — not yet observed
      against a real battery actually crossing that threshold on hardware.
+
+     **Follow-up, raised directly (2026-09-28):** the block itself stays
+     (at/below `BATTERY_LOW_VOLTAGE` while charging, e.g. right after an
+     autonomous low-battery return), but Cozmo must *say* he can't come
+     rather than promise to and silently not move, the same `say`-before-
+     `drive` ordering problem as above. Fixed in two layers.
+     `RobotBackend.is_movement_blocked()` is now public, and
+     `CozmoEngine.handle_turn()` appends a short status note to the user's
+     message whenever it's true, so the model knows *before* it replies.
+     As a deterministic backstop, a refused `drive`/`turn` result carries
+     `extra["blocked_by_charger"]`; if the turn ends with no successful
+     `say` after that refusal (the model ignored it, or ran out of
+     `MAX_TOOL_ITERATIONS`), the engine itself says "Sorry, I can't come
+     out yet - my battery's too low...". **Verified as logic only**
+     (scripted fake model: note present only when blocked; fallback spoken
+     after an unexplained refusal; no fallback when the model corrects
+     itself or when not blocked). Not yet observed on real hardware.
    - ✅ **Startle reaction on pickup — done.** `RobotBackend.is_picked_up()`
      (real backend: `IS_PICKED_UP`, already read for tap-gating; simulated:
      always `False`) is polled by a small background thread,
@@ -1888,6 +1917,19 @@ Still open, roughly in priority order:
      `IDLE_FIDGET_AFTER_S` (default 30s — see below) of continued quiet,
      resetting the moment a real turn happens. `IDLE_FIDGET_ENABLED=false`
      disables it entirely.
+
+     **Charger-aware (2026-09-28):** `peek` includes `turn` steps, and a
+     turn on the dock drives Cozmo straight off first. Since charging
+     voltage quickly reads above `BATTERY_LOW_VOLTAGE`, a fidget could
+     knock him off the charger minutes after docking, including right
+     after an autonomous low-battery return (roadmap item 6). While docked
+     **and still charging**, fidgets now skip their wheel steps
+     (`run_gesture(..., wheels=False)` in `robot/base.py`): face, head,
+     and lift still play, so he doesn't look dead on the dock. Once
+     charging finishes (docked, not charging), the full gesture runs and
+     may drive him off like any other movement. This is the only
+     restriction on leaving the charger; conversation-driven movement is
+     unaffected. **Verified as logic only** (scripted, fake robot).
 
      **Raised directly on real hardware:** the original 300s (5 min)
      default never actually got a chance to fire — Cozmo disconnects/
@@ -1968,11 +2010,11 @@ Still open, roughly in priority order:
      different trade-off (needs its own account, but no billing) rather
      than this exact "no key, needs internet" STT combination; nothing
      currently fills that specific gap.
-6. **Autonomous return-to-charger on critical battery** — investigated, not
-   yet built. `BatteryMonitor` already reads real voltage and `dock()`
-   already handles the final blind approach, but neither knows *where* the
-   charger actually is; this only matters once Cozmo is somewhere else
-   entirely.
+6. **Autonomous return-to-charger on low battery** — built (see the
+   "Implementation" sub-item at the end), **not yet run on real hardware**.
+   `BatteryMonitor` already read real voltage and `dock()` already handled
+   the final blind approach, but neither knew *where* the charger actually
+   is; this only matters once Cozmo is somewhere else entirely.
    - **PyCozmo already tracks real pose — confirmed via source, unused
      until now.** Every `RobotState` packet (~33Hz) includes `pose_x`/
      `pose_y`/`pose_angle_rad`, computed by Cozmo's own firmware from
@@ -2089,6 +2131,79 @@ Still open, roughly in priority order:
      320×240 at ~15fps), just with zero built-in CV. Light-cube BLE
      discovery also exists but is proximity-only (`rssi`, no bearing/
      distance) — confirmed no use for navigation.
+   - **Implementation — built, not yet verified on real hardware.**
+     - **Navigation primitive:** `RobotBackend.return_to_pose(Pose2D)`
+       (`robot/real.py`) wraps `go_to_pose()` plus the validated heading
+       correction (read `cli.pose` back, `turn()` the delta
+       unconditionally). Two things found in pycozmo's `client.py` while
+       building it: `go_to_pose()` blocks on an `Event` with **no timeout**,
+       and our own cliff poll doesn't run during a firmware-driven path. So
+       it runs on a helper thread while the caller watches for
+       `IS_FALLING`/`CLIFF_DETECTED`/`IS_PICKED_UP`, a pose-origin change,
+       a stale connection, and `RETURN_TO_POSE_TIMEOUT_S`. On any of those
+       it sends `ClearPath` (a real protocol packet, but its effect on an
+       in-progress path is unverified) plus `stop_all_motors()`, and
+       reports why via `MoveResult.hazard`/the new `MoveResult.reason`.
+       After `go_to_pose()` returns, it also waits (bounded) for the
+       firmware's `IS_PATHING` flag to clear before correcting the heading.
+       `go_to_pose()`'s completion wait fires on *any* non-`PATH_STARTED`
+       event, which is a plausible contributor to the intermittent
+       point-turn failure. If already on the charger, it drives straight
+       off first, the same way `spin_wheels_for()` does.
+     - **Charger location:** recorded in `drive()` at the moment a drive
+       starts while `is_on_charger()` (every self-powered route off the
+       charger goes through there), **in memory only**. Pycozmo re-sends
+       `SetOrigin` on every connect, so nothing persisted could be valid
+       after a restart. It's forgotten on pickup (the moment `IS_PICKED_UP`
+       is seen, not just once the origin changes on set-down), on any
+       pose-origin change, and on `disconnect()`/`reconnect()`. The last
+       one has to be explicit: a new client restarts at `origin_id` 1, so
+       old and new frames can share an id and an origin comparison alone
+       would miss it.
+     - **Where it drives to:** not the docked pose itself (driving
+       `go_to_pose()` nose-first onto the dock and point-turning on the
+       platform is exactly the false-cliff/snagging geometry already
+       worked around). Instead it goes to a staging point
+       `CHARGER_DOCK_DISTANCE_MM` straight out along the docked heading,
+       facing away. `return_to_charger()` then hands off to `dock()`'s
+       existing blind reverse, and checks `is_on_charger()` afterward,
+       reporting `not_on_charger` honestly if the contacts don't read as
+       docked. Assumes pycozmo's usual pose convention (heading CCW from
+       +x, forward along it) for that offset, which is consistent with
+       every drift-test reading but not independently confirmed for this.
+     - **Trigger policy** (`cozmo_brain/charger_return.py`, fed every
+       valid reading by `BatteryMonitor`). At `BATTERY_LOW_VOLTAGE` Cozmo
+       *offers* out loud to head back. The offer is written into the
+       conversation as an assistant message, so a normal-activation "yes"
+       (wake word/tap/push-to-talk/typing, no mode changes) makes sense to
+       the model, which calls `dock`. At `BATTERY_CRITICAL_VOLTAGE` he
+       announces it and goes on his own, the backstop for an unanswered
+       offer. Either level needs 2 consecutive readings off the charger
+       (so motor-load voltage sag mid-drive can't trigger it), fires at
+       most once per episode, and an episode ends only once he's seen on
+       the charger again. With no valid charger location, or a return
+       that fails partway, he asks once per episode to be put on the
+       charger. Speech and driving take a new `CozmoEngine.turn_lock`
+       (held for all of `handle_turn()`), so this never talks over a reply
+       in progress or edits the conversation mid-turn.
+       `AUTO_RETURN_TO_CHARGER_ENABLED=false` turns all of this off.
+     - **`dock` tool** now navigates first whenever a valid charger
+       location is known, and otherwise falls back to the plain blind
+       reverse as before.
+     - **Verified as logic only**, with scripted tests against a fake
+       pycozmo client plus fake robot/engine. Covered: pose recording on
+       exit; the staging offset following the setting; forgetting on
+       pickup/origin change/disconnect; the heading correction fixing a
+       skipped point-turn; a hung `go_to_pose()` timing out with motors
+       stopped; pickup mid-navigation aborting; the full navigate→dock
+       sequence aiming at the right staging point; `not_on_charger` on a
+       misaligned dock; the LOW/CRITICAL streak/once-per-episode rules;
+       waiting for an in-progress turn; the stale-connection skip; the
+       `dock` tool's three branches. **Nothing here has driven the real
+       robot yet.** Still open: whether the staging offset direction
+       matches reality, whether `ClearPath` actually cancels a path,
+       whether the 150mm reverse from staging actually lands on the
+       contacts, and the real discharge curve against the two thresholds.
 
 ---
 

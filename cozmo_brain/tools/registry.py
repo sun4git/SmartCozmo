@@ -18,7 +18,7 @@ from cozmo_brain.config import Settings
 from cozmo_brain.imaging import encode_image_b64
 from cozmo_brain.llm.chat_client import ChatClient
 from cozmo_brain.llm.speech_client import SpeechClient
-from cozmo_brain.robot.base import RobotBackend
+from cozmo_brain.robot.base import MoveResult, RobotBackend
 from cozmo_brain.robot.gestures import GESTURES
 from cozmo_brain.robot.moods import MOODS
 from cozmo_brain.tools.base import Tool, ToolResult
@@ -41,6 +41,41 @@ _COMPARE_FACES_PROMPT = (
     "second photo the same person as in the first photo? Reply with exactly one "
     "word: yes or no."
 )
+
+
+_CHARGER_RETURN_REASONS = {
+    "no_charger_pose": "don't know where the charger is (haven't left it this session, or was picked up/reconnected since)",
+    "already_on_charger": "already on the charger",
+    "picked_up": "got picked up partway, so no longer know where the charger is",
+    "pose_lost": "lost track of position partway (it reset), so no longer know where the charger is",
+    "disconnected": "lost the connection to Cozmo partway",
+    "timeout": "took too long getting there and stopped",
+    "not_on_charger": "drove back and reversed to dock, but the charger contacts aren't reading as docked - may be misaligned",
+}
+
+
+def charger_return_message(result: MoveResult) -> str:
+    """Honest, model-facing description of a return_to_charger() outcome -
+    shared by the `dock` tool and charger_return.py's autonomous return."""
+    if result.completed:
+        return "Drove back to the charger and docked."
+    if result.hazard:
+        return f"Only made partway back to the charger - {_HAZARD_MESSAGES[result.hazard]}."
+    if result.reason:
+        return f"Didn't make it onto the charger - {_CHARGER_RETURN_REASONS.get(result.reason, result.reason)}."
+    return "Didn't move - still charging and the battery's low."
+
+
+def _charger_blocked_result(verb: str) -> ToolResult:
+    # extra["blocked_by_charger"] lets the engine guarantee the human hears
+    # why nothing happened, even if the model never says so itself (see
+    # engine.py's _CHARGER_BLOCKED_FALLBACK).
+    return ToolResult(
+        True,
+        f"Didn't {verb} - still charging on the dock and the battery's too low to come off yet. "
+        "Tell them out loud you can't move yet because you need to charge more.",
+        extra={"blocked_by_charger": True},
+    )
 
 
 def _sanitize_name(name: str) -> str:
@@ -153,7 +188,7 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
     def handle_drive(distance_mm: float, speed_mmps: float) -> ToolResult:
         result = robot.drive(distance_mm, speed_mmps)
         if not result.moved:
-            return ToolResult(True, "Didn't drive - battery's still low, need to charge a bit more first.")
+            return _charger_blocked_result("drive")
         if result.hazard:
             return ToolResult(True, f"Only drove partway toward {distance_mm:.0f}mm - {_HAZARD_MESSAGES[result.hazard]}.")
         return ToolResult(True, f"Drove {distance_mm:.0f}mm at {speed_mmps:.0f}mm/s.")
@@ -161,12 +196,20 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
     def handle_turn(angle_degrees: float) -> ToolResult:
         result = robot.turn(angle_degrees)
         if not result.moved:
-            return ToolResult(True, "Didn't turn - battery's still low, need to charge a bit more first.")
+            return _charger_blocked_result("turn")
         if result.hazard:
             return ToolResult(True, f"Only turned partway - {_HAZARD_MESSAGES[result.hazard]}.")
         return ToolResult(True, f"Turned {angle_degrees:.0f} degrees.")
 
     def handle_dock() -> ToolResult:
+        if robot.is_on_charger():
+            return ToolResult(True, "Already on the charger - no need to dock.")
+        # Known charger location (recorded when Cozmo last drove off it, and
+        # still valid - no pickup/reconnect since): navigate back to the
+        # staging point first, then dock. Otherwise fall back to the plain
+        # blind reverse, which only works if he's already lined up.
+        if robot.has_charger_pose():
+            return ToolResult(True, charger_return_message(robot.return_to_charger()))
         result = robot.dock()
         if not result.moved:
             return ToolResult(True, "Already on the charger - no need to dock.")
@@ -318,13 +361,14 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
         Tool(
             name="dock",
             description=(
-                "Reverse onto the charger to dock. Use this specifically when asked to return "
-                "to the charger/dock/base, instead of drive() with a negative distance - a plain "
-                "reverse drive() gets falsely stopped early by the charger platform's own edge "
-                "(it looks like a cliff/dropoff to Cozmo's sensors right before actually touching "
-                "it), which this works around. Only reverses in a straight line - it does not "
-                "search for or align to the charger on its own, so it only works when Cozmo is "
-                "already reasonably close to and facing away from it."
+                "Go back onto the charger. Use this whenever asked to return to the charger/dock/"
+                "base (including agreeing to an earlier offer to go charge), instead of drive() "
+                "with a negative distance - a plain reverse drive() gets falsely stopped early by "
+                "the charger platform's own edge, which this works around. If Cozmo remembers "
+                "where the charger is (he drove off it earlier and hasn't been picked up since), "
+                "this drives all the way back and docks on its own. Otherwise it only reverses "
+                "in a straight line, so it only works when Cozmo is already close to and facing "
+                "away from the charger - the result says which happened."
             ),
             parameters={"type": "object", "properties": {}},
             handler=lambda _args: handle_dock(),

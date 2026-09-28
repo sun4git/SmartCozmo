@@ -63,6 +63,14 @@ class IdleFidgeter:
         self._last_fidget_monotonic = now
         gesture = random.choice(_IDLE_GESTURES)
         try:
-            self._robot.run_gesture(gesture)
+            # A fidget is the one thing that must not leave the charger while
+            # it's still charging - there's no reason to come out. Face/head/
+            # lift still play so he doesn't look dead on the dock. Once
+            # charging finishes (docked but not charging = full), the full
+            # gesture runs, and its wheel steps drive him off the dock
+            # first like any other movement. Conversation-triggered
+            # movement has no such restriction.
+            charging_on_dock = self._robot.is_on_charger() and self._robot.is_charging()
+            self._robot.run_gesture(gesture, wheels=not charging_on_dock)
         except Exception as e:  # noqa: BLE001 - a cosmetic fidget hiccup shouldn't crash the process
             logger.debug("Idle fidget ('%s') failed: %s", gesture, e)

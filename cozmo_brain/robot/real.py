@@ -42,7 +42,7 @@ import pycozmo
 
 from cozmo_brain.config import Settings
 from cozmo_brain.robot import wifi
-from cozmo_brain.robot.base import MoveResult, RobotBackend
+from cozmo_brain.robot.base import MoveResult, Pose2D, RobotBackend
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,20 @@ _CLIFF_POLL_S = 0.05
 # stops, not just while it's actively moving.
 _LIFT_TAP_SUPPRESS_GRACE_S = 0.3
 
+# Pause after a navigation move before reading pose back - lets residual
+# momentum settle so the reading reflects where Cozmo actually stopped.
+# Same value pose_drift_test.py's validated runs used.
+_POSE_SETTLE_S = 0.3
+
+# How long return_to_pose() waits, after go_to_pose() itself returns, for
+# the firmware's IS_PATHING flag to clear before correcting heading.
+# go_to_pose()'s completion wait fires on *any* non-PATH_STARTED event
+# (pycozmo client.py), which is a plausible cause of the confirmed-
+# intermittent point-turn failure - this makes sure the firmware is really
+# done before our own turn() starts. Bounded, since whether the firmware
+# reliably reports IS_PATHING at all is unverified here.
+_PATHING_CLEAR_TIMEOUT_S = 5.0
+
 
 def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
@@ -110,6 +124,19 @@ class PyCozmoRobot(RobotBackend):
         # wheel steps (run_gesture_async(), see base.py) can't race a
         # foreground drive/turn tool call issued at the same moment.
         self._wheel_lock = threading.RLock()
+        # Whether at least one RobotState packet has arrived on the current
+        # connection - cli.pose is a (0,0,0) placeholder until then, not a
+        # real reading.
+        self._have_robot_state = False
+        # Where Cozmo was sitting on the charger the last time he drove off
+        # it (recorded in drive()), plus the pose origin it was recorded
+        # under. In memory only, deliberately: pycozmo resets the pose
+        # frame on every connect (client.py's SetOrigin), so nothing saved
+        # to disk could ever be valid after a restart. Also forgotten on
+        # pickup (_on_robot_state) and disconnect()/reconnect() - see
+        # _forget_charger_pose().
+        self._charger_pose: Pose2D | None = None
+        self._charger_origin_id: int | None = None
 
     def connect(self) -> None:
         wifi.ensure_connected(self._settings.cozmo_wifi_ssid, self._settings.cozmo_wifi_password)
@@ -158,6 +185,13 @@ class PyCozmoRobot(RobotBackend):
             logger.warning("Could not play wake-up gesture: %s", e)
 
     def disconnect(self) -> None:
+        # Also covers reconnect(), which calls this first. A new pycozmo
+        # Client re-sends SetOrigin, restarting the pose frame at origin_id
+        # 1 wherever Cozmo happens to be - so an origin_id comparison alone
+        # can't catch this case (the old and new frames can share an id);
+        # the charger pose has to be dropped explicitly here.
+        self._forget_charger_pose("disconnected/reconnecting")
+        self._have_robot_state = False
         if self._cli is None:
             return
         try:
@@ -175,6 +209,14 @@ class PyCozmoRobot(RobotBackend):
     def _on_robot_state(self, _cli, pkt) -> None:
         self._last_seen = time.monotonic()
         self._latest_status = pkt.status
+        self._have_robot_state = True
+        # Picked up = the pose frame resets once he's set back down (pycozmo
+        # re-sends SetOrigin with a new origin_id), so the recorded charger
+        # location is gone, not stale-but-usable. Dropped immediately on the
+        # pickup itself rather than waiting for the origin change, so a
+        # return can't start in the window between the two.
+        if pkt.status & pycozmo.RobotStatusFlag.IS_PICKED_UP:
+            self._forget_charger_pose("picked up")
         self._update_tap_detection(pkt)
 
     def _update_tap_detection(self, pkt) -> None:
@@ -323,6 +365,9 @@ class PyCozmoRobot(RobotBackend):
             return True
         return voltage <= self._settings.battery_low_voltage
 
+    def is_movement_blocked(self) -> bool:
+        return self._cli is not None and self._must_stay_on_charger()
+
     def is_picked_up(self) -> bool:
         return bool(self._latest_status & pycozmo.RobotStatusFlag.IS_PICKED_UP)
 
@@ -343,11 +388,11 @@ class PyCozmoRobot(RobotBackend):
         # needs it (see _must_stay_on_charger()) - once full, or once above
         # BATTERY_LOW_VOLTAGE even mid-charge, a normal drive/turn is
         # allowed to proceed like any other, and drives Cozmo off the dock
-        # as a side effect of whatever actually asked for movement.
-        # Deliberately not an autonomous "leave the charger" behavior of
-        # its own - that decision stays with whatever ordinarily triggers a
-        # drive (conversation, a tool call), not a background reactor
-        # deciding to move Cozmo unprompted.
+        # as a side effect of whatever actually asked for movement
+        # (conversation, a tool call, a gesture). The only extra restriction
+        # on leaving lives in idle_fidget.py: an unprompted fidget skips its
+        # wheel steps while still charging, since there's no reason to come
+        # out - see base.py's run_gesture(wheels=...).
         if self._must_stay_on_charger():
             logger.info("Ignoring drive() - still charging and battery is low.")
             return MoveResult(moved=False)
@@ -369,9 +414,16 @@ class PyCozmoRobot(RobotBackend):
             # trigger approaching the charger from the other direction,
             # where is_on_charger() can't tell us it's about to happen.
             # IS_FALLING protection is unrelated and stays active regardless.
-            ignore_cliff = self.is_on_charger() or suppress_cliff
+            leaving_charger = self.is_on_charger()
+            ignore_cliff = leaving_charger or suppress_cliff
             if ignore_cliff:
                 self._set_cliff_protection(enabled=False)
+            # Every route off the charger under our own power comes through
+            # here (spin_wheels_for()/return_to_pose() exit via this same
+            # method), so this is the one place that knows exactly where the
+            # charger is - recorded before moving, while still sitting on it.
+            if leaving_charger:
+                self._record_charger_pose()
 
             cli = self._client
             max_speed = self._settings.max_drive_speed_mmps
@@ -399,6 +451,221 @@ class PyCozmoRobot(RobotBackend):
         distance_mm = -abs(self._settings.charger_dock_distance_mm)
         speed = self._settings.charger_dock_speed_mmps
         return self.drive(distance_mm, speed, suppress_cliff=True)
+
+    # --- pose tracking / navigation ---
+
+    def get_pose(self) -> Pose2D | None:
+        if self._cli is None or not self._have_robot_state:
+            return None
+        pose = self._cli.pose
+        return Pose2D(pose.position.x, pose.position.y, pose.rotation.angle_z.degrees)
+
+    def _forget_charger_pose(self, why: str) -> None:
+        if self._charger_pose is not None:
+            logger.info("Forgetting the recorded charger location (%s).", why)
+        self._charger_pose = None
+        self._charger_origin_id = None
+
+    def _record_charger_pose(self) -> None:
+        pose = self.get_pose()
+        if pose is None:
+            logger.warning("Leaving the charger with no pose telemetry yet - charger location not recorded.")
+            return
+        # Origin set before the pose, so a concurrent reader never sees a
+        # new pose paired with a stale origin_id.
+        self._charger_origin_id = self._client.pose.origin_id
+        self._charger_pose = pose
+        logger.info(
+            "Recorded charger location: x=%.1fmm y=%.1fmm heading=%.1fdeg (origin_id=%d).",
+            pose.x_mm, pose.y_mm, pose.heading_deg, self._charger_origin_id,
+        )
+
+    def _charger_staging_pose(self) -> Pose2D | None:
+        """Where return_to_charger() navigates to before dock(): straight out
+        from the recorded docked pose by CHARGER_DOCK_DISTANCE_MM, same
+        heading - i.e. facing away from the charger, exactly where dock()'s
+        fixed-distance reverse expects to start. Assumes pycozmo's usual
+        pose convention (heading measured counterclockwise from +x, "forward"
+        along the heading) - consistent with every drift-test reading so
+        far, not independently confirmed for this offset specifically."""
+        # Snapshot first: _on_robot_state() (pycozmo's receive thread) can
+        # clear these at any moment on a pickup.
+        charger, origin_id, cli = self._charger_pose, self._charger_origin_id, self._cli
+        if charger is None or cli is None:
+            return None
+        # Belt-and-braces alongside the explicit pickup/disconnect drops: any
+        # other origin change (one we didn't anticipate) also invalidates it.
+        if cli.pose.origin_id != origin_id:
+            self._forget_charger_pose("pose origin changed")
+            return None
+        distance = abs(self._settings.charger_dock_distance_mm)
+        heading_rad = math.radians(charger.heading_deg)
+        return Pose2D(
+            charger.x_mm + distance * math.cos(heading_rad),
+            charger.y_mm + distance * math.sin(heading_rad),
+            charger.heading_deg,
+        )
+
+    def has_charger_pose(self) -> bool:
+        return self._charger_staging_pose() is not None
+
+    def _abort_path(self) -> None:
+        # ClearPath is a real protocol packet (protocol_encoder.py) but its
+        # effect on an in-progress path is unverified here - stop_all_motors()
+        # is the part actually relied on.
+        try:
+            self._client.conn.send(pycozmo.protocol_encoder.ClearPath())
+        except Exception as e:  # noqa: BLE001 - best-effort, the motor stop below matters more
+            logger.debug("ClearPath failed: %s", e)
+        self._client.stop_all_motors()
+
+    def _go_to_pose_watched(self, target: Pose2D) -> MoveResult | None:
+        """Runs pycozmo's go_to_pose() on a helper thread while this thread
+        watches for anything that should cut it short - go_to_pose() itself
+        blocks on an Event with no timeout at all (pycozmo client.py), so a
+        pickup, dropped connection, or a path event that never arrives
+        would otherwise hang the caller forever. Our own cliff poll
+        (_sleep_unless_cliff()) doesn't run during a firmware-driven path
+        either, so hazards are checked here too. Returns None when
+        go_to_pose() finished normally, or the MoveResult describing why it
+        was aborted. On a timeout the helper thread is left blocked (daemon,
+        nothing else to do with it) - its handler just sets a stale Event
+        whenever a later path event arrives."""
+        cli = self._client
+        origin_id = cli.pose.origin_id
+        pose = pycozmo.util.Pose(
+            target.x_mm, target.y_mm, 0.0, angle_z=pycozmo.util.Angle(degrees=target.heading_deg)
+        )
+        done = threading.Event()
+        errors: list[BaseException] = []
+
+        def _run() -> None:
+            try:
+                cli.go_to_pose(pose)
+            except BaseException as e:  # noqa: BLE001 - re-raised on the calling thread below
+                errors.append(e)
+            finally:
+                done.set()
+
+        threading.Thread(target=_run, name="go-to-pose", daemon=True).start()
+        deadline = time.monotonic() + self._settings.return_to_pose_timeout_s
+        hazard: str | None = None
+        reason: str | None = None
+        while not done.wait(_CLIFF_POLL_S):
+            status = self._latest_status
+            if status & pycozmo.RobotStatusFlag.IS_FALLING:
+                hazard = "fall"
+            elif status & pycozmo.RobotStatusFlag.CLIFF_DETECTED:
+                hazard = "cliff"
+            elif status & pycozmo.RobotStatusFlag.IS_PICKED_UP:
+                reason = "picked_up"
+            elif cli.pose.origin_id != origin_id:
+                reason = "pose_lost"
+            elif not self.is_healthy():
+                reason = "disconnected"
+            elif time.monotonic() > deadline:
+                reason = "timeout"
+            if hazard or reason:
+                break
+
+        if hazard or reason:
+            logger.warning("Aborting go_to_pose(): %s.", hazard or reason)
+            self._abort_path()
+            if hazard:
+                # go_to_pose() drives its line segment forward (observed in
+                # every drift-test run), so "back away" means reverse - same
+                # assumption _react_to_hazard() makes for a forward drive().
+                self._react_to_hazard(hazard, backup_away_from_sign=1.0)
+            return MoveResult(moved=True, hazard=hazard, reason=reason)
+        if errors:
+            self._abort_path()
+            raise errors[0]
+
+        pathing_deadline = time.monotonic() + _PATHING_CLEAR_TIMEOUT_S
+        while self._latest_status & pycozmo.RobotStatusFlag.IS_PATHING and time.monotonic() < pathing_deadline:
+            time.sleep(_CLIFF_POLL_S)
+        time.sleep(_POSE_SETTLE_S)
+        return None
+
+    def return_to_pose(self, target: Pose2D) -> MoveResult:
+        if self._must_stay_on_charger():
+            logger.info("Ignoring return_to_pose() - still charging and battery is low.")
+            return MoveResult(moved=False)
+
+        with self._wheel_lock:
+            if self.is_picked_up():
+                return MoveResult(moved=False, reason="picked_up")
+            if self.is_on_charger():
+                # Same reasoning as spin_wheels_for(): go_to_pose() would
+                # turn in place on the dock platform with firmware cliff
+                # protection on (a guaranteed false trigger). Drive straight
+                # off first via drive()'s own leaving-charger handling.
+                exit_result = self.drive(
+                    self._settings.charger_exit_distance_mm, self._settings.charger_exit_speed_mmps
+                )
+                if exit_result.hazard:
+                    return exit_result
+
+            aborted = self._go_to_pose_watched(target)
+            if aborted is not None:
+                return aborted
+
+            # go_to_pose()'s own point-turn is unreliable (confirmed on real
+            # hardware, intermittent - see README roadmap item 6), but
+            # cli.pose's heading readback tracked reality correctly every
+            # time. So correct the heading ourselves with the calibrated
+            # turn(), unconditionally: near-zero if go_to_pose() already got
+            # it right, the real fix if it didn't. Validated end-to-end in
+            # pose_drift_test.py.
+            current = self.get_pose()
+            if current is None:
+                return MoveResult(moved=True, reason="disconnected")
+            heading_error = (target.heading_deg - current.heading_deg + 180) % 360 - 180
+            logger.info(
+                "go_to_pose() landed at x=%.1f y=%.1f heading=%.1f (target %.1f, %.1f, %.1f) - correcting %.1fdeg.",
+                current.x_mm, current.y_mm, current.heading_deg,
+                target.x_mm, target.y_mm, target.heading_deg, heading_error,
+            )
+            turn_result = self.turn(heading_error)
+            if turn_result.hazard:
+                return MoveResult(moved=True, hazard=turn_result.hazard)
+            time.sleep(_POSE_SETTLE_S)
+
+            final = self.get_pose()
+            if final is not None:
+                logger.info(
+                    "return_to_pose() finished at x=%.1f y=%.1f heading=%.1f.",
+                    final.x_mm, final.y_mm, final.heading_deg,
+                )
+            return MoveResult(moved=True)
+
+    def return_to_charger(self) -> MoveResult:
+        with self._wheel_lock:
+            if self.is_on_charger():
+                return MoveResult(moved=False, reason="already_on_charger")
+            staging = self._charger_staging_pose()
+            if staging is None:
+                return MoveResult(moved=False, reason="no_charger_pose")
+
+            logger.info("Returning to charger via staging point x=%.1f y=%.1f.", staging.x_mm, staging.y_mm)
+            nav = self.return_to_pose(staging)
+            if not nav.completed:
+                return nav
+            # A pickup right as navigation finished would make dock()'s
+            # blind reverse meaningless - re-check before committing to it.
+            if self._charger_staging_pose() is None:
+                return MoveResult(moved=True, reason="pose_lost")
+
+            docked = self.dock()
+            if docked.hazard:
+                return docked
+            time.sleep(_POSE_SETTLE_S)
+            if not self.is_on_charger():
+                # Drove the full sequence, but the charger contacts don't
+                # read as docked - misaligned, or the staging point was off.
+                # Reported honestly rather than as a success.
+                return MoveResult(moved=True, reason="not_on_charger")
+            return MoveResult(moved=True)
 
     def turn(self, angle_degrees: float) -> MoveResult:
         turn_speed = self._settings.turn_speed_mmps

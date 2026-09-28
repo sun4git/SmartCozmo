@@ -227,6 +227,25 @@ class Settings:
     battery_critical_voltage: float = field(default_factory=lambda: _env_float("BATTERY_CRITICAL_VOLTAGE", 3.5))
     battery_check_interval_s: float = field(default_factory=lambda: _env_float("BATTERY_CHECK_INTERVAL_S", 30.0))
 
+    # Low-battery return-to-charger (cozmo_brain/charger_return.py). At
+    # BATTERY_LOW_VOLTAGE Cozmo *offers* out loud to head back; at
+    # BATTERY_CRITICAL_VOLTAGE he goes on his own - both only once the
+    # reading has held for 2 consecutive checks, so motor-load voltage sag
+    # during a drive can't trigger it. If no valid charger location is
+    # known (never left the charger this session, picked up, or reconnected
+    # since), he asks to be put on it instead. false disables all of that;
+    # the `dock` tool's navigate-first behavior on an explicit request stays
+    # either way.
+    auto_return_to_charger_enabled: bool = field(
+        default_factory=lambda: _env_bool("AUTO_RETURN_TO_CHARGER_ENABLED", True)
+    )
+    # Upper bound on one go_to_pose() navigation before it's aborted -
+    # pycozmo's own go_to_pose() has no timeout and would otherwise block
+    # forever if its completion event never arrives. A generous guess for
+    # desk-scale distances (go_to_pose() drives at <=100mm/s with slow
+    # 20mm/s^2 ramps), not tuned against real hardware.
+    return_to_pose_timeout_s: float = field(default_factory=lambda: _env_float("RETURN_TO_POSE_TIMEOUT_S", 60.0))
+
     # --- Wi-Fi auto-connect (optional, Linux/nmcli only — see robot/wifi.py) ---
     # Leave COZMO_WIFI_SSID empty to disable and keep connecting manually (nmcli
     # dev wifi connect ...) as before. Cozmo's SSID/password can regenerate on

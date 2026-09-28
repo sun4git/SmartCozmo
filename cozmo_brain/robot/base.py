@@ -21,6 +21,11 @@ from cozmo_brain.robot.moods import MOODS, Mood
 
 logger = logging.getLogger(__name__)
 
+# Gesture step kinds that move the wheels. On the charger, any of these
+# first drives Cozmo straight off the dock (real.py's drive()/
+# spin_wheels_for()) - never a spin in place on it.
+_WHEEL_STEP_KINDS = ("turn", "drive")
+
 
 @dataclass(frozen=True)
 class MoveResult:
@@ -31,6 +36,30 @@ class MoveResult:
 
     moved: bool
     hazard: str | None = None  # None, "cliff", or "fall" - see robot/real.py
+    # Non-hazard reason a navigation move (return_to_pose()/
+    # return_to_charger()) stopped short or never started - None when it
+    # completed normally. One of: "picked_up", "pose_lost", "disconnected",
+    # "timeout", "no_charger_pose", "already_on_charger", "not_on_charger"
+    # (see tools/registry.py's charger_return_message() for what each means).
+    # Plain drive()/turn() never set this.
+    reason: str | None = None
+
+    @property
+    def completed(self) -> bool:
+        """Moved, with nothing cutting it short."""
+        return self.moved and self.hazard is None and self.reason is None
+
+
+@dataclass(frozen=True)
+class Pose2D:
+    """A position + heading in Cozmo's own firmware-tracked pose frame (see
+    real.py's get_pose()). Only meaningful within the pose origin it was
+    read under - that origin resets on every connect/reconnect and every
+    pickup/set-down, so a stored Pose2D from before either is garbage."""
+
+    x_mm: float
+    y_mm: float
+    heading_deg: float  # counterclockwise-positive, same convention as turn()
 
 
 class RobotBackend(abc.ABC):
@@ -89,6 +118,35 @@ class RobotBackend(abc.ABC):
         from it. Distance/speed are fixed, not model-supplied, specifically
         so getting the reverse direction/magnitude right doesn't depend on
         the model remembering to pass a negative drive() distance."""
+
+    @abc.abstractmethod
+    def get_pose(self) -> Pose2D | None:
+        """Cozmo's current firmware-tracked pose, or None if unknown (not
+        connected, no telemetry yet, or a backend with no pose tracking)."""
+
+    @abc.abstractmethod
+    def return_to_pose(self, target: Pose2D) -> MoveResult:
+        """Navigate to `target` (position and heading) in the current pose
+        frame, blocking until done. Real backend: pycozmo's go_to_pose(),
+        followed by a heading correction via turn() - go_to_pose()'s own
+        point-turn is confirmed unreliable on real hardware (see real.py).
+        Stops early and says why (MoveResult.hazard/.reason) on a cliff,
+        fall, pickup, pose reset, dropped connection, or timeout."""
+
+    @abc.abstractmethod
+    def has_charger_pose(self) -> bool:
+        """Whether a still-valid charger location is known - recorded the
+        last time Cozmo drove off the charger, and forgotten on any pickup,
+        pose reset, or reconnect since (backends with no such concept
+        always return False)."""
+
+    @abc.abstractmethod
+    def return_to_charger(self) -> MoveResult:
+        """Navigate back to a staging point CHARGER_DOCK_DISTANCE_MM straight
+        out from the recorded charger pose (via return_to_pose()), then hand
+        off to dock() for the final blind reverse. `reason="no_charger_pose"`
+        (moved=False) if no valid charger pose is known - see
+        has_charger_pose()."""
 
     @abc.abstractmethod
     def set_head_angle_deg(self, angle_deg: float, duration: float = 0.4) -> None: ...
@@ -157,10 +215,20 @@ class RobotBackend(abc.ABC):
         and not is_charging()` means docked but not charging - i.e. full,
         assuming the charge controller stops topping off once full like
         chargers normally do (backends with no such concept always return
-        False). drive()/turn() block only while this is True - once full,
-        a normal drive/turn is allowed and drives Cozmo off the dock as a
-        side effect, rather than any background behavior deciding to leave
-        the charger unprompted."""
+        False). drive()/turn() block only while this is True (and the
+        battery is low - see real.py) - otherwise a normal drive/turn is
+        allowed and drives Cozmo off the dock as a side effect. Idle
+        fidgets additionally skip their wheel steps while this is True on
+        the dock (idle_fidget.py)."""
+
+    def is_movement_blocked(self) -> bool:
+        """Whether drive()/turn() (and so any gesture's wheel steps) would
+        currently refuse to move - real backend: still charging on the dock
+        with a low battery (real.py's _must_stay_on_charger()). Checked by
+        the engine *before* the model replies, so it can say "I can't come
+        out yet" instead of promising to and then not moving. Backends with
+        no such concept never block."""
+        return False
 
     # --- connection health (default: always healthy — overridden by real.py) ---
     def is_healthy(self) -> bool:
@@ -201,9 +269,15 @@ class RobotBackend(abc.ABC):
             raise ValueError(f"Unknown gesture '{name}'. Known gestures: {', '.join(sorted(GESTURES))}")
         return gesture
 
-    def run_gesture(self, name: str) -> str:
+    def run_gesture(self, name: str, *, wheels: bool = True) -> str:
+        """`wheels=False` skips the gesture's drive/turn steps and plays
+        everything else (face, lights, head, lift) - used by idle_fidget.py
+        while docked and charging, so an unprompted fidget doesn't drive
+        Cozmo off the charger (see _WHEEL_STEP_KINDS)."""
         gesture = self._get_gesture(name)
         for step in gesture.steps:
+            if not wheels and step.kind in _WHEEL_STEP_KINDS:
+                continue
             self._run_step(step)
         return gesture.description
 

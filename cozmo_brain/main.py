@@ -7,6 +7,7 @@ import argparse
 import logging
 import sys
 
+from cozmo_brain.charger_return import ChargerReturner
 from cozmo_brain.config import settings
 from cozmo_brain.conversation import Conversation
 from cozmo_brain.engine import CozmoEngine
@@ -71,9 +72,6 @@ def main(argv: list[str] | None = None) -> int:
             calibrate_mode.run(robot, settings)
             return 0
 
-        battery_monitor = BatteryMonitor(robot, settings)
-        battery_monitor.start()
-
         pickup_reactor = PickupReactor(robot)
         pickup_reactor.start()
 
@@ -90,6 +88,13 @@ def main(argv: list[str] | None = None) -> int:
             conversation.load()
 
         engine = CozmoEngine(settings, robot, ollama, speech, tools, conversation)
+
+        # Started after the engine exists (not alongside pickup_reactor
+        # above) because the low-battery return-to-charger policy speaks and
+        # writes to the conversation through it.
+        charger_returner = ChargerReturner(robot, engine, settings)
+        battery_monitor = BatteryMonitor(robot, settings, on_reading=charger_returner.on_battery_reading)
+        battery_monitor.start()
 
         idle_fidgeter = IdleFidgeter(robot, engine, settings)
         idle_fidgeter.start()

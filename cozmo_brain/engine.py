@@ -7,6 +7,7 @@ VAD, text, calibration) funnels user input through `CozmoEngine.handle_turn`.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 
 import requests
@@ -20,6 +21,24 @@ from cozmo_brain.robot.base import RobotBackend
 from cozmo_brain.tools.base import Tool, ToolResult
 
 logger = logging.getLogger(__name__)
+
+# Appended to the user's message when the robot can't move right now
+# (RobotBackend.is_movement_blocked()). Confirmed on real hardware that
+# telling the model only via the drive/turn tool result is too late: it
+# usually calls `say` ("I'm coming!") *before* `drive` in the same turn, so
+# the promise was already spoken before it ever learned the drive was
+# refused. This gives it the fact before it decides what to say.
+_CHARGER_BLOCKED_NOTE = (
+    "[Status: I'm on my charger and my battery is still too low to come off - drive, turn, and "
+    "the wheel parts of gestures won't work right now. If asked to move or come out, say I can't "
+    "yet because I need to charge more; don't say I'm coming.]"
+)
+
+# Spoken by the engine itself if a drive/turn was refused for that reason
+# and the model never said anything after finding out (e.g. it ran out of
+# MAX_TOOL_ITERATIONS, or ignored the tool result) - the human must never be
+# left with a spoken promise and a Cozmo that silently didn't move.
+_CHARGER_BLOCKED_FALLBACK = "Sorry, I can't come out yet - my battery's too low. I need to charge a bit more first."
 
 
 class CozmoEngine:
@@ -44,6 +63,35 @@ class CozmoEngine:
         # process start rather than looking infinitely idle before the
         # first turn ever happens.
         self.last_interaction_monotonic: float = time.monotonic()
+        # Held for the whole of every handle_turn(). Background behavior that
+        # speaks, drives, or writes to the conversation on its own
+        # (charger_return.py) takes this too, so it never talks over a reply
+        # in progress or mutates the message list mid-turn - and a turn that
+        # starts meanwhile simply waits for it to finish.
+        self.turn_lock = threading.Lock()
+
+    def _movement_blocked(self) -> bool:
+        try:
+            return self._robot.is_movement_blocked()
+        except Exception as e:  # noqa: BLE001 - a status check must never break a turn
+            logger.debug("Movement-blocked check failed: %s", e)
+            return False
+
+    def speak(self, text: str, mood: str = "neutral") -> bool:
+        """Say something unprompted, through the same `say` tool the model
+        uses (same TTS provider, AUDIO_OUTPUT routing, and lift handling).
+        Caller must hold turn_lock. Returns whether it succeeded."""
+        result = self._call_tool("say", {"text": text, "mood": mood})
+        if not result.ok:
+            logger.warning("Unprompted speech failed: %s", result.to_tool_message())
+        return result.ok
+
+    def add_note(self, text: str) -> None:
+        """Record something Cozmo said/did on his own as an assistant message,
+        so the model has context for the human's next reply (e.g. "yes" to a
+        low-battery offer it never made itself). Caller must hold turn_lock."""
+        self.conversation.add_assistant(text)
+        self.conversation.save()
 
     def _call_tool(self, name: str, arguments: dict) -> ToolResult:
         tool = self._tools_by_name.get(name)
@@ -65,10 +113,19 @@ class CozmoEngine:
     def handle_turn(self, user_text: str, images: list[str] | None = None) -> str:
         """Runs one full user turn through the tool-calling loop. Returns a
         transcript-ish summary of what Cozmo said/did, for logging/display."""
+        with self.turn_lock:
+            return self._handle_turn(user_text, images)
+
+    def _handle_turn(self, user_text: str, images: list[str] | None) -> str:
         self.last_interaction_monotonic = time.monotonic()
+        if self._movement_blocked():
+            user_text = f"{user_text}\n\n{_CHARGER_BLOCKED_NOTE}"
         self.conversation.add_user(user_text, images=images)
         schema = [t.schema() for t in self._tools]
         summary_lines: list[str] = []
+        # True once a drive/turn got refused by the charger check, until a
+        # successful `say` afterward - i.e. the model has told them why.
+        unexplained_block = False
 
         for iteration in range(self._settings.max_tool_iterations):
             try:
@@ -97,6 +154,10 @@ class CozmoEngine:
                 result = self._call_tool(tc.name, tc.arguments)
                 summary_lines.append(f"[{tc.name}] {result.to_tool_message()}")
                 self.conversation.add_tool_result(tc.name, result.to_tool_message(), tool_call_id=tc.id)
+                if result.extra and result.extra.get("blocked_by_charger"):
+                    unexplained_block = True
+                elif tc.name == "say" and result.ok:
+                    unexplained_block = False
                 if result.ok and result.extra and result.extra.get("image_path"):
                     image_to_attach = result.extra["image_path"]
                     image_caption = result.extra.get("image_caption", image_caption)
@@ -109,6 +170,12 @@ class CozmoEngine:
                     logger.warning("Could not attach captured photo: %s", e)
         else:
             logger.warning("Hit max_tool_iterations (%d) without a final reply.", self._settings.max_tool_iterations)
+
+        if unexplained_block:
+            logger.info("A move was refused (charging, low battery) and never explained - saying so directly.")
+            if self.speak(_CHARGER_BLOCKED_FALLBACK, mood="sleepy"):
+                self.conversation.add_assistant(f"[I said this out loud:] {_CHARGER_BLOCKED_FALLBACK}")
+                summary_lines.append(f"[say] {_CHARGER_BLOCKED_FALLBACK}")
 
         self.conversation.save()
         return "\n".join(summary_lines) if summary_lines else "(no response)"
