@@ -492,7 +492,7 @@ why this ended up folded into `--mode vad` instead of a standalone mode.
 | `list_animations()` | Lists the real animation/group names actually loaded on this robot. |
 | `drive(distance_mm, speed_mmps)` | Drives straight, clamped to safe limits. |
 | `turn(angle_degrees)` | Turns in place (calibrated via `TURN_SECONDS_PER_DEGREE`). |
-| `dock()` | Reverses onto the charger, with the platform's known false cliff-detection trigger suppressed. Doesn't search for/align to the charger — only works already close and facing away from it. **Not yet verified against real hardware.** |
+| `dock()` | Goes back onto the charger. If Cozmo remembers where it is (he drove off it earlier and hasn't been picked up or reconnected since), navigates to a staging point in front of it, then reverses on until the contacts engage. Otherwise only reverses in a straight line, so it only works already close and facing away from it. See roadmap item 6. |
 | `look()` | Captures a camera frame and attaches it to the next LLM turn for vision. |
 | `remember_person(name)` | Captures a reference photo, stored under that name. |
 | `who_is_this()` | Captures a photo and asks the vision LLM if it matches anyone remembered. **Experimental.** |
@@ -518,6 +518,84 @@ assets — this only works once you've run `pycozmo_resources.py download`
 (step 1 above). If those assets aren't present, `list_animations()` just
 returns empty and the model is expected to fall back to `gesture`/`say`
 moods instead — nothing crashes.
+
+### How a turn ends (`FINAL_LLM_CALL`)
+
+A turn is a loop: the LLM returns tool calls, the engine runs them and sends
+the results back, and so on until the LLM replies with **no** tool calls.
+Cozmo's actual answer is itself a tool call (`say`). So after almost every
+reply the loop makes one more LLM call, just to hear "done". In `--mode vad`
+the mic stays closed during that call (~1–2s). `FINAL_LLM_CALL` decides what
+happens to it:
+
+| Setting | That last call | Mic reopens | Catches a model that acts *after* its `say`? |
+|---|---|---|---|
+| `sync` (default) | made, and waited for | after it returns | ✅ |
+| `async` | made in the background | right after the `say` | ✅ (pauses the mic while it acts) |
+| `skip` | not made | right after the `say` | ❌ the action is lost |
+
+**When a turn is allowed to stop early at all.** This is the same rule for
+`async` and `skip` (`CozmoEngine._turn_is_done()`). A step qualifies only if
+**all** of these hold:
+- its **last** call is a successful `say`;
+- every tool in that step is a pure action (`Tool.safe_to_end_turn`: `say`,
+  `gesture`, `play_animation`, `drive`, `turn`, `dock`, `remember_person`);
+- nothing needs the model's attention: no error, no cliff/fall, no move
+  refused on the charger, no failed charger return, no photo.
+
+Until a step qualifies, everything runs synchronously, with the mic closed,
+exactly like `sync`. **New tools default to `safe_to_end_turn=False`**, so a
+turn that uses one never ends before the model has seen that tool's result.
+Only opt a tool in if its success result tells the model nothing new.
+
+**Examples** (verified in scripted tests with a fake model). "Before mic
+reopens" is what you wait through; "background" happens while Cozmo is
+already listening:
+
+| You say | Model's steps | `sync`: before mic reopens | `async`: before mic reopens | `async`: background |
+|---|---|---|---|---|
+| "Hi!" | `say` → *done* | `say`, *done* | `say` | *done* |
+| "Turn left" (batching model) | `say`+`turn` → *done* | both | both (last call isn't `say`) | — |
+| "What do you see?" | `say`+`look` → `say` → *done* | all 3 | `say`+`look`, `say` | *done* |
+| "What moves can you do?" | `list_animations`+`say` → `say` → *done* | all 3 | first 2 (must read the list) | *done* |
+| "Drive forward" (hits a cliff) | `say`+`drive` → `say` → *done* | all 3 | first 2 (must react to the cliff) | *done* |
+| "Turn left" (**one-tool-per-step model**, e.g. Groq `openai/gpt-oss-120b`) | `say` → `turn` → *done* | all 3 | `say` | `turn` (mic paused), *done* |
+| "Look around" (same kind of model) | `say` → `look` → `say` → *done* | all 4 | `say` | `look`, `say`, *done* (mic paused from `look`) |
+
+With `skip`, the last two rows would stop right after the first `say`: he'd
+announce the turn and never make it. That's exactly what happened with
+gpt-oss-120b in a live test, and why `skip` isn't the default.
+
+**What `async` looks like when the model continues** (the "one-tool-per-step" rows):
+
+```
+you: "turn left"
+  ├─ LLM step 1: say("Sure, turning!")   ← Cozmo speaks
+  ├─ handle_turn() returns → mic reopens, listening...
+  │     (background) LLM step 2 → turn  ← model continued
+  │        ├─ followup_interrupt set → recording stops within ~30ms
+  │        │   (a capture you'd already started is discarded)
+  │        ├─ turn(90) runs, mic closed
+  │        └─ LLM step 3 → done, turn_lock released
+  └─ "(Cozmo continued his reply - listening again)" → same listening window resumes
+```
+
+**Rules that hold in every mode:**
+- A turn never returns while a gesture is still running (`spin` is ~7s), so
+  the mic never reopens into motor noise.
+- The background call keeps holding `turn_lock`. Your next turn, an
+  autonomous charger return, or an idle fidget waits for it, so the
+  conversation history always stays in order.
+- `async` only applies in `--mode vad`. Text and push-to-talk modes don't
+  reopen a mic on their own, so they always behave like `sync`.
+- `async` still makes the extra LLM call every turn. It saves waiting, not
+  API usage (a live test hit Groq's free-tier `429` limit). Only `skip`
+  saves the call.
+
+The history this leaves behind (a turn ending on a tool result, then the
+next user message) was live-tested and accepted by every provider: Ollama,
+OpenAI, and Groq. The `LLM step N: ...` log lines show the real per-step
+behavior of whatever model you're on.
 
 ### Recognizing people (experimental)
 
@@ -1335,7 +1413,7 @@ annotated list (it's the source of truth). The essentials:
 | `AUTO_RETURN_TO_CHARGER_ENABLED` | Low-battery return-to-charger: offer at `BATTERY_LOW_VOLTAGE`, go on its own at `BATTERY_CRITICAL_VOLTAGE`, ask for help if the charger location isn't known (default `true`). |
 | `RETURN_TO_POSE_TIMEOUT_S` | Upper bound on one `go_to_pose()` navigation leg before it's aborted (pycozmo's own has no timeout). |
 | `MAX_TOOL_ITERATIONS` | Cap on LLM↔tool round-trips per user turn. |
-| `FINAL_LLM_CALL` | The LLM call after a reply ending in a clean `say` (usually just "done"): `sync` (default) waits for it before listening again; `async` reopens the mic right away and makes it in the background, pausing the recording if the model continues (`--mode vad` only); `skip` drops it (fastest, but a model that says "sure!" alone and acts in its *next* step, confirmed live with Groq's `openai/gpt-oss-120b`, loses the action). Early end only happens when every tool in the batch is a pure action (`Tool.safe_to_end_turn`, opt-in per tool, so new tools default to asking again) and nothing needs the model's attention (errors, hazards, refused moves, photos). A turn never returns until background gestures finish, so the mic doesn't reopen mid-`spin`. |
+| `FINAL_LLM_CALL` | The LLM call after a reply ending in a clean `say` (usually just "done"): `sync` (default) waits for it before listening again; `async` reopens the mic right away and makes it in the background, pausing the recording if the model continues (`--mode vad` only); `skip` drops it (fastest, but a model that says "sure!" alone and acts in its *next* step, confirmed live with Groq's `openai/gpt-oss-120b`, loses the action). Early end only happens when every tool in the batch is a pure action (`Tool.safe_to_end_turn`, opt-in per tool, so new tools default to asking again) and nothing needs the model's attention (errors, hazards, refused moves, photos). A turn never returns until background gestures finish, so the mic doesn't reopen mid-`spin`. Worked examples: [How a turn ends](#how-a-turn-ends-final_llm_call). |
 | `CONVERSATION_MAX_MESSAGES` / `CONVERSATION_HISTORY_PATH` | Memory size and persistence path. |
 | `VAD_AGGRESSIVENESS` / `VAD_SILENCE_MS` / `VAD_MAX_UTTERANCE_S` | Hands-free listening tuning. |
 | `VAD_FOLLOWUP_TIMEOUT_S` | How long a conversation stays open after a reply before the wake word is needed again. |
@@ -2294,7 +2372,7 @@ Still open, roughly in priority order:
      (scripted: a flag arriving 1.5s late is now reported as docked, with
      the delay logged). Not yet re-run on real hardware.
    - **The post-reply LLM call: `FINAL_LLM_CALL=sync|async|skip`
-     (2026-09-28).** Cozmo's answer is itself a tool call (`say`), so the
+     (2026-09-28).** Behavior with worked examples: [How a turn ends](#how-a-turn-ends-final_llm_call). Cozmo's answer is itself a tool call (`say`), so the
      generic loop always made one more LLM call after it just to hear
      "done", with the mic closed meanwhile. Skipping that call (`skip`) was
      tried first, then **live-tested against every provider**. All accept
