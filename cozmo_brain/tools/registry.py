@@ -264,6 +264,12 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
 
         return ToolResult(True, "I took a look, but I don't recognize this person.", extra=extra)
 
+    # safe_to_end_turn=True marks pure actions only (see tools/base.py). The
+    # information tools - list_animations, look, who_is_this - deliberately
+    # leave it False: the model has to read their result, so a turn that
+    # used one always goes back to the model, even if a `say` came last.
+    # When adding a tool, leave it False unless its success result tells the
+    # model nothing it needs.
     return [
         Tool(
             name="say",
@@ -295,6 +301,7 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
                 "required": ["text"],
             },
             handler=lambda args: handle_say(args["text"], args.get("mood", "neutral"), args.get("gesture")),
+            safe_to_end_turn=True,
         ),
         Tool(
             name="gesture",
@@ -317,6 +324,7 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
                 "required": ["name"],
             },
             handler=lambda args: handle_gesture(args["name"]),
+            safe_to_end_turn=True,
         ),
         Tool(
             name="play_animation",
@@ -333,6 +341,7 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
                 "required": ["name"],
             },
             handler=lambda args: handle_play_animation(args["name"]),
+            safe_to_end_turn=True,
         ),
         Tool(
             name="list_animations",
@@ -355,6 +364,7 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
                 "required": ["distance_mm", "speed_mmps"],
             },
             handler=lambda args: handle_drive(args["distance_mm"], args["speed_mmps"]),
+            safe_to_end_turn=True,
         ),
         Tool(
             name="turn",
@@ -370,6 +380,7 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
                 "required": ["angle_degrees"],
             },
             handler=lambda args: handle_turn(args["angle_degrees"]),
+            safe_to_end_turn=True,
         ),
         Tool(
             name="dock",
@@ -385,6 +396,7 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
             ),
             parameters={"type": "object", "properties": {}},
             handler=lambda _args: handle_dock(),
+            safe_to_end_turn=True,
         ),
         Tool(
             name="look",
@@ -408,6 +420,7 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
                 "required": ["name"],
             },
             handler=lambda args: handle_remember_person(args["name"]),
+            safe_to_end_turn=True,
         ),
         Tool(
             name="who_is_this",

@@ -312,8 +312,30 @@ class RobotBackend(abc.ABC):
                 except Exception as e2:  # noqa: BLE001 - best-effort recovery, not worth failing louder over
                     logger.warning("Could not lower the lift after gesture '%s' failed: %s", name, e2)
 
-        threading.Thread(target=_run, name=f"gesture-{name}", daemon=True).start()
+        thread = threading.Thread(target=_run, name=f"gesture-{name}", daemon=True)
+        self._background_gestures().append(thread)
+        thread.start()
         return gesture.description
+
+    def _background_gestures(self) -> list[threading.Thread]:
+        # Lazily created (subclasses define their own __init__ without
+        # calling ours), pruned of finished threads on every access.
+        threads = self.__dict__.setdefault("_gesture_threads", [])
+        threads[:] = [t for t in threads if t.is_alive() or not t.ident]
+        return threads
+
+    def wait_for_background_gestures(self, timeout: float) -> bool:
+        """Block until every run_gesture_async() gesture has finished, or
+        `timeout` seconds pass. Returns whether they all finished. Used at
+        the end of a conversation turn, so the mic doesn't reopen while
+        Cozmo is still moving (see engine.py)."""
+        deadline = time.monotonic() + timeout
+        for thread in list(self._background_gestures()):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            thread.join(remaining)
+        return not any(t.is_alive() for t in self._background_gestures())
 
     def _run_step(self, step: Step) -> None:
         if step.kind == "mood":

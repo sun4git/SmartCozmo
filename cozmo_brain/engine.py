@@ -38,6 +38,10 @@ _CHARGER_BLOCKED_NOTE = (
 # and the model never said anything after finding out (e.g. it ran out of
 # MAX_TOOL_ITERATIONS, or ignored the tool result) - the human must never be
 # left with a spoken promise and a Cozmo that silently didn't move.
+# Upper bound on waiting for background gestures at the end of a turn -
+# longest real gesture (spin) is ~7s at the current turn calibration.
+_GESTURE_WAIT_S = 15.0
+
 _CHARGER_BLOCKED_FALLBACK = "Sorry, I can't come out yet - my battery's too low. I need to charge a bit more first."
 
 
@@ -107,7 +111,16 @@ class CozmoEngine:
         last_name, last_result = batch[-1]
         if last_name != "say" or not last_result.ok:
             return False
-        return all(r.ok and not (r.extra and r.extra.get("needs_attention")) for _, r in batch)
+        # Every tool in the batch must be a pure action (Tool.safe_to_end_turn)
+        # - an information tool like list_animations means the model hasn't
+        # read that result yet, even if it spoke after calling it.
+        for name, result in batch:
+            tool = self._tools_by_name.get(name)
+            if tool is None or not tool.safe_to_end_turn:
+                return False
+            if not result.ok or (result.extra and result.extra.get("needs_attention")):
+                return False
+        return True
 
     def _charger_status_note(self) -> str | None:
         """A one-line status note whenever Cozmo's on/off-charger (or
@@ -211,6 +224,9 @@ class CozmoEngine:
                 if iteration == 0:
                     logger.info("Model returned no tool calls this turn.")
                 break
+            # Shows in real-hardware logs whether the model batches actions
+            # with its `say`, or speaks first and acts in a later step.
+            logger.info("LLM step %d: %s", iteration + 1, ", ".join(tc.name for tc in response.tool_calls))
 
             image_to_attach: str | None = None
             image_caption = "[Cozmo just looked around and captured a photo of what's in front of him.]"
@@ -245,6 +261,15 @@ class CozmoEngine:
             if self.speak(_CHARGER_BLOCKED_FALLBACK, mood="sleepy"):
                 self.conversation.add_assistant(f"[I said this out loud:] {_CHARGER_BLOCKED_FALLBACK}")
                 summary_lines.append(f"[say] {_CHARGER_BLOCKED_FALLBACK}")
+
+        # A turn isn't over while Cozmo is still moving: a `say`'s gesture
+        # (GESTURE_ASYNC_ENABLED) keeps running in the background after the
+        # speech finishes - `spin` takes ~7s, well past any sentence. The
+        # caller (e.g. --mode vad) reopens the mic as soon as this returns,
+        # and would otherwise record the motor noise. The old extra LLM
+        # round trip used to hide part of this by accident.
+        if not self._robot.wait_for_background_gestures(_GESTURE_WAIT_S):
+            logger.warning("A background gesture was still running after %.0fs - not waiting longer.", _GESTURE_WAIT_S)
 
         self.conversation.save()
         return "\n".join(summary_lines) if summary_lines else "(no response)"
