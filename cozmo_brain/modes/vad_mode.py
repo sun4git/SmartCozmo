@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 
 import requests
 
@@ -98,6 +99,7 @@ def run(engine: CozmoEngine, robot: RobotBackend, speech: SpeechClient, settings
                 _apply_mood_safely(robot, "neutral")
                 break
 
+            stt_started = time.monotonic()
             try:
                 text = speech.transcribe(settings.raw_input_wav)
             except requests.RequestException as e:
@@ -115,7 +117,15 @@ def run(engine: CozmoEngine, robot: RobotBackend, speech: SpeechClient, settings
                 logger.warning("Speech-to-text request failed: %s", detail)
                 print(f"(speech-to-text request failed, try again: {detail})\n")
                 continue
+            # Logged every time, empty results included - the mic is closed
+            # for this whole round trip, and an empty result used to loop
+            # straight back to recording with nothing logged at all
+            # (confirmed on real hardware: 13 silent captures in a row).
+            logger.info(
+                "STT (%s) took %.2fs -> %r", settings.stt_provider, time.monotonic() - stt_started, text
+            )
             if not text:
+                print("(heard something, but speech-to-text returned nothing - listening again)")
                 continue  # heard something, but nothing transcribable - keep the conversation open
             print(f"You said: {text}")
             if is_likely_hallucination(text):

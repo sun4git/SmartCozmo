@@ -44,8 +44,9 @@ def record_until_silence(
     kept clearing a 60ms/2-frame debounce reliably enough to burn through a
     free-tier STT quota. `min_rms` is untested against real hardware for
     its exact value — tune it from what real background-noise vs. real
-    speech RMS values actually look like in your environment (nothing logs
-    these yet; ask if you want that added for tuning).
+    speech RMS values actually look like in your environment (every
+    accepted capture's length/peak RMS/stop reason is logged at INFO, and
+    rejected-as-noise listens log their peak RMS too).
 
     `min_speech_ms` is an onset debounce, not a minimum utterance length: a
     single false-positive frame from background noise used to be enough to
@@ -85,11 +86,15 @@ def record_until_silence(
     frame_count = 0
     peak_rms_seen = 0
     webrtcvad_only_hits = 0  # frames webrtcvad liked but the RMS floor rejected - tuning signal
+    # Why the capture stopped - logged with every accepted capture, to tell
+    # "you stopped talking" apart from "hit the time cap".
+    end_reason = f"hit the {max_seconds}s cap"
 
     try:
         while frame_count < max_frames:
             frame = proc.stdout.read(_FRAME_BYTES)
             if len(frame) < _FRAME_BYTES:
+                end_reason = "mic stream ended"
                 break
             frame_count += 1
             frame_rms = audioop.rms(frame, 2)
@@ -117,6 +122,7 @@ def record_until_silence(
                 else:
                     silence_run += 1
                     if silence_run >= silence_frames_needed:
+                        end_reason = f"{silence_ms}ms below speech threshold"
                         break
     finally:
         proc.terminate()
@@ -159,11 +165,19 @@ def record_until_silence(
             )
         return False
 
-    logger.debug(
-        "Accepted capture: %.1fs, peak RMS %d (min_rms=%d) - for reference if tuning VAD_MIN_RMS.",
+    # INFO, not DEBUG: raised directly on real hardware - many consecutive
+    # captures in a row came back from STT as empty text with nothing at
+    # all in the log, so there was no way to tell whether these clips were
+    # truncated fragments (e.g. quieter words falling under min_rms and
+    # counting as "silence" mid-sentence) or real speech the STT dropped.
+    # Clip length + peak RMS + why it stopped answers that.
+    logger.info(
+        "Captured %.1fs of audio (listened %.1fs, peak RMS %d, min_rms=%d) - stopped: %s.",
+        len(voiced_frames) * _FRAME_MS / 1000.0,
         frame_count * _FRAME_MS / 1000.0,
         peak_rms_seen,
         min_rms,
+        end_reason,
     )
     with wave.open(path, "wb") as wf:
         wf.setnchannels(1)
