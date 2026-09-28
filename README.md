@@ -594,8 +594,32 @@ you: "turn left"
 
 The history this leaves behind (a turn ending on a tool result, then the
 next user message) was live-tested and accepted by every provider: Ollama,
-OpenAI, and Groq. The `LLM step N: ...` log lines show the real per-step
-behavior of whatever model you're on.
+OpenAI, and Groq.
+
+**Reading the log.** Every LLM step is logged, including the final "done"
+one, with how long the call took. Unless marked `(background)`, that's time
+the mic was closed:
+
+```
+# sync (default) - a plain reply
+LLM step 1 (1.10s): say
+LLM step 2 (0.90s): no tool calls - turn done        <- mic closed for this
+
+# async - same reply
+LLM step 1 (1.10s): say
+LLM step 2 (background) (0.90s): no tool calls - turn done   <- listening meanwhile
+
+# async - a model that says first, then acts
+LLM step 1 (1.10s): say
+Model continued its reply - pausing listening while it runs.
+LLM step 2 (background) (0.95s): turn
+LLM step 3 (background) (0.80s): no tool calls - turn done
+```
+
+(Timings are illustrative.) If step 1 shows only `say` right after you asked
+for a movement, and step 2 shows the movement, that model is one of the
+"one-tool-per-step" kind above. `sync` and `async` handle it; `skip` would
+not.
 
 ### Recognizing people (experimental)
 

@@ -293,7 +293,9 @@ class CozmoEngine:
         `before_tools` runs once a response turns out to contain tool calls,
         before any of them execute (the async follow-up uses it to stop the
         mic first)."""
+        where = " (background)" if threading.current_thread().name == "llm-followup" else ""
         for iteration in range(first_step, self._settings.max_tool_iterations):
+            step_started = time.monotonic()
             try:
                 response = self._ollama.chat(self.conversation.messages, tools=schema)
             except requests.RequestException as e:
@@ -312,15 +314,24 @@ class CozmoEngine:
             if response.content:
                 turn.lines.append(f"(thinking) {response.content}")
 
+            # Every step is logged, the final "done" one included (it used to
+            # be silent, so a sync turn looked like it only ever had one
+            # step), with how long the LLM call took - i.e. what that step
+            # cost in waiting, mic closed unless it says "(background)".
+            # Also shows whether the model batches actions with its `say`,
+            # or speaks first and acts in a later step.
+            step_s = time.monotonic() - step_started
             if not response.tool_calls:
                 if iteration == 0:
                     logger.info("Model returned no tool calls this turn.")
+                logger.info("LLM step %d%s (%.2fs): no tool calls - turn done", iteration + 1, where, step_s)
                 return False, iteration + 1
             if before_tools is not None:
                 before_tools()
-            # Shows in real-hardware logs whether the model batches actions
-            # with its `say`, or speaks first and acts in a later step.
-            logger.info("LLM step %d: %s", iteration + 1, ", ".join(tc.name for tc in response.tool_calls))
+            logger.info(
+                "LLM step %d%s (%.2fs): %s",
+                iteration + 1, where, step_s, ", ".join(tc.name for tc in response.tool_calls),
+            )
 
             image_to_attach: str | None = None
             image_caption = "[Cozmo just looked around and captured a photo of what's in front of him.]"
