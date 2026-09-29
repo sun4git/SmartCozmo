@@ -144,8 +144,8 @@ class Settings:
     # provider (audio/speech_gate.py - Silero VAD, the model bundled in
     # faster-whisper; skipped if faster-whisper isn't installed). A clip
     # with less than SPEECH_GATE_MIN_SPEECH_MS of detected speech isn't
-    # sent. Measured with the real model: noise 0.00-0.03s, one-word replies
-    # 0.45-0.54s - 150ms leaves wide margins both ways. SPEECH_GATE_THRESHOLD
+    # sent. Measured with the real model (two runs): noise 0.00-0.06s, one-word replies
+    # 0.42-0.67s - 150ms leaves wide margins both ways. SPEECH_GATE_THRESHOLD
     # is Silero's own per-frame speech probability cutoff (its default 0.5).
     speech_gate_enabled: bool = field(default_factory=lambda: _env_bool("SPEECH_GATE_ENABLED", True))
     speech_gate_min_speech_ms: int = field(default_factory=lambda: _env_int("SPEECH_GATE_MIN_SPEECH_MS", 150))

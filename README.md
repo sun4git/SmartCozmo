@@ -84,7 +84,8 @@ See [Roadmap](#roadmap--open-work) for what's still open.
 .
 ├── standalone/              # one-off scripts, not part of cozmo_brain (run from the repo root)
 │   ├── orchestrator.py      # lightweight single-file test script (no memory/tools/gestures)
-│   └── pose_drift_test.py   # pose/dead-reckoning drift test behind return-to-charger (roadmap item 6)
+│   ├── pose_drift_test.py   # pose/dead-reckoning drift test behind return-to-charger (roadmap item 6)
+│   └── sync_env.py          # after a git pull: shows/appends .env settings missing vs .env.example
 ├── tests/                   # offline tests (fakes - no robot/mic/keys): python tests/run_all.py
 │   └── live/                # opt-in tests that call real LLM providers with your .env keys
 ├── run.sh                   # activates cozmo-env + runs cozmo_brain in one step (./run.sh --help)
@@ -192,6 +193,19 @@ cp .env.example .env
 Edit `.env` and fill in at least `GROQ_API_KEY`. Adjust `OLLAMA_BASE_URL` /
 `OLLAMA_MODEL` to match your Ollama setup. See `.env.example` for what every
 variable does.
+
+**After a `git pull` that adds settings:** `.env` is gitignored (it holds
+your keys), so a pull never updates it. The new settings then just use their
+built-in defaults, but you can't see or tune them, and an *old* value still
+in `.env` overrides a new default. To check:
+
+```bash
+python3 standalone/sync_env.py           # report only: missing, stale, and unknown settings
+python3 standalone/sync_env.py --apply   # append the missing ones (asks first, backs up .env)
+```
+
+It never changes or removes an existing line, and never prints a value from
+your `.env` (unknown settings are listed by name only).
 
 ### 3. Join Cozmo's Wi-Fi AP (do this every time Cozmo has been power-cycled)
 

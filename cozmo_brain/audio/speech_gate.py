@@ -7,10 +7,11 @@ speech-shaped noise - a bump, motor hum, clatter - can pass that. Whisper
 then invents text for it ("Thank you.", "you", "."). Silero is a small
 neural model trained to tell speech from noise, so it catches what the
 loudness check can't. Measured 2026-09-29 with the real model (faster-whisper
-1.2.1's bundled silero_vad_v6.onnx - the same file as on the Pi): hiss and
-clatter 0.00s of speech, motor hum 0.03s, while one-word replies ("yes",
-"no", "okay", including a "yes" at a quarter volume) all measured
-0.45-0.54s, and a full sentence 3.74s. Took 2-15ms per clip on a desktop
+1.2.1's bundled silero_vad_v6.onnx - the same file as on the Pi), over two
+independent sets of clips: hiss and clatter 0.00s of speech, motor hum
+0.03-0.06s, while one-word replies ("yes", "no", "okay", including a "yes"
+at a quarter volume) all measured 0.42-0.67s, and a full sentence ~3.5s.
+Took 2-20ms per clip on a desktop
 CPU - negligible next to an STT round trip, which it saves entirely for
 every noise clip it catches (and, with STT_PROVIDER=local, a whole CPU
 Whisper decode).
