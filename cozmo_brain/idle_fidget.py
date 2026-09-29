@@ -85,7 +85,9 @@ class IdleFidgeter:
             # real.py's _must_stay_on_charger()).
             charging_on_dock = self._robot.is_on_charger() and self._robot.is_charging()
             wheels = not (charging_on_dock or self._robot.is_movement_blocked())
-            self._robot.run_gesture(gesture, wheels=wheels)
+            # Its mood step would otherwise leave an idle (off) light lit.
+            with self._robot.keep_backpack_light():
+                self._robot.run_gesture(gesture, wheels=wheels)
         except Exception as e:  # noqa: BLE001 - a cosmetic fidget hiccup shouldn't crash the process
             logger.debug("Idle fidget ('%s') failed: %s", gesture, e)
         finally:

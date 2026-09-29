@@ -11,6 +11,7 @@ physical robot.
 from __future__ import annotations
 
 import abc
+import contextlib
 import logging
 import random
 import threading
@@ -168,6 +169,27 @@ class RobotBackend(abc.ABC):
     @abc.abstractmethod
     def set_backpack_light(self, color: str) -> None:
         """color is one of: green, red, blue, white, off."""
+
+    def current_backpack_light(self) -> str | None:
+        """Last color set_backpack_light() was given, or None if this
+        backend doesn't track it."""
+        return None
+
+    @contextlib.contextmanager
+    def keep_backpack_light(self):
+        """Put the backpack color back afterwards - for things that happen
+        while he's idle (a fidget, a pickup reaction, an unprompted charger
+        announcement), so an idle "off" light stays off once they're done.
+        Off means idle: see vad_mode.py."""
+        before = self.current_backpack_light()
+        try:
+            yield
+        finally:
+            if before is not None:
+                try:
+                    self.set_backpack_light(before)
+                except Exception as e:  # noqa: BLE001 - cosmetic; never mask the body's own outcome
+                    logger.debug("Could not restore backpack light '%s': %s", before, e)
 
     def set_listening_indicator(self, listening: bool) -> None:
         """Blink the backpack light while the mic is recording (see real.py).

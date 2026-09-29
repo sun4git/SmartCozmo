@@ -84,6 +84,7 @@ class R2:
     def is_charging(self): return False
     def is_movement_blocked(self): return False
     def run_gesture(self, name, wheels=True): calls.append(wheels)
+    def keep_backpack_light(self): return contextlib.nullcontext()
 class E2:
     last_interaction_monotonic = 0.0
     listening_window_open = False

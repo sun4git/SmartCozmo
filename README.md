@@ -1390,7 +1390,8 @@ response — no separate reset needed there.
 | Backpack | Meaning |
 |---|---|
 | **Blinking** (any color) | The mic is recording you right now - talk. |
-| Steady color, or off | Not recording: thinking/speaking a reply, or idle and waiting for the wake word. |
+| Steady color | Not recording: thinking or speaking a reply (the color is his mood). |
+| Off | Idle: waiting for the wake word. |
 
 While recording, the light blinks in whatever color is currently up (white
 if it was off), so a mood or the red low-battery warning arriving mid-
@@ -1399,15 +1400,18 @@ blink is done by the firmware (`LightState` on/off frames, ~0.5s each
 assuming ~30fps frames - unverified on hardware; see `robot/real.py`).
 
 Steady colors come from the reply's mood (`cozmo_brain/robot/moods.py`),
-plus red for a low battery:
+plus red for a low battery. Every mood has a color, so **off only ever means
+idle**: the light is switched off at startup and when the follow-up window
+ends, and things that happen while idle (a fidget, the pickup reaction, an
+unprompted charger announcement) put it back the way they found it:
 
 | Steady color | Moods / meaning |
 |---|---|
-| green | smug, embarrassed, bored, confused |
+| green | neutral (his default reply mood), smug, embarrassed, bored, confused |
 | blue | excited, happy, proud |
 | white | curious (just heard the wake word), surprised, suspicious |
 | red | annoyed, angry, scared, sad, sleepy - or battery low/critical (with the battery icon on his face) |
-| off | neutral (idle) |
+| off | idle only - waiting for the wake word |
 
 **Don't `pip install openwakeword` directly** — on Linux it unconditionally
 declares a dependency on `tflite-runtime`, which has **no build for Python

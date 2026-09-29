@@ -46,7 +46,9 @@ MOODS: dict[str, Mood] = {
     # would otherwise leave the face hidden behind an arm raised by
     # whatever ran before it, with no guarantee anything would ever lower
     # it again.
-    "neutral": Mood("Neutral", "off", head_deg=0, lower_lift=True),
+    # neutral is also the default `say` mood, so it has a color: the light
+    # is off only when he's actually idle, which vad_mode.py sets itself.
+    "neutral": Mood("Neutral", "green", head_deg=0, lower_lift=True),
     "happy": Mood("Happiness", "blue", head_deg=15, lift_mm=70),
     "excited": Mood("Excitement", "blue", head_deg=30, lift_mm=90),
     "curious": Mood("Amazement", "white", head_deg=20, lower_lift=True),

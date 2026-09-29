@@ -44,6 +44,18 @@ def _set_listening_light_safely(robot: RobotBackend, listening: bool) -> None:
         logger.warning("Could not %s the listening light: %s", "start" if listening else "stop", e)
 
 
+def _go_idle(robot: RobotBackend, apply_neutral: bool = True) -> None:
+    """Idle = waiting for the wake word: neutral face, backpack light off.
+    Off is reserved for this - every mood has a color (robot/moods.py) -
+    so a dark backpack means "idle, not listening"."""
+    if apply_neutral:
+        _apply_mood_safely(robot, "neutral")
+    try:
+        robot.set_backpack_light("off")
+    except Exception as e:  # noqa: BLE001 - a light hiccup shouldn't end the session
+        logger.warning("Could not turn the backpack light off: %s", e)
+
+
 def _apply_mood_safely(robot: RobotBackend, mood: str) -> None:
     try:
         robot.apply_mood(mood)
@@ -84,6 +96,7 @@ def run(engine: CozmoEngine, robot: RobotBackend, speech: SpeechClient, settings
     )
     engine.log_steps_live = True
     speech_gate_warm_up(settings)
+    _go_idle(robot, apply_neutral=False)
     while True:
         _wait_for_wake_word_or_tap(robot, settings)
         print("Wake word or tap heard - listening...")
@@ -139,7 +152,7 @@ def _run_listening_window(engine: CozmoEngine, robot: RobotBackend, speech: Spee
             continue
         if not got_speech:
             print("(no follow-up heard - wake word needed again)\n")
-            _apply_mood_safely(robot, "neutral")
+            _go_idle(robot)
             return
 
         # Neural speech check before spending an STT call on the clip - loud,

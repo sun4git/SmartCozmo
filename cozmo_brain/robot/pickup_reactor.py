@@ -31,6 +31,7 @@ class PickupReactor:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._was_picked_up = False
+        self._light_before_pickup: str | None = None
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._run, name="pickup-reactor", daemon=True)
@@ -55,10 +56,19 @@ class PickupReactor:
 
         if picked_up and not self._was_picked_up:
             self._was_picked_up = True
+            self._light_before_pickup = self._robot.current_backpack_light()
             self._react_safely("surprised")
         elif not picked_up and self._was_picked_up:
             self._was_picked_up = False
             self._react_safely("neutral")
+            # Back to whatever the light was before the pickup - "off" if
+            # he was idle (off means idle, see vad_mode.py), rather than
+            # neutral's green.
+            if self._light_before_pickup is not None:
+                try:
+                    self._robot.set_backpack_light(self._light_before_pickup)
+                except Exception as e:  # noqa: BLE001 - same as above
+                    logger.debug("Could not restore backpack light: %s", e)
 
     def _react_safely(self, mood: str) -> None:
         try:

@@ -1065,6 +1065,9 @@ class PyCozmoRobot(RobotBackend):
             self._light_color = color
             self._send_backpack_light()
 
+    def current_backpack_light(self) -> str | None:
+        return self._light_color
+
     def set_listening_indicator(self, listening: bool) -> None:
         with self._light_lock:
             if listening == self._listening_light:

@@ -62,7 +62,7 @@ GESTURES: dict[str, Gesture] = {
         ],
     ),
     "sleep": Gesture(
-        "Lowers head and arm and dims the lights, ready for a nap.",
+        "Lowers head and arm with a sleepy face, ready for a nap.",
         [
             Step("head", -25, duration=0.6),
             Step("lower_lift", None, duration=0.6),
@@ -89,7 +89,7 @@ GESTURES: dict[str, Gesture] = {
             Step("turn", -25, duration=0.15),
             Step("light", "blue"),
             Step("turn", 25, duration=0.15),
-            Step("light", "off"),
+            # Ends lit, not "off": off is reserved for idle (vad_mode.py).
         ],
     ),
     "spin": Gesture(

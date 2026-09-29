@@ -102,7 +102,8 @@ class ChargerReturner:
                 self._ask_for_help(voltage)
                 return
             logger.info("Battery low (%.2fV) - offering to return to the charger.", voltage)
-            self._engine.speak(_OFFER_TEXT, mood="sleepy")
+            with self._robot.keep_backpack_light():  # usually idle (off) - don't leave it lit
+                self._engine.speak(_OFFER_TEXT, mood="sleepy")
             self._engine.add_note(
                 f"[Battery low ({voltage:.2f}V). I said this out loud on my own, not in reply to "
                 f"anything: \"{_OFFER_TEXT}\" If they agree, call the dock tool.]"
@@ -122,7 +123,8 @@ class ChargerReturner:
                 return
 
             logger.warning("Battery critical (%.2fV) - returning to the charger on my own.", voltage)
-            self._engine.speak(_GOING_TEXT, mood="sleepy")
+            with self._robot.keep_backpack_light():
+                self._engine.speak(_GOING_TEXT, mood="sleepy")
             try:
                 result = self._robot.return_to_charger()
                 outcome = charger_return_message(result)
@@ -147,7 +149,8 @@ class ChargerReturner:
             return
         self._help_asked = True
         logger.info("Battery low (%.2fV), no way back to the charger - asking for help.", voltage)
-        self._engine.speak(_HELP_TEXT, mood="sad")
+        with self._robot.keep_backpack_light():
+            self._engine.speak(_HELP_TEXT, mood="sad")
         self._engine.add_note(
             f"[Battery low ({voltage:.2f}V). I said this out loud on my own: \"{_HELP_TEXT}\"]"
         )
