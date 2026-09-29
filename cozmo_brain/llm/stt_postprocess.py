@@ -28,8 +28,11 @@ intended speech that happens to contain similar words.
 
 from __future__ import annotations
 
+import logging
 import re
 import unicodedata
+
+logger = logging.getLogger(__name__)
 
 # Sourced from widely-reported Whisper hallucination behavior, plus what was
 # actually observed recurring on real hardware. This list is necessarily
@@ -90,5 +93,83 @@ _KNOWN_HALLUCINATIONS = {_normalize(phrase) for phrase in _KNOWN_HALLUCINATIONS_
 def is_likely_hallucination(text: str) -> bool:
     """Whether `text` exactly matches a known STT hallucination/fallback
     phrase (Whisper or otherwise), after normalizing away case/
-    punctuation/whitespace differences."""
+    punctuation/whitespace differences - or contains no letters or digits
+    at all. Confirmed live 2026-09-28: Groq's Whisper returns a bare "."
+    for clatter and motor hum, which used to reach the LLM as if the human
+    had said it (`if not text` only catches the empty string)."""
+    if not any(ch.isalnum() for ch in text):
+        return True
     return _normalize(text) in _KNOWN_HALLUCINATIONS
+
+
+def filter_whisper_segments(segments: list[dict], settings) -> str:
+    """Join the text of the segments Whisper itself is reasonably sure are
+    speech, dropping the rest - and log every segment's scores at INFO, so
+    thresholds can be tuned from real audio instead of guessed.
+
+    Each segment is a dict with `text` and, where the provider reports
+    them, `no_speech_prob`, `avg_logprob`, `compression_ratio` (Groq and
+    OpenAI `verbose_json`; faster-whisper's segment objects, converted by
+    local_client.py). A segment is dropped if ANY of:
+      - no_speech_prob > STT_NO_SPEECH_PROB: Whisper's own "this was
+        silence/noise" estimate. Measured live: OpenAI whisper-1 gives
+        0.93-0.97 on noise vs 0.00 on speech. Groq always reports 0.00, so
+        this check simply never fires there.
+      - avg_logprob < STT_MIN_AVG_LOGPROB: low decoding confidence. The only
+        usable signal on Groq (speech ~-0.15 vs noise -0.57..-0.97 on clean
+        test audio); the default -1.0 is Whisper's own, deliberately loose
+        until real mic logs show where speech actually scores.
+      - compression_ratio > STT_MAX_COMPRESSION_RATIO: a highly repetitive
+        loop ("thank you thank you thank you..."), Whisper's classic
+        runaway-decoding failure.
+    Missing values never cause a drop, so providers/models that don't
+    report them (or report partial data) fall back to plain text."""
+    kept: list[str] = []
+    for seg in segments:
+        text = (seg.get("text") or "").strip()
+        nsp = seg.get("no_speech_prob")
+        lp = seg.get("avg_logprob")
+        cr = seg.get("compression_ratio")
+        reason = None
+        if nsp is not None and nsp > settings.stt_no_speech_prob:
+            reason = f"no_speech_prob {nsp:.2f} > {settings.stt_no_speech_prob}"
+        elif lp is not None and lp < settings.stt_min_avg_logprob:
+            reason = f"avg_logprob {lp:.2f} < {settings.stt_min_avg_logprob}"
+        elif cr is not None and cr > settings.stt_max_compression_ratio:
+            reason = f"compression_ratio {cr:.2f} > {settings.stt_max_compression_ratio}"
+        logger.info(
+            "STT segment %s (no_speech=%s logprob=%s compression=%s): %r%s",
+            "DROPPED" if reason else "kept",
+            _fmt(nsp), _fmt(lp), _fmt(cr), text,
+            f" - {reason}" if reason else "",
+        )
+        if not reason and text:
+            kept.append(text)
+    return " ".join(kept).strip()
+
+
+def whisper_request_fields(model: str, settings) -> dict:
+    """Extra form fields for a Groq/OpenAI transcription request: the
+    language (if STT_LANGUAGE is set), and verbose_json - which is what
+    returns the per-segment scores above - but only for Whisper models.
+    OpenAI's newer non-Whisper models (e.g. gpt-4o-transcribe) reject
+    verbose_json, so they get plain text, as before."""
+    fields: dict = {}
+    if settings.stt_language:
+        fields["language"] = settings.stt_language
+    if "whisper" in model.lower():
+        fields["response_format"] = "verbose_json"
+    return fields
+
+
+def text_from_whisper_response(body: dict, settings) -> str:
+    """The transcript from a Groq/OpenAI response: segment-filtered when the
+    response carries segments (verbose_json), plain `text` otherwise."""
+    segments = body.get("segments")
+    if isinstance(segments, list) and segments:
+        return filter_whisper_segments(segments, settings)
+    return (body.get("text") or "").strip()
+
+
+def _fmt(value) -> str:
+    return "n/a" if value is None else f"{value:.2f}"

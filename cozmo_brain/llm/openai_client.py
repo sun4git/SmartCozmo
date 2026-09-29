@@ -29,6 +29,7 @@ import requests
 
 from cozmo_brain.config import Settings
 from cozmo_brain.llm.openai_compatible_chat import OpenAICompatibleChatClient
+from cozmo_brain.llm.stt_postprocess import text_from_whisper_response, whisper_request_fields
 from cozmo_brain.llm.tts_postprocess import apply_cozmo_voice_character
 
 _STT_URL = "https://api.openai.com/v1/audio/transcriptions"
@@ -48,11 +49,14 @@ class OpenAIClient:
                 _STT_URL,
                 headers=self._headers,
                 files={"file": f},
-                data={"model": self._settings.openai_stt_model},
+                data={
+                    "model": self._settings.openai_stt_model,
+                    **whisper_request_fields(self._settings.openai_stt_model, self._settings),
+                },
                 timeout=30,
             )
         resp.raise_for_status()
-        return resp.json()["text"].strip()
+        return text_from_whisper_response(resp.json(), self._settings)
 
     def synthesize(self, text: str, out_path: str, voice: str | None = None) -> str:
         """Generate speech for `text`, apply voice effects + gain, and write a Cozmo-ready WAV to out_path."""

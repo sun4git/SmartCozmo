@@ -18,6 +18,11 @@ logger = logging.getLogger(__name__)
 
 _SAMPLE_RATE = 16000
 _FRAME_MS = 30
+
+# How much of the end-of-speech silence to keep on a captured clip before
+# sending it to STT - enough not to clip a trailing soft consonant, short
+# enough not to give Whisper a long silent stretch to hallucinate over.
+_KEPT_SILENCE_TAIL_MS = 200
 _FRAME_BYTES = int(_SAMPLE_RATE * (_FRAME_MS / 1000.0)) * 2  # 16-bit mono samples
 
 
@@ -205,6 +210,17 @@ def record_until_silence(
     # truncated fragments (e.g. quieter words falling under min_rms and
     # counting as "silence" mid-sentence) or real speech the STT dropped.
     # Clip length + peak RMS + why it stopped answers that.
+    #
+    # When it stopped on silence, the clip's last `silence_ms` is that
+    # silence itself (it's how the end of speech is detected). Only keep a
+    # short tail of it: Whisper is prone to inventing an ending on long
+    # silent stretches ("...thank you"), and there's nothing to transcribe
+    # there anyway. The sent clip length is what's logged.
+    if silence_run >= silence_frames_needed:
+        keep = max(1, _KEPT_SILENCE_TAIL_MS // _FRAME_MS)
+        extra = silence_run - keep
+        if extra > 0:
+            voiced_frames = voiced_frames[:-extra]
     logger.info(
         "Captured %.1fs of audio (listened %.1fs, peak RMS %d, min_rms=%d) - stopped: %s.",
         len(voiced_frames) * _FRAME_MS / 1000.0,

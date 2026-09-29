@@ -119,6 +119,27 @@ class Settings:
     # --- OpenAI STT/TTS (used when STT_PROVIDER/TTS_PROVIDER=openai) ---
     # Model/voice names are OpenAI's own, not interchangeable with Groq's.
     openai_stt_model: str = field(default_factory=lambda: _env_str("OPENAI_STT_MODEL", "whisper-1"))
+
+    # --- Whisper hallucination defenses (Groq, OpenAI, local) ---
+    # Language to transcribe in (ISO-639-1, e.g. "en"). Telling Whisper the
+    # language stops it guessing one on noise - that guess is where the
+    # foreign-language hallucinations (e.g. the Korean news sign-off seen
+    # on real hardware) come from. Empty = let Whisper auto-detect.
+    stt_language: str = field(default_factory=lambda: _env_str("STT_LANGUAGE", "en"))
+    # Per-segment confidence filters for Whisper models, which return
+    # no_speech_prob / avg_logprob / compression_ratio (see
+    # stt_postprocess.filter_whisper_segments). Measured live 2026-09-28:
+    # OpenAI whisper-1 gives noise no_speech_prob 0.93-0.97 vs 0.00 for
+    # speech - a clean split. Groq whisper-large-v3-turbo always reports
+    # 0.00, so for Groq only avg_logprob helps (speech ~-0.15, noise
+    # -0.57..-0.97 on clean test audio - real mic speech will score lower,
+    # so the default is Whisper's own conservative -1.0 until real logs
+    # show where to tighten it). Every segment's values are logged at INFO.
+    stt_no_speech_prob: float = field(default_factory=lambda: _env_float("STT_NO_SPEECH_PROB", 0.6))
+    stt_min_avg_logprob: float = field(default_factory=lambda: _env_float("STT_MIN_AVG_LOGPROB", -1.0))
+    stt_max_compression_ratio: float = field(
+        default_factory=lambda: _env_float("STT_MAX_COMPRESSION_RATIO", 2.4)
+    )
     openai_tts_model: str = field(default_factory=lambda: _env_str("OPENAI_TTS_MODEL", "tts-1"))
     openai_tts_voice: str = field(default_factory=lambda: _env_str("OPENAI_TTS_VOICE", "alloy"))
 

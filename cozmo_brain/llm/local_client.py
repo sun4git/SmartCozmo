@@ -24,6 +24,7 @@ import io
 import wave
 
 from cozmo_brain.config import Settings
+from cozmo_brain.llm.stt_postprocess import filter_whisper_segments
 from cozmo_brain.llm.tts_postprocess import apply_cozmo_voice_character
 
 
@@ -45,8 +46,26 @@ class LocalClient:
         return self._whisper_model
 
     def transcribe(self, wav_path: str) -> str:
-        segments, _info = self._whisper().transcribe(wav_path)
-        return "".join(segment.text for segment in segments).strip()
+        # vad_filter: faster-whisper's built-in Silero voice-activity filter,
+        # which skips non-speech stretches *before* decoding - noise inside
+        # the clip never gets the chance to become hallucinated text. The
+        # language hint and per-segment confidence filter are the same
+        # defenses the hosted Whisper providers get (stt_postprocess.py).
+        segments, _info = self._whisper().transcribe(
+            wav_path, language=self._settings.stt_language or None, vad_filter=True
+        )
+        return filter_whisper_segments(
+            [
+                {
+                    "text": s.text,
+                    "no_speech_prob": s.no_speech_prob,
+                    "avg_logprob": s.avg_logprob,
+                    "compression_ratio": s.compression_ratio,
+                }
+                for s in segments
+            ],
+            self._settings,
+        )
 
     def _piper(self):
         if self._piper_voice is None:
