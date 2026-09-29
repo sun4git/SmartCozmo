@@ -852,7 +852,7 @@ class PyCozmoRobot(RobotBackend):
                 return MoveResult(moved=True, reason="disconnected")
             heading_error = _shortest_turn(target.heading_deg - current.heading_deg)
             logger.info(
-                "go_to_pose() landed at x=%.1f y=%.1f heading=%.1f (target %.1f, %.1f, %.1f) - correcting %+.1fdeg.",
+                "Before final heading correction: at x=%.1f y=%.1f heading=%.1f (target %.1f, %.1f, %.1f) - correcting %+.1fdeg.",
                 current.x_mm, current.y_mm, current.heading_deg,
                 target.x_mm, target.y_mm, target.heading_deg, heading_error,
             )
