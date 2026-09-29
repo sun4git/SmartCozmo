@@ -252,6 +252,12 @@ class Settings:
     # connection as dropped and reconnect() gets tried (see robot/real.py).
     # Inferred from the protocol, not tuned against a real disconnect.
     robot_stale_after_s: float = field(default_factory=lambda: _env_float("ROBOT_STALE_AFTER_S", 5.0))
+    # How often connection_monitor.py checks the connection in the
+    # background (and reconnects if it's stale), so a drop is caught while
+    # idle too, not only before the next tool call. 0 = off.
+    connection_check_interval_s: float = field(
+        default_factory=lambda: _env_float("CONNECTION_CHECK_INTERVAL_S", 120.0)
+    )
 
     # --- Battery monitor (real backend only) ---
     # Voltage thresholds sourced from real-world Cozmo community usage: 3.7V

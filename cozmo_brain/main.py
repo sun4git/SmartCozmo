@@ -12,6 +12,7 @@ from cozmo_brain.charger_return import ChargerReturner
 from cozmo_brain.config import settings
 from cozmo_brain.conversation import Conversation
 from cozmo_brain.engine import CozmoEngine
+from cozmo_brain.connection_monitor import ConnectionMonitor
 from cozmo_brain.idle_fidget import IdleFidgeter
 from cozmo_brain.llm import create_chat_client, create_speech_client
 from cozmo_brain.personality import SYSTEM_PROMPT
@@ -126,6 +127,9 @@ def main(argv: list[str] | None = None) -> int:
         idle_fidgeter = IdleFidgeter(robot, engine, settings)
         idle_fidgeter.start()
 
+        connection_monitor = ConnectionMonitor(robot, engine, settings)
+        connection_monitor.start()
+
         try:
             if args.mode == "text":
                 from cozmo_brain.modes import text_mode
@@ -143,6 +147,7 @@ def main(argv: list[str] | None = None) -> int:
             battery_monitor.stop()
             pickup_reactor.stop()
             idle_fidgeter.stop()
+            connection_monitor.stop()
 
     return 0
 
