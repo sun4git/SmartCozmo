@@ -87,7 +87,7 @@ See [Roadmap](#roadmap--open-work) for what's still open.
 │   └── pose_drift_test.py   # pose/dead-reckoning drift test behind return-to-charger (roadmap item 6)
 ├── tests/                   # offline tests (fakes - no robot/mic/keys): python tests/run_all.py
 │   └── live/                # opt-in tests that call real LLM providers with your .env keys
-├── run.sh                   # activates cozmo-env + runs cozmo_brain in one step (chmod +x once)
+├── run.sh                   # activates cozmo-env + runs cozmo_brain in one step (./run.sh --help)
 ├── requirements.txt        # pip install -r requirements.txt (core deps only — see setup step 1 for extras)
 ├── .env.example             # template for every config variable, annotated — copy to .env
 ├── .env                      # your real config (gitignored, not in repo)
@@ -386,12 +386,8 @@ aplay -D pipewire test.wav
 
 ### 7. Run it
 
-One-time, before the first `./run.sh` call below (git on this repo doesn't
-preserve the executable bit — it was committed from a Windows checkout):
-
-```bash
-chmod +x run.sh
-```
+`run.sh` is stored executable in git (since 2026-09-29). If an older
+checkout says "Permission denied", run `chmod +x run.sh` once.
 
 **Recommended first run — sanity-check `.env`/Groq/Ollama before touching
 the robot at all.** This isolates config problems (bad API key, unreachable
@@ -416,7 +412,21 @@ python3 standalone/orchestrator.py
 # Full application:
 ./run.sh --mode voice          # push-to-talk — press Enter, speak, 'quit' to exit
 ./run.sh --mode vad             # hands-free — needs the wake-word setup from step 1
+./run.sh --help                 # every option, incl. --simulate, --fresh, --log-level
 ```
+
+**Logging:** `--log-level` sets how much is logged, case-insensitive:
+
+| Level | Shows |
+|---|---|
+| `INFO` (default) | The useful diagnostics: LLM steps and tool results, STT results and segment scores, speech-gate and capture lines, docking/charger events |
+| `WARNING` | Quiet: only problems |
+| `ERROR` | Only failures |
+| `DEBUG` | Everything, including PyCozmo's own packet chatter |
+
+To change the default without typing the flag every run, set
+`LOG_LEVEL=WARNING` (etc.) in `.env`. The flag still overrides it for a
+single run.
 
 (See [Modes](#modes) below if you'd rather activate `cozmo-env` and call
 `python3 -m cozmo_brain` directly instead of using `run.sh`.)
@@ -465,9 +475,8 @@ python3 -m cozmo_brain --simulate         # force the console-logging robot back
 `python3 -m cozmo_brain` requires `cozmo-env` to be activated first (or call
 `cozmo-env/bin/python -m cozmo_brain` directly, which is equivalent without
 activating). `./run.sh` does both in one step — activates `cozmo-env` and
-forwards all arguments, e.g. `./run.sh --mode voice`. One-time setup:
-`chmod +x run.sh` (git on this repo doesn't preserve the executable bit,
-since it was committed from a Windows checkout).
+forwards all arguments, e.g. `./run.sh --mode voice`. `./run.sh --help` lists
+every option.
 
 Conversation history persists to `CONVERSATION_HISTORY_PATH` between runs;
 pass `--fresh` to start clean instead.
@@ -1538,6 +1547,7 @@ annotated list (it's the source of truth). The essentials:
 | `TTS_LEADIN_MS` | Silent lead-in before speech, works around the first word often being inaudible. |
 | `TTS_PITCH_SHIFT` | Pitch+tempo shift for a smaller/more childlike/robotic voice. 1.0 = off. |
 | `TTS_ROBOT_MOD_DEPTH` / `TTS_ROBOT_MOD_HZ` | Optional ring-modulation robotic timbre. Depth 0.0 = off. |
+| `LOG_LEVEL` | Default log level (`DEBUG`/`INFO`/`WARNING`/`ERROR`, case-insensitive; default `INFO`). `--log-level` overrides it per run. |
 | `ROBOT_BACKEND` | `real` or `simulated` (cozmo_brain/ only; `--simulate` overrides it). |
 | `ROBOT_STALE_AFTER_S` | Seconds without robot telemetry before auto-reconnect kicks in. |
 | `BATTERY_LOW_VOLTAGE` / `BATTERY_CRITICAL_VOLTAGE` | Voltage thresholds for the face battery-warning icon; `BATTERY_LOW_VOLTAGE` also gates whether `drive`/`turn` refuse to move while charging (real backend only). |

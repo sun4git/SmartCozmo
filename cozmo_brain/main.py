@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 
 from cozmo_brain.charger_return import ChargerReturner
@@ -18,6 +19,20 @@ from cozmo_brain.robot import create_robot
 from cozmo_brain.robot.battery_monitor import BatteryMonitor
 from cozmo_brain.robot.pickup_reactor import PickupReactor
 from cozmo_brain.tools import build_tools
+
+
+_LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR"]
+
+
+def _default_log_level() -> str:
+    # argparse doesn't check a default against `choices`, so an invalid
+    # LOG_LEVEL in .env would otherwise crash logging.basicConfig().
+    level = os.environ.get("LOG_LEVEL", "INFO").strip().upper()
+    if level not in _LOG_LEVELS:
+        print(f"Ignoring invalid LOG_LEVEL={level!r} in .env (use one of {', '.join(_LOG_LEVELS)}) - using INFO.",
+              file=sys.stderr)
+        return "INFO"
+    return level
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -40,7 +55,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Ignore any saved conversation history and start clean.",
     )
-    parser.add_argument("--log-level", default="INFO")
+    parser.add_argument(
+        "--log-level",
+        # Case-insensitive (logging itself only accepts uppercase names, so
+        # "--log-level debug" used to crash at startup). Default comes from
+        # LOG_LEVEL in .env, else INFO.
+        type=str.upper,
+        choices=_LOG_LEVELS,
+        default=_default_log_level(),
+        help="How much to log. INFO (default): the useful diagnostics - LLM steps and tool results, "
+        "STT results and segment scores, speech-gate and capture lines, docking/charger events. "
+        "WARNING: only problems (quiet). ERROR: only failures. DEBUG: everything, incl. PyCozmo's "
+        "own chatter. Default can be set with LOG_LEVEL in .env.",
+    )
     return parser.parse_args(argv)
 
 
