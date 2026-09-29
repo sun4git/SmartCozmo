@@ -1413,6 +1413,26 @@ unprompted charger announcement) put it back the way they found it:
 | red | annoyed, angry, scared, sad, sleepy - or battery low/critical (with the battery icon on his face) |
 | off | idle only - waiting for the wake word |
 
+Gestures (`cozmo_brain/robot/gestures.py`) change the light too, and the
+color they end on stays until the next mood, gesture, or going idle. When a
+gesture plays alongside a reply (`say`'s `gesture`), its colors replace the
+reply's mood color.
+
+| Gesture | Light while it plays | Ends on |
+|---|---|---|
+| `dance` | blue → green → blue (flashing) | blue |
+| `cheer` | blue (excited) → green | green |
+| `wake_up` | red (sleepy) → blue (happy) | blue |
+| `sleep`, `sad_shuffle`, `flinch` | red (sleepy / sad / scared) | red |
+| `fist_pump` | blue (proud) | blue |
+| `peek`, `sneaky_creep`, `alert` | white (curious / suspicious / surprised) | white |
+| `shrug` | green (confused) | green |
+| `nod_yes`, `shake_no`, `spin` | no change | the color it started with |
+
+Idle fidgets (`peek`, `shrug`) put the light back afterwards, so an idle
+backpack stays off. `wake_up` plays when he connects; `--mode vad` then
+turns the light off, since he starts idle.
+
 **Don't `pip install openwakeword` directly** — on Linux it unconditionally
 declares a dependency on `tflite-runtime`, which has **no build for Python
 3.12 anywhere** (checked both PyPI and piwheels.org — the Raspberry Pi
