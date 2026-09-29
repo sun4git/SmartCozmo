@@ -1403,11 +1403,11 @@ plus red for a low battery:
 
 | Steady color | Moods / meaning |
 |---|---|
-| green | happy, proud, smug |
-| blue | excited |
-| white | curious (just heard the wake word), scared, surprised |
-| red | annoyed, angry - or battery low/critical |
-| off | neutral (idle), sad, sleepy, bored, confused, suspicious, embarrassed |
+| green | smug, embarrassed, bored, confused |
+| blue | excited, happy, proud |
+| white | curious (just heard the wake word), surprised, suspicious |
+| red | annoyed, angry, scared, sad, sleepy - or battery low/critical (with the battery icon on his face) |
+| off | neutral (idle) |
 
 **Don't `pip install openwakeword` directly** — on Linux it unconditionally
 declares a dependency on `tflite-runtime`, which has **no build for Python
