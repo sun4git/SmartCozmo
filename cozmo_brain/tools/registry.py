@@ -51,6 +51,7 @@ _CHARGER_RETURN_REASONS = {
     "disconnected": "lost the connection to Cozmo partway",
     "timeout": "took too long getting there and stopped",
     "not_on_charger": "drove back and reversed to dock, but the charger contacts aren't reading as docked - may be misaligned",
+    "jammed": "drove back, but got caught on the edge of the charger while reversing in (twisted off line) and stopped",
 }
 
 
@@ -227,6 +228,10 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
         if result.hazard:
             return ToolResult(
                 True, f"Only made partway back to the charger - {_HAZARD_MESSAGES[result.hazard]}.", extra=_ATTENTION
+            )
+        if result.reason == "jammed":
+            return ToolResult(
+                True, "Got caught on the edge of the charger while backing in and stopped - not docked.", extra=_ATTENTION
             )
         return ToolResult(True, "Backed onto the charger to dock.")
 

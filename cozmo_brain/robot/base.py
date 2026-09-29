@@ -40,9 +40,10 @@ class MoveResult:
     # Non-hazard reason a navigation move (return_to_pose()/
     # return_to_charger()) stopped short or never started - None when it
     # completed normally. One of: "picked_up", "pose_lost", "disconnected",
-    # "timeout", "no_charger_pose", "already_on_charger", "not_on_charger"
-    # (see tools/registry.py's charger_return_message() for what each means).
-    # Plain drive()/turn() never set this.
+    # "timeout", "no_charger_pose", "already_on_charger", "not_on_charger",
+    # "jammed" (see tools/registry.py's charger_return_message() for what
+    # each means). drive() sets only "jammed", and only with a heading hold
+    # (dock()); turn() never sets this.
     reason: str | None = None
 
     @property

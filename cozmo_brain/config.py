@@ -324,6 +324,17 @@ class Settings:
     # after Cozmo is physically seated (not set at 0.3s, set within ~40s).
     # Returns as soon as it appears; 10 is a guess, tune from the logged delay.
     charger_contact_wait_s: float = field(default_factory=lambda: _env_float("CHARGER_CONTACT_WAIT_S", 10.0))
+    # dock()'s reverse steers to hold the charger's heading: mm/s of tread
+    # speed difference per degree of heading error (0 = off, the old blind
+    # reverse). Confirmed on real hardware that a tread caught the charger
+    # entrance and twisted him -17deg; 2.0 is a first guess, not tuned.
+    charger_dock_heading_gain: float = field(default_factory=lambda: _env_float("CHARGER_DOCK_HEADING_GAIN", 2.0))
+    # Twisted further than this off the charger's heading during the dock
+    # reverse (despite steering) = treated as caught on the charger: stop.
+    charger_dock_jam_deg: float = field(default_factory=lambda: _env_float("CHARGER_DOCK_JAM_DEG", 10.0))
+    # After a missed dock, return_to_charger() drives back out to the staging
+    # point and tries again this many times.
+    charger_dock_retries: int = field(default_factory=lambda: _env_int("CHARGER_DOCK_RETRIES", 1))
 
     # --- Agentic loop / conversation ---
     max_tool_iterations: int = field(default_factory=lambda: _env_int("MAX_TOOL_ITERATIONS", 4))

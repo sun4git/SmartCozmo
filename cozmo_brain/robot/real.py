@@ -37,6 +37,7 @@ import logging
 import math
 import threading
 import time
+from typing import Callable
 
 import pycozmo
 
@@ -111,6 +112,11 @@ _HEADING_CORRECTION_PASSES = 4
 # Cap on the per-pass shortfall added back onto the next command (see
 # _correct_heading) - keeps one bad pose reading from causing a big spin.
 _MAX_TURN_SHORTFALL_DEG = 15.0
+
+# drive()'s heading hold may slow/speed each tread by at most this fraction
+# of the drive speed - enough to steer, never enough to stop or reverse a
+# tread. First guess, not tuned on hardware.
+_HEADING_HOLD_MAX_FRACTION = 0.4
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -342,7 +348,11 @@ class PyCozmoRobot(RobotBackend):
         self._client.conn.send(pycozmo.protocol_encoder.EnableStopOnCliff(enable=enabled))
 
     def _sleep_unless_cliff(
-        self, duration: float, ignore_cliff: bool = False, stop_on_charger: bool = False
+        self,
+        duration: float,
+        ignore_cliff: bool = False,
+        stop_on_charger: bool = False,
+        on_poll: Callable[[], bool] | None = None,
     ) -> str | None:
         """Sleeps for `duration` like a plain time.sleep(), but polls
         CLIFF_DETECTED/IS_FALLING every _CLIFF_POLL_S and returns early with
@@ -362,7 +372,10 @@ class PyCozmoRobot(RobotBackend):
         and only when the drive started while still on the charger.
 
         `stop_on_charger` returns early (None - not a hazard) the moment
-        IS_ON_CHARGER reads true - dock()'s stop-on-contact, see there."""
+        IS_ON_CHARGER reads true - dock()'s stop-on-contact, see there.
+
+        `on_poll` runs every poll (drive()'s heading hold); returning True
+        ends the sleep early (None - the caller knows why)."""
         deadline = time.monotonic() + duration
         while True:
             remaining = deadline - time.monotonic()
@@ -378,6 +391,8 @@ class PyCozmoRobot(RobotBackend):
             if not ignore_cliff and status & pycozmo.RobotStatusFlag.CLIFF_DETECTED:
                 logger.warning("Cliff detected mid-drive - stopping early.")
                 return "cliff"
+            if on_poll is not None and on_poll():
+                return None
             time.sleep(min(_CLIFF_POLL_S, remaining))
 
     def _react_to_hazard(self, hazard: str, backup_away_from_sign: float = 1.0) -> None:
@@ -467,7 +482,13 @@ class PyCozmoRobot(RobotBackend):
     # completely unrelated next).
 
     def drive(
-        self, distance_mm: float, speed_mmps: float, *, suppress_cliff: bool = False, stop_on_charger: bool = False
+        self,
+        distance_mm: float,
+        speed_mmps: float,
+        *,
+        suppress_cliff: bool = False,
+        stop_on_charger: bool = False,
+        hold_heading_deg: float | None = None,
     ) -> MoveResult:
         # Blocked only while docked AND the battery still needs it (see
         # _must_stay_on_charger()) - once full, or once above
@@ -518,9 +539,37 @@ class PyCozmoRobot(RobotBackend):
             signed_speed = speed if distance_mm >= 0 else -speed
             duration = abs(distance_mm) / speed
 
+            jammed = False
+
+            def hold_heading() -> bool:
+                # Steer against heading drift using the pose heading (gyro-
+                # based - it tracked reality even when the wheels slipped,
+                # unlike position). Rotation from a wheel difference doesn't
+                # depend on travel direction: speeding the right tread up
+                # relative to the left turns counterclockwise either way.
+                nonlocal jammed
+                pose = self.get_pose()
+                if pose is None:
+                    return False
+                error = _shortest_turn(hold_heading_deg - pose.heading_deg)
+                if abs(error) > self._settings.charger_dock_jam_deg:
+                    logger.info(
+                        "Heading twisted %+.1fdeg off %.1fdeg despite steering - a tread is probably caught; stopping.",
+                        -error, hold_heading_deg,
+                    )
+                    jammed = True
+                    return True
+                max_c = speed * _HEADING_HOLD_MAX_FRACTION
+                c = _clamp(error * self._settings.charger_dock_heading_gain, -max_c, max_c)
+                cli.drive_wheels(lwheel_speed=signed_speed - c, rwheel_speed=signed_speed + c)
+                return False
+
             self._suppress_taps(duration)
             cli.drive_wheels(lwheel_speed=signed_speed, rwheel_speed=signed_speed)
-            hazard = self._sleep_unless_cliff(duration, ignore_cliff=ignore_cliff, stop_on_charger=stop_on_charger)
+            hazard = self._sleep_unless_cliff(
+                duration, ignore_cliff=ignore_cliff, stop_on_charger=stop_on_charger,
+                on_poll=hold_heading if hold_heading_deg is not None else None,
+            )
             cli.stop_all_motors()
             self._suppress_taps(0.0)  # grace measured from the actual stop
 
@@ -528,7 +577,7 @@ class PyCozmoRobot(RobotBackend):
                 self._set_cliff_protection(enabled=True)
             if hazard:
                 self._react_to_hazard(hazard, backup_away_from_sign=signed_speed)
-            return MoveResult(moved=True, hazard=hazard)
+            return MoveResult(moved=True, hazard=hazard, reason="jammed" if jammed and not hazard else None)
 
     def dock(self) -> MoveResult:
         if self.is_on_charger():
@@ -549,8 +598,18 @@ class PyCozmoRobot(RobotBackend):
         # OVERSHOOT/speed seconds, then the caller reports the miss.
         distance_mm = -(abs(self._settings.charger_dock_distance_mm) + abs(self._settings.charger_dock_overshoot_mm))
         speed = self._settings.charger_dock_speed_mmps
-        result = self.drive(distance_mm, speed, suppress_cliff=True, stop_on_charger=True)
-        if result.moved and not result.hazard:
+        # Hold a straight line in, and stop if a tread catches. Confirmed on
+        # real hardware (2026-09-29): lined up within ~1mm and 2deg, his
+        # left tread caught the charger entrance and the open-loop reverse
+        # twisted him -17deg, stuck at the edge. Hold the recorded docked
+        # heading when known (that's the line into the charger), else the
+        # heading he starts with. CHARGER_DOCK_HEADING_GAIN=0 turns it off.
+        hold = self._charger_staging_pose() or self.get_pose()
+        hold_heading = hold.heading_deg if hold is not None and self._settings.charger_dock_heading_gain > 0 else None
+        result = self.drive(
+            distance_mm, speed, suppress_cliff=True, stop_on_charger=True, hold_heading_deg=hold_heading
+        )
+        if result.moved and not result.hazard and result.reason != "jammed":
             self._wait_for_charger_contacts()
         final = self.get_pose()
         if final is not None:
@@ -880,27 +939,43 @@ class PyCozmoRobot(RobotBackend):
             if staging is None:
                 return MoveResult(moved=False, reason="no_charger_pose")
 
-            logger.info("Returning to charger via staging point x=%.1f y=%.1f.", staging.x_mm, staging.y_mm)
-            nav = self.return_to_pose(staging)
-            if not nav.completed:
-                return nav
-            # A pickup right as navigation finished would make dock()'s
-            # blind reverse meaningless - re-check before committing to it.
-            if self._charger_staging_pose() is None:
-                return MoveResult(moved=True, reason="pose_lost")
+            attempts = 1 + max(0, self._settings.charger_dock_retries)
+            for attempt in range(1, attempts + 1):
+                staging = self._charger_staging_pose()
+                if staging is None:
+                    return MoveResult(moved=True, reason="pose_lost")
+                if attempt == 1:
+                    logger.info("Returning to charger via staging point x=%.1f y=%.1f.", staging.x_mm, staging.y_mm)
+                else:
+                    # Drive back out and line up again. The position readback
+                    # may be off by the failed reverse's slip (the treads kept
+                    # counting while stuck), but heading is gyro-based, and
+                    # along-axis error is covered by stop-on-contact +
+                    # overshoot. Sideways error from slip isn't - unverified.
+                    logger.info(
+                        "Dock attempt %d of %d: driving back out to the staging point to line up again.",
+                        attempt, attempts,
+                    )
+                nav = self.return_to_pose(staging)
+                if not nav.completed:
+                    return nav
+                # A pickup right as navigation finished would make dock()'s
+                # reverse meaningless - re-check before committing to it.
+                if self._charger_staging_pose() is None:
+                    return MoveResult(moved=True, reason="pose_lost")
 
-            charger = self._charger_pose
-            docked = self.dock()
-            self._log_dock_offset(charger)
-            if docked.hazard:
-                return docked
-            time.sleep(_POSE_SETTLE_S)
-            if not self.is_on_charger():
-                # Drove the full sequence, but the charger contacts don't
-                # read as docked - misaligned, or the staging point was off.
-                # Reported honestly rather than as a success.
-                return MoveResult(moved=True, reason="not_on_charger")
-            return MoveResult(moved=True)
+                charger = self._charger_pose
+                docked = self.dock()
+                self._log_dock_offset(charger)
+                if docked.hazard:
+                    return docked
+                time.sleep(_POSE_SETTLE_S)
+                if self.is_on_charger():
+                    return MoveResult(moved=True)
+            # Drove the full sequence, but the charger contacts don't read as
+            # docked - misaligned, or the staging point was off. Reported
+            # honestly rather than as a success.
+            return MoveResult(moved=True, reason="jammed" if docked.reason == "jammed" else "not_on_charger")
 
     def turn(self, angle_degrees: float) -> MoveResult:
         turn_speed = self._settings.turn_speed_mmps
