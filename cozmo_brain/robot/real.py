@@ -100,6 +100,18 @@ _PATHING_CLEAR_TIMEOUT_S = 5.0
 # meaningless, and "facing" it could mean a pointless large turn.
 _MIN_NAV_DISTANCE_MM = 10.0
 
+# return_to_pose()'s final heading correction re-reads the pose after each
+# turn and tries again while the error is above this, up to the pass limit.
+# Confirmed on real hardware (2026-09-29): a commanded -9.5deg correction
+# moved him only ~0.9deg - turn() is open-loop timing, and a short pulse is
+# mostly acceleration ramp. The 8.6deg left over became a ~37mm sideways miss
+# after dock()'s 200mm blind reverse.
+_HEADING_TOLERANCE_DEG = 2.0
+_HEADING_CORRECTION_PASSES = 4
+# Cap on the per-pass shortfall added back onto the next command (see
+# _correct_heading) - keeps one bad pose reading from causing a big spin.
+_MAX_TURN_SHORTFALL_DEG = 15.0
+
 
 def _clamp(value: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, value))
@@ -785,10 +797,9 @@ class PyCozmoRobot(RobotBackend):
                 current.x_mm, current.y_mm, current.heading_deg,
                 target.x_mm, target.y_mm, target.heading_deg, heading_error,
             )
-            turn_result = self.turn(heading_error)
-            if turn_result.hazard:
-                return MoveResult(moved=True, hazard=turn_result.hazard)
-            time.sleep(_POSE_SETTLE_S)
+            aborted = self._correct_heading(target.heading_deg)
+            if aborted is not None:
+                return aborted
 
             final = self.get_pose()
             if final is not None:
@@ -797,6 +808,50 @@ class PyCozmoRobot(RobotBackend):
                     final.x_mm, final.y_mm, final.heading_deg,
                 )
             return MoveResult(moved=True)
+
+    def _correct_heading(self, target_heading_deg: float) -> MoveResult | None:
+        """Turn until the pose readback is within _HEADING_TOLERANCE_DEG of
+        the target heading (closed loop on cli.pose, which has tracked
+        reality correctly on hardware). Short turns under-rotate, apparently
+        a fixed loss to the acceleration ramp, so each pass adds the degrees
+        the previous pass fell short by onto the next command. Returns a
+        MoveResult only to abort (hazard/disconnect), else None - running
+        out of passes is logged, not an abort, since dock() may still seat."""
+        shortfall = 0.0
+        for attempt in range(1, _HEADING_CORRECTION_PASSES + 1):
+            current = self.get_pose()
+            if current is None:
+                return MoveResult(moved=True, reason="disconnected")
+            error = _shortest_turn(target_heading_deg - current.heading_deg)
+            if abs(error) <= _HEADING_TOLERANCE_DEG:
+                if attempt > 1:
+                    logger.info("Heading within %.1fdeg of target after %d correction turn(s).", abs(error), attempt - 1)
+                return None
+            command = error + math.copysign(shortfall, error)
+            if attempt > 1:
+                logger.info(
+                    "Heading still %+.1fdeg off - correction pass %d: turning %+.1fdeg (adds %.1fdeg the last turn fell short).",
+                    error, attempt, command, shortfall,
+                )
+            turn_result = self.turn(command)
+            if turn_result.hazard:
+                return MoveResult(moved=True, hazard=turn_result.hazard)
+            time.sleep(_POSE_SETTLE_S)
+            after = self.get_pose()
+            if after is None:
+                return MoveResult(moved=True, reason="disconnected")
+            achieved = _shortest_turn(after.heading_deg - current.heading_deg)
+            # Only same-direction progress counts; an overshoot or a wrong-
+            # way reading resets the compensation rather than growing it.
+            lost = abs(command) - achieved * math.copysign(1.0, command)
+            shortfall = _clamp(lost, 0.0, _MAX_TURN_SHORTFALL_DEG)
+        final = self.get_pose()
+        if final is not None:
+            logger.info(
+                "Heading still %+.1fdeg off after %d correction passes - docking anyway.",
+                _shortest_turn(target_heading_deg - final.heading_deg), _HEADING_CORRECTION_PASSES,
+            )
+        return None
 
     def _log_dock_offset(self, charger: Pose2D | None) -> None:
         """Diagnostic only: where dock() actually ended up relative to the

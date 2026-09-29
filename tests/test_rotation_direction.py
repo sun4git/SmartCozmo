@@ -48,6 +48,39 @@ cli.calls.clear()
 r.return_to_pose(Pose2D(0.0, 0.0, 0.0))
 check(f"within 10mm: no go_to_pose, just the heading correction ({turns})", not [c for c in cli.calls if c[0] == "go_to_pose"] and len(turns) == 1 and abs(turns[0] + 30) < 0.5)
 
+# Short turns under-rotate (hardware 2026-09-29: -9.5deg commanded -> ~0.9deg
+# moved). Model a fixed loss of 8.6deg per turn: closed loop must still land.
+def lossy(r, cli, lost_deg=8.6):
+    exact = r.spin_wheels_for
+    def spin(seconds, speed):
+        before = cli.pose.rotation.angle_z.degrees
+        res = exact(seconds, speed)
+        moved = cli.pose.rotation.angle_z.degrees - before
+        kept = math.copysign(max(0.0, abs(moved) - lost_deg), moved)
+        cli.set_pose(cli.pose.position.x, cli.pose.position.y, before + kept)
+        return res
+    r.spin_wheels_for = spin
+
+r, cli = make_robot(); cli.set_pose(145.9, -1.5, 9.5)
+lossy(r, cli)
+turns = turns_commanded(r)
+records.clear()
+res = r.return_to_pose(Pose2D(150.0, -0.2, -0.1))
+final = r.get_pose()
+check(f"lossy short turn: extra correction passes land within 2deg (final {final.heading_deg:.1f}, turns {['%.1f' % t for t in turns]})",
+      res.completed and abs(final.heading_deg + 0.1) <= 2.0 and 1 < len(turns) <= 4)
+check("correction passes logged", any("correction pass 2" in m for m in records))
+
+# Turn that never moves at all: bounded passes, no runaway, logs and carries on
+r, cli = make_robot(); cli.set_pose(0.0, 0.0, 30.0)
+lossy(r, cli, lost_deg=1000.0)
+turns = turns_commanded(r)
+records.clear()
+res = r.return_to_pose(Pose2D(0.0, 0.0, 0.0))
+check(f"stuck turn: at most 4 passes, each capped (turns {['%.1f' % t for t in turns]})",
+      len(turns) == 4 and all(abs(t) <= 30 + 15 + 0.01 for t in turns) and res.completed)
+check("gave-up logged", any("correction passes - docking anyway" in m for m in records))
+
 # Tracker unwraps across the +/-180 seam
 t = _RotationTracker(0.0)
 for h in (90, 170, -170, -90):
