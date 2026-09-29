@@ -115,6 +115,9 @@ class SimulatedRobot(RobotBackend):
     def set_backpack_light(self, color: str) -> None:
         logger.info("[sim] \U0001f4a1 backpack light -> %s", color)
 
+    def set_listening_indicator(self, listening: bool) -> None:
+        logger.info("[sim] \U0001f4a1 backpack light %s", "blinking (listening)" if listening else "steady")
+
     def show_expression(self, name: str, duration: float | None = None) -> None:
         if name not in _KNOWN_EXPRESSIONS:
             raise ValueError(f"Unknown expression '{name}'. Known: {', '.join(sorted(_KNOWN_EXPRESSIONS))}")

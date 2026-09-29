@@ -37,6 +37,13 @@ from cozmo_brain.robot.base import RobotBackend
 logger = logging.getLogger(__name__)
 
 
+def _set_listening_light_safely(robot: RobotBackend, listening: bool) -> None:
+    try:
+        robot.set_listening_indicator(listening)
+    except Exception as e:  # noqa: BLE001 - a light hiccup shouldn't end the session
+        logger.warning("Could not %s the listening light: %s", "start" if listening else "stop", e)
+
+
 def _apply_mood_safely(robot: RobotBackend, mood: str) -> None:
     try:
         robot.apply_mood(mood)
@@ -110,6 +117,8 @@ def _run_listening_window(engine: CozmoEngine, robot: RobotBackend, speech: Spee
         # for it to finish, then simply listen again with the same window.
         engine.settle_followup()
         engine.mic_active = True
+        # Blinking backpack = recording right now; steady/off = not.
+        _set_listening_light_safely(robot, True)
         try:
             got_speech = record_until_silence(
                 settings.raw_input_wav,
@@ -124,6 +133,7 @@ def _run_listening_window(engine: CozmoEngine, robot: RobotBackend, speech: Spee
             )
         finally:
             engine.mic_active = False
+            _set_listening_light_safely(robot, False)
         if not got_speech and engine.settle_followup():
             print("(Cozmo continued his reply - listening again)")
             continue

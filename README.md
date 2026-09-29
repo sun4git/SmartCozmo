@@ -1385,6 +1385,30 @@ listening; going quiet past the follow-up window switches him back to
 `say`/`gesture` naturally takes over the face/lights as part of its normal
 response — no separate reset needed there.
 
+**Can he hear me? Watch the backpack light:**
+
+| Backpack | Meaning |
+|---|---|
+| **Blinking** (any color) | The mic is recording you right now - talk. |
+| Steady color, or off | Not recording: thinking/speaking a reply, or idle and waiting for the wake word. |
+
+While recording, the light blinks in whatever color is currently up (white
+if it was off), so a mood or the red low-battery warning arriving mid-
+recording still blinks. Once recording stops it goes back to steady. The
+blink is done by the firmware (`LightState` on/off frames, ~0.5s each
+assuming ~30fps frames - unverified on hardware; see `robot/real.py`).
+
+Steady colors come from the reply's mood (`cozmo_brain/robot/moods.py`),
+plus red for a low battery:
+
+| Steady color | Moods / meaning |
+|---|---|
+| green | happy, proud, smug |
+| blue | excited |
+| white | curious (just heard the wake word), scared, surprised |
+| red | annoyed, angry - or battery low/critical |
+| off | neutral (idle), sad, sleepy, bored, confused, suspicious, embarrassed |
+
 **Don't `pip install openwakeword` directly** — on Linux it unconditionally
 declares a dependency on `tflite-runtime`, which has **no build for Python
 3.12 anywhere** (checked both PyPI and piwheels.org — the Raspberry Pi

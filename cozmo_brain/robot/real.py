@@ -48,12 +48,20 @@ from cozmo_brain.robot.base import MoveResult, Pose2D, RobotBackend
 logger = logging.getLogger(__name__)
 
 _LIGHTS = {
-    "green": pycozmo.lights.green_light,
-    "red": pycozmo.lights.red_light,
-    "blue": pycozmo.lights.blue_light,
-    "white": pycozmo.lights.white_light,
-    "off": pycozmo.lights.off_light,
+    "green": pycozmo.lights.green,
+    "red": pycozmo.lights.red,
+    "blue": pycozmo.lights.blue,
+    "white": pycozmo.lights.white,
+    "off": pycozmo.lights.off,
 }
+
+# Listening indicator: the backpack blinks in its current color (white if
+# it's off) while the mic is recording, so "can he hear me" reads off the
+# robot no matter which mood or battery color is up. The firmware does the
+# blinking itself (LightState on/off frames). Frame length is assumed to be
+# ~30fps like Anki's SDK - so ~0.5s on / 0.5s off - unverified on hardware.
+_BLINK_ON_FRAMES = 15
+_BLINK_OFF_FRAMES = 15
 
 _MIN_HEAD_DEG = pycozmo.MIN_HEAD_ANGLE.degrees
 _MAX_HEAD_DEG = pycozmo.MAX_HEAD_ANGLE.degrees
@@ -159,6 +167,12 @@ class PyCozmoRobot(RobotBackend):
         self._settings = settings
         self._cli: pycozmo.Client | None = None
         self._animations_loaded = False
+        # Last requested backpack color + whether the listening blink is on;
+        # set_backpack_light() is called from several threads (moods,
+        # gestures, battery monitor), so both change under _light_lock.
+        self._light_color = "off"
+        self._listening_light = False
+        self._light_lock = threading.Lock()
         self._last_seen: float = 0.0
         self._accel_baseline: float | None = None
         self._tap_event = threading.Event()
@@ -1044,9 +1058,33 @@ class PyCozmoRobot(RobotBackend):
         time.sleep(duration)
 
     def set_backpack_light(self, color: str) -> None:
-        light = _LIGHTS.get(color.lower())
-        if light is None:
+        color = color.lower()
+        if color not in _LIGHTS:
             raise ValueError(f"Unknown light color '{color}'. Known colors: {', '.join(_LIGHTS)}")
+        with self._light_lock:
+            self._light_color = color
+            self._send_backpack_light()
+
+    def set_listening_indicator(self, listening: bool) -> None:
+        with self._light_lock:
+            if listening == self._listening_light:
+                return
+            self._listening_light = listening
+            self._send_backpack_light()
+
+    def _send_backpack_light(self) -> None:
+        """Caller holds _light_lock. Solid current color, or - while
+        listening - that color blinking (white when the color is off, so
+        the blink is always visible)."""
+        if self._listening_light:
+            color = _LIGHTS["white" if self._light_color == "off" else self._light_color].to_int16()
+            light = pycozmo.protocol_encoder.LightState(
+                on_color=color, off_color=pycozmo.lights.off.to_int16(),
+                on_frames=_BLINK_ON_FRAMES, off_frames=_BLINK_OFF_FRAMES,
+            )
+        else:
+            color = _LIGHTS[self._light_color].to_int16()
+            light = pycozmo.protocol_encoder.LightState(on_color=color, off_color=color)
         self._client.set_all_backpack_lights(light)
 
     def show_expression(self, name: str, duration: float | None = None) -> None:

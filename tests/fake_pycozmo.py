@@ -49,6 +49,9 @@ class FakeCli:
     def set_lift_height(self, h, duration=0.4):
         self.calls.append(("lift", h))
 
+    def set_all_backpack_lights(self, light):
+        self.calls.append(("lights", light.on_color, light.off_color, light.on_frames, light.off_frames))
+
     def stop_all_motors(self):
         self.calls.append(("stop",))
 

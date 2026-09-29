@@ -169,6 +169,11 @@ class RobotBackend(abc.ABC):
     def set_backpack_light(self, color: str) -> None:
         """color is one of: green, red, blue, white, off."""
 
+    def set_listening_indicator(self, listening: bool) -> None:
+        """Blink the backpack light while the mic is recording (see real.py).
+        Colors set meanwhile still apply - they blink until this is turned
+        off, then stay solid. No-op for backends without real lights."""
+
     @abc.abstractmethod
     def show_expression(self, name: str, duration: float | None = None) -> None:
         """name is a pycozmo.expressions.expressions class name, e.g. 'Happiness'."""
