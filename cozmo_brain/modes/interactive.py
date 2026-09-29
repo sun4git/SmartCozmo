@@ -8,6 +8,8 @@ import logging
 import requests
 
 from cozmo_brain.audio.recorder import record_fixed
+from cozmo_brain.audio.speech_gate import clip_has_speech
+from cozmo_brain.audio.speech_gate import warm_up as speech_gate_warm_up
 from cozmo_brain.config import Settings
 from cozmo_brain.engine import CozmoEngine
 from cozmo_brain.llm.speech_client import SpeechClient
@@ -18,12 +20,18 @@ logger = logging.getLogger(__name__)
 
 def run(engine: CozmoEngine, speech: SpeechClient, settings: Settings) -> None:
     print("Press Enter to talk, or type 'quit' to exit.\n")
+    speech_gate_warm_up(settings)
     while True:
         cmd = input("[Enter=talk, quit=exit] > ").strip().lower()
         if cmd == "quit":
             break
 
         record_fixed(settings.raw_input_wav, settings.record_seconds, settings.record_device)
+        # A fixed-length recording is sent even if nothing was said - exactly
+        # what Whisper hallucinates on. Same neural check as --mode vad.
+        if not clip_has_speech(settings.raw_input_wav, settings):
+            print("(heard no speech, try again)\n")
+            continue
         try:
             text = speech.transcribe(settings.raw_input_wav)
         except requests.RequestException as e:

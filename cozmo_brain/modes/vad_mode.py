@@ -24,6 +24,8 @@ import time
 
 import requests
 
+from cozmo_brain.audio.speech_gate import clip_has_speech
+from cozmo_brain.audio.speech_gate import warm_up as speech_gate_warm_up
 from cozmo_brain.audio.vad import record_until_silence
 from cozmo_brain.audio.wakeword import wait_for_wake_word
 from cozmo_brain.config import Settings
@@ -74,6 +76,7 @@ def run(engine: CozmoEngine, robot: RobotBackend, speech: SpeechClient, settings
         "Press Ctrl+C to exit.\n"
     )
     engine.log_steps_live = True
+    speech_gate_warm_up(settings)
     while True:
         _wait_for_wake_word_or_tap(robot, settings)
         print("Wake word or tap heard - listening...")
@@ -128,6 +131,13 @@ def _run_listening_window(engine: CozmoEngine, robot: RobotBackend, speech: Spee
             print("(no follow-up heard - wake word needed again)\n")
             _apply_mood_safely(robot, "neutral")
             return
+
+        # Neural speech check before spending an STT call on the clip - loud,
+        # speech-shaped noise can pass the loudness/webrtcvad gate above, and
+        # Whisper would invent text for it (audio/speech_gate.py).
+        if not clip_has_speech(settings.raw_input_wav, settings):
+            print("(heard a sound, but no speech in it - not sent to speech-to-text, listening again)")
+            continue
 
         stt_started = time.monotonic()
         try:

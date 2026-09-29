@@ -140,6 +140,16 @@ class Settings:
     stt_max_compression_ratio: float = field(
         default_factory=lambda: _env_float("STT_MAX_COMPRESSION_RATIO", 2.4)
     )
+    # Neural speech check on every captured clip before it's sent to any STT
+    # provider (audio/speech_gate.py - Silero VAD, the model bundled in
+    # faster-whisper; skipped if faster-whisper isn't installed). A clip
+    # with less than SPEECH_GATE_MIN_SPEECH_MS of detected speech isn't
+    # sent. Measured with the real model: noise 0.00-0.03s, one-word replies
+    # 0.45-0.54s - 150ms leaves wide margins both ways. SPEECH_GATE_THRESHOLD
+    # is Silero's own per-frame speech probability cutoff (its default 0.5).
+    speech_gate_enabled: bool = field(default_factory=lambda: _env_bool("SPEECH_GATE_ENABLED", True))
+    speech_gate_min_speech_ms: int = field(default_factory=lambda: _env_int("SPEECH_GATE_MIN_SPEECH_MS", 150))
+    speech_gate_threshold: float = field(default_factory=lambda: _env_float("SPEECH_GATE_THRESHOLD", 0.5))
     openai_tts_model: str = field(default_factory=lambda: _env_str("OPENAI_TTS_MODEL", "tts-1"))
     openai_tts_voice: str = field(default_factory=lambda: _env_str("OPENAI_TTS_VOICE", "alloy"))
 
