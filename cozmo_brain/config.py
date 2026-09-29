@@ -330,16 +330,18 @@ class Settings:
     # What to do with the LLM call that follows a reply ending in a clean
     # `say` (the model usually answers "done" - see engine.py's
     # _turn_is_done()):
-    #   sync  - wait for it before listening again (default: safe with every
-    #           model, costs one round trip of mic-closed time per reply)
-    #   async - reopen the mic right away and make the call in the
-    #           background; if the model continues (more actions/speech), the
-    #           recording is paused while that runs (--mode vad only; other
-    #           modes treat it as sync)
+    #   async - (default, chosen by the user 2026-09-29) reopen the mic
+    #           right away and make the call in the background; if the model
+    #           continues (more actions/speech), the recording is paused
+    #           while that runs (--mode vad only; other modes treat it as
+    #           sync)
+    #   sync  - wait for it before listening again: the conservative
+    #           fallback if async ever misbehaves on hardware - costs one
+    #           round trip of mic-closed time per reply
     #   skip  - don't make it at all. Fastest, but confirmed live: a model
     #           that says "sure!" alone and acts in its *next* step
     #           (openai/gpt-oss-120b on Groq) loses the action entirely.
-    final_llm_call: str = field(default_factory=lambda: _env_str("FINAL_LLM_CALL", "sync").lower())
+    final_llm_call: str = field(default_factory=lambda: _env_str("FINAL_LLM_CALL", "async").lower())
     conversation_max_messages: int = field(default_factory=lambda: _env_int("CONVERSATION_MAX_MESSAGES", 40))
     conversation_history_path: str = field(
         default_factory=lambda: _env_str("CONVERSATION_HISTORY_PATH", "conversation_history.json")

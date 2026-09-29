@@ -557,8 +557,8 @@ happens to it:
 
 | Setting | That last call | Mic reopens | Catches a model that acts *after* its `say`? |
 |---|---|---|---|
-| `sync` (default) | made, and waited for | after it returns | ✅ |
-| `async` | made in the background | right after the `say` | ✅ (pauses the mic while it acts) |
+| `async` (default) | made in the background | right after the `say` | ✅ (pauses the mic while it acts) |
+| `sync` | made, and waited for | after it returns | ✅ |
 | `skip` | not made | right after the `say` | ❌ the action is lost |
 
 **When a turn is allowed to stop early at all.** This is the same rule for
@@ -628,15 +628,15 @@ one, with how long the call took. Unless marked `(background)`, that's time
 the mic was closed:
 
 ```
-# sync (default) - a plain reply
+# async (default) - a plain reply
 LLM step 1 (1.10s): say
 tool say (11.2s): OK: Said (mood=proud) while performing 'nod_yes' ...: I feel POWERFUL!
-LLM step 2 (0.90s): no tool calls - turn done        <- mic closed for this
+LLM step 2 (background) (0.90s): no tool calls - turn done   <- listening meanwhile
 
-# async - same reply
+# sync - same reply
 LLM step 1 (1.10s): say
 tool say (11.2s): OK: Said ...
-LLM step 2 (background) (0.90s): no tool calls - turn done   <- listening meanwhile
+LLM step 2 (0.90s): no tool calls - turn done        <- mic closed for this
 
 # async - a model that says first, then acts
 LLM step 1 (1.10s): say
@@ -1576,7 +1576,7 @@ annotated list (it's the source of truth). The essentials:
 | `AUTO_RETURN_TO_CHARGER_ENABLED` | Low-battery return-to-charger: offer at `BATTERY_LOW_VOLTAGE`, go on its own at `BATTERY_CRITICAL_VOLTAGE`, ask for help if the charger location isn't known (default `true`). |
 | `RETURN_TO_POSE_TIMEOUT_S` | Upper bound on one `go_to_pose()` navigation leg before it's aborted (pycozmo's own has no timeout). |
 | `MAX_TOOL_ITERATIONS` | Cap on LLM↔tool round-trips per user turn. |
-| `FINAL_LLM_CALL` | The LLM call after a reply ending in a clean `say` (usually just "done"): `sync` (default) waits for it before listening again; `async` reopens the mic right away and makes it in the background, pausing the recording if the model continues (`--mode vad` only); `skip` drops it (fastest, but a model that says "sure!" alone and acts in its *next* step, confirmed live with Groq's `openai/gpt-oss-120b`, loses the action). Early end only happens when every tool in the batch is a pure action (`Tool.safe_to_end_turn`, opt-in per tool, so new tools default to asking again) and nothing needs the model's attention (errors, hazards, refused moves, photos). A turn never returns until background gestures finish, so the mic doesn't reopen mid-`spin`. Worked examples: [How a turn ends](#how-a-turn-ends-final_llm_call). |
+| `FINAL_LLM_CALL` | The LLM call after a reply ending in a clean `say` (usually just "done"): `async` (default) reopens the mic right away and makes it in the background, pausing the recording if the model continues (`--mode vad` only; other modes behave as `sync`); `sync` waits for it before listening again (the fallback if `async` misbehaves); `skip` drops it (fastest, but a model that says "sure!" alone and acts in its *next* step, confirmed live with Groq's `openai/gpt-oss-120b`, loses the action). Early end only happens when every tool in the batch is a pure action (`Tool.safe_to_end_turn`, opt-in per tool, so new tools default to asking again) and nothing needs the model's attention (errors, hazards, refused moves, photos). A turn never returns until background gestures finish, so the mic doesn't reopen mid-`spin`. Worked examples: [How a turn ends](#how-a-turn-ends-final_llm_call). |
 | `CONVERSATION_MAX_MESSAGES` / `CONVERSATION_HISTORY_PATH` | Memory size and persistence path. |
 | `VAD_AGGRESSIVENESS` / `VAD_SILENCE_MS` / `VAD_MAX_UTTERANCE_S` | Hands-free listening tuning. |
 | `VAD_FOLLOWUP_TIMEOUT_S` | How long a conversation stays open after a reply before the wake word is needed again. |
@@ -2555,7 +2555,7 @@ Still open, roughly in priority order:
      listening resumes in the same window. The follow-up keeps holding
      `turn_lock`, so the next turn, a charger return, or a fidget waits
      for it, and history stays in order. Other modes treat `async` as
-     `sync`. **Default is `sync`** until `async` is confirmed on real
+     `sync`. **Default is now `async`** (switched 2026-09-29 at the user's request; it was `sync` until then). It's still to be confirmed on real
      hardware. **Verified:** scripted (early return, lock hand-off, pause
      and resume in a simulated listening window, turn ordering, hazards
      still consulted synchronously, follow-up failure releases the lock)
