@@ -286,7 +286,9 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
                 "WHILE talking, e.g. dancing while cheering — this is the only way to guarantee "
                 "the gesture and the speech actually happen at the same time, since calling the "
                 "separate `gesture` tool before or after `say` only ever runs one before the "
-                "other, never together."
+                "other, never together. This is Cozmo's only voice: plain text outside a tool "
+                "call is never heard. Put everything you want to say in this one call, and "
+                "after your final `say`, reply with no text."
             ),
             parameters={
                 "type": "object",
