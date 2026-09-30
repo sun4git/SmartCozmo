@@ -36,6 +36,11 @@ from cozmo_brain.robot.base import RobotBackend
 
 logger = logging.getLogger(__name__)
 
+# How long to wait before restarting the wake-word listener after it stops
+# without hearing anything (see _wait_for_wake_word_or_tap). Long enough not
+# to spin on a mic that's off, short enough to pick it up soon once it's on.
+_MIC_RETRY_S = 5.0
+
 
 def _set_listening_light_safely(robot: RobotBackend, listening: bool) -> None:
     try:
@@ -63,30 +68,54 @@ def _apply_mood_safely(robot: RobotBackend, mood: str) -> None:
         logger.warning("Could not show '%s' mood: %s", mood, e)
 
 
-def _wait_for_wake_word_or_tap(robot: RobotBackend, settings: Settings) -> None:
+def _wait_for_wake_word_or_tap(robot: RobotBackend, settings: Settings) -> str:
     """Blocks until either the wake word is heard or Cozmo is tapped,
-    whichever comes first. Races the two on separate threads (wake-word
-    listening owns a mic subprocess + model inference, so it's given a
-    cancel signal rather than just abandoned once a tap wins)."""
-    stop_wake_word = threading.Event()
-    wake_word_done = threading.Event()
+    whichever comes first, and returns which one ("wake word"/"tap").
+    Races the two on separate threads (wake-word listening owns a mic
+    subprocess + model inference, so it's given a cancel signal rather than
+    just abandoned once a tap wins).
 
-    def _listen_for_wake_word() -> None:
-        wait_for_wake_word(
-            settings.record_device, settings.wake_word_model, settings.wake_word_threshold, stop_wake_word
-        )
-        wake_word_done.set()
+    If the wake-word listener stops without hearing anything (mic stream
+    ended - e.g. the Bluetooth mic is off - or the listener crashed), that
+    is not a wake: taps keep working, and the listener is restarted after
+    _MIC_RETRY_S. Raised directly: with the mic off, this used to count
+    as a wake and loop, looking like fake wakes."""
+    while True:
+        stop_wake_word = threading.Event()
+        wake_word_done = threading.Event()
+        heard: list[bool] = []
 
-    thread = threading.Thread(target=_listen_for_wake_word, daemon=True)
-    thread.start()
+        def _listen_for_wake_word() -> None:
+            try:
+                heard.append(wait_for_wake_word(
+                    settings.record_device, settings.wake_word_model, settings.wake_word_threshold, stop_wake_word
+                ))
+            except Exception:  # noqa: BLE001 - logged; taps keep working and it's retried below
+                logger.exception("Wake-word listener crashed.")
+            finally:
+                wake_word_done.set()
 
-    while not wake_word_done.is_set():
-        if robot.wait_for_tap(timeout=0.2):
-            stop_wake_word.set()
-            thread.join(timeout=2)
-            return
+        thread = threading.Thread(target=_listen_for_wake_word, daemon=True)
+        thread.start()
 
-    thread.join()
+        while not wake_word_done.is_set():
+            if robot.wait_for_tap(timeout=0.2):
+                stop_wake_word.set()
+                thread.join(timeout=2)
+                return "tap"
+
+        thread.join()
+        if heard and heard[0]:
+            return "wake word"
+
+        # Debug only: wakeword.py already warns once per mic outage, and
+        # this repeats every _MIC_RETRY_S while the mic stays off.
+        logger.debug("Wake-word listener stopped without a wake word - retrying in %.0fs (taps still work).",
+                     _MIC_RETRY_S)
+        deadline = time.monotonic() + _MIC_RETRY_S
+        while time.monotonic() < deadline:
+            if robot.wait_for_tap(timeout=0.2):
+                return "tap"
 
 
 def run(engine: CozmoEngine, robot: RobotBackend, speech: SpeechClient, settings: Settings) -> None:
@@ -98,8 +127,9 @@ def run(engine: CozmoEngine, robot: RobotBackend, speech: SpeechClient, settings
     speech_gate_warm_up(settings)
     _go_idle(robot, apply_neutral=False)
     while True:
-        _wait_for_wake_word_or_tap(robot, settings)
-        print("Wake word or tap heard - listening...")
+        trigger = _wait_for_wake_word_or_tap(robot, settings)
+        logger.info("Woke up: %s.", trigger)
+        print(f"Woke up ({trigger}) - listening...")
         engine.set_listening_window(True)
         try:
             _run_listening_window(engine, robot, speech, settings)

@@ -318,6 +318,12 @@ class PyCozmoRobot(RobotBackend):
             and (now - self._last_tap_time) > debounce_s
         ):
             self._last_tap_time = now
+            # Logged for every accepted tap, not only ones that wake him -
+            # tells a real tap from a self-caused jolt when tuning TAP_THRESHOLD.
+            logger.info(
+                "Tap detected: accel jump %.0f (threshold %.0f, baseline %.0f).",
+                abs(delta), self._settings.tap_threshold, self._accel_baseline,
+            )
             self._tap_event.set()
 
     def _suppress_taps(self, seconds: float) -> None:
