@@ -1,8 +1,9 @@
 """Voice-activity-detected recording: starts capturing when you speak and stops
 after a period of silence, so you don't need to press Enter each turn.
 
-Requires the optional `webrtcvad` package (only imported when this mode is
-actually used, so it isn't a hard dependency for push-to-talk/text modes).
+Requires the optional `webrtcvad` module - install `webrtcvad-wheels`, the
+maintained fork (see requirements.txt) - only imported when this mode is
+actually used, so it isn't a hard dependency for push-to-talk/text modes.
 """
 
 from __future__ import annotations
@@ -84,7 +85,7 @@ def record_until_silence(
         import webrtcvad
     except ImportError as e:
         raise RuntimeError(
-            "VAD mode requires the 'webrtcvad' package. Install it with: pip install webrtcvad"
+            "VAD mode requires the 'webrtcvad' module. Install it with: pip install webrtcvad-wheels"
         ) from e
 
     vad = webrtcvad.Vad(aggressiveness)

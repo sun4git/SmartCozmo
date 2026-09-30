@@ -1,7 +1,7 @@
 """Hands-free voice mode: Cozmo listens continuously and reacts whenever you
 say the wake word OR gently tap Cozmo's body, using on-device wake-word
 detection (openWakeWord) gating voice activity detection instead of a
-push-to-talk key. Requires `pip install webrtcvad` and openwakeword (see
+push-to-talk key. Requires `pip install webrtcvad-wheels` and openwakeword (see
 cozmo_brain/audio/wakeword.py for the install command — it's not a plain
 `pip install openwakeword`). The tap trigger needs no extra dependency —
 it's RobotBackend.wait_for_tap(), backed by a real accelerometer spike on

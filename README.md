@@ -157,25 +157,32 @@ pycozmo_resources.py download   # downloads Cozmo's animation/audio resource fil
 **Only if you plan to use `--mode vad`** (hands-free), two more installs, both
 with real gotchas:
 
-1. **webrtcvad** needs a C compiler + Python headers to build (it has no
-   prebuilt wheel for aarch64/Python 3.12):
+1. **webrtcvad-wheels** (the maintained fork of `webrtcvad`, same
+   `import webrtcvad`, prebuilt aarch64/Python 3.12 wheel, no compiler needed):
 
    ```bash
-   sudo apt install -y build-essential python3-dev
-   pip install webrtcvad
-   pip install "setuptools<81"   # required — see below
+   pip install webrtcvad-wheels
    ```
 
-   `setuptools<81` is a **required pin, not optional** (order relative to
-   `pip install webrtcvad` doesn't matter — this fixes an *import-time*
-   failure, not a build-time one): webrtcvad (abandoned since 2020) does a
-   module-level `import pkg_resources` for its version check, and
-   pkg_resources was removed from setuptools itself in a recent release — a
-   fresh venv's default (latest) setuptools installs webrtcvad fine but then
-   breaks *importing* it with `ModuleNotFoundError: No module named
-   'pkg_resources'`. Later running `pip install --upgrade setuptools` in
-   this venv reintroduces the same failure — reinstall the pin if that
-   happens.
+   Don't install the original `webrtcvad` package. It's abandoned (since
+   2020), has no prebuilt wheel (needs `build-essential python3-dev`), and
+   does a module-level `import pkg_resources`, which recent setuptools
+   removed, so it only imports with `setuptools<81` pinned. The fork doesn't
+   use `pkg_resources` on Python 3.8+, so no pin is needed.
+
+   **Switching an existing venv from `webrtcvad`:** uninstall the old one
+   first. Both packages ship the same module files, so having both and then
+   removing one breaks the other:
+
+   ```bash
+   pip uninstall -y webrtcvad
+   pip install webrtcvad-wheels
+   python -c "import webrtcvad; print(webrtcvad.__version__)"   # e.g. 2.0.14
+   ```
+
+   Rollback is the reverse (`pip uninstall -y webrtcvad-wheels`, then
+   `pip install webrtcvad` with the build tools and `setuptools<81`). An
+   existing `setuptools<81` pin can stay: it does nothing for the fork.
 2. **Wake-word detection**, which is **not** a plain `pip install
    openwakeword` — see [Wake word detection](#wake-word-detection-zero-network)
    below for the exact install command and why.
@@ -1645,11 +1652,10 @@ annotated list (it's the source of truth). The essentials:
 
 ## Known gotchas
 
-- **`webrtcvad` needs `setuptools<81` pinned in the venv, permanently**, not
-  just at install time — see [step 1](#1-python-environment-on-the-deployment-machine)
-  above. If `--mode vad` ever starts throwing `ModuleNotFoundError: No
-  module named 'pkg_resources'` again after working before, something
-  upgraded setuptools past that pin — reinstall it.
+- **`ModuleNotFoundError: No module named 'pkg_resources'` in `--mode vad`**
+  (or a `pkg_resources is deprecated` warning) means the original, abandoned
+  `webrtcvad` package is installed, not `webrtcvad-wheels`. Swap it - see
+  [step 1](#1-python-environment-on-the-deployment-machine) above.
 - **Cozmo's AP is flaky to scan.** If `nmcli dev wifi list` doesn't show him
   even though his face shows credentials, rescan and try again before
   assuming anything is broken.
