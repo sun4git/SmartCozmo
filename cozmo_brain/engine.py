@@ -319,10 +319,12 @@ class CozmoEngine:
             ]
             self.conversation.add_assistant(response.content, tool_calls=tool_calls_raw or None)
 
+            # Only `say` makes Cozmo speak - text outside a tool call is
+            # never heard, so label it as such rather than as "thinking".
             if response.content:
-                turn.lines.append(f"(thinking) {response.content}")
+                turn.lines.append(f"(model text, not spoken) {response.content}")
                 if self.log_steps_live:
-                    logger.info("thinking: %s", response.content)
+                    logger.info("model text (not spoken)%s: %s", where, response.content)
 
             # Every step is logged, the final "done" one included (it used to
             # be silent, so a sync turn looked like it only ever had one
