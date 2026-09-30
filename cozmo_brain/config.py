@@ -419,7 +419,11 @@ class Settings:
     # register as a false tap) — set_lift_height_mm()/lower_lift_fully()
     # suppress tap detection for their own duration, not via this threshold
     # either, since we always know exactly when that's happening.
-    tap_threshold: float = field(default_factory=lambda: _env_float("TAP_THRESHOLD", 150.0))
+    # Default raised 150 -> 600 (2026-09-30): at 150, an idle Cozmo
+    # nobody touched logged false taps with jumps of 159-187 and woke
+    # himself up; 500 stopped them on the Pi while a real tap still
+    # measured 1567. 600 leaves a bit more margin over the false spikes.
+    tap_threshold: float = field(default_factory=lambda: _env_float("TAP_THRESHOLD", 600.0))
 
     # Minimum time between two accepted taps - without this, a single tap's
     # multi-sample "ringing" (confirmed on real hardware: one tap can cross
