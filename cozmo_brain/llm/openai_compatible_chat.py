@@ -123,6 +123,10 @@ class OpenAICompatibleChatClient:
             json=payload,
             timeout=self._timeout_s,
         )
+        if not resp.ok:
+            # raise_for_status() alone drops the body, which is where the
+            # provider says *what* it rejected (e.g. an orphaned tool message).
+            logger.error("Chat API %s error body: %s", resp.status_code, resp.text[:1000])
         resp.raise_for_status()
         data = resp.json()
 

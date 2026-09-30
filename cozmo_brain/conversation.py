@@ -10,6 +10,18 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _from_first_user(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop leading messages until a "user" one. A plain tail slice can cut
+    between an assistant's tool_calls and their "tool" results, leaving
+    history that starts with an orphaned tool result - Ollama shrugs that
+    off, but OpenAI (and other strict OpenAI-compatible APIs) reject the
+    whole request with a 400."""
+    for i, msg in enumerate(messages):
+        if msg.get("role") == "user":
+            return messages[i:]
+    return []
+
+
 class Conversation:
     """A running list of chat messages, trimmed to stay under a message-count budget.
 
@@ -55,7 +67,7 @@ class Conversation:
             return
         system = self.messages[0]
         recent = self.messages[-(self._max_messages - 1):]
-        self.messages = [system, *recent]
+        self.messages = [system, *_from_first_user(recent)]
         logger.debug("Trimmed conversation history to %d messages", len(self.messages))
 
     def save(self) -> None:
@@ -70,7 +82,12 @@ class Conversation:
         if not self._history_path or not self._history_path.exists():
             return False
         try:
-            self.messages = json.loads(self._history_path.read_text(encoding="utf-8"))
+            messages = json.loads(self._history_path.read_text(encoding="utf-8"))
+            if not messages:
+                return False
+            # A file saved before _trim() learned to cut at a user message
+            # may already start with an orphaned tool result.
+            self.messages = [messages[0], *_from_first_user(messages[1:])]
             return True
         except (OSError, json.JSONDecodeError) as e:
             logger.warning("Could not load conversation history, starting fresh: %s", e)
