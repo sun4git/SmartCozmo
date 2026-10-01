@@ -3049,6 +3049,24 @@ Still open, roughly in priority order:
      every turn. **Verified as logic only** (scripted reproduction of
      this exact sequence now stays docked), not yet re-run on real
      hardware.
+7. **Reminders - planned, not started.** Today Cozmo knows the date and
+   time (it's in his prompt every turn), but he only thinks when spoken
+   to: "remember my dentist appointment is Monday at 5" is saved as a
+   memory fact, and he may mention it if you talk to him that day, but he
+   never speaks up on his own at 4:55. Real reminders need:
+   - a reminder list (e.g. `data/reminders.json`: time, message, done);
+   - tools to set ("remind me at 5 to call mom"), list, and cancel them;
+   - a background check (every ~30s) that says a due reminder out loud,
+     through the same `turn_lock` + `engine.speak()` path the low-battery
+     offer uses (`charger_return.py`), so it never talks over a reply.
+
+   Limits to design around: Cozmo has to be on, connected and running the
+   app - a reminder due while he's off or disconnected can only be said
+   late, when he's back; you have to be in the room to hear it (no phone
+   notification without a separate service); repeating reminders ("every
+   day at 9") are more work - start with one-off ones. To brainstorm
+   before building: what happens to a missed reminder, whether he repeats
+   one until it's acknowledged, and whether quiet hours are needed.
 
 ---
 
