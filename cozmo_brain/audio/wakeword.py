@@ -16,18 +16,19 @@ That last line is a required one-time step, separate from the pip installs
 without it fails with a plain "file doesn't exist"). It needs internet once,
 during setup; nothing at runtime after that.
 
-`WAKE_WORD_MODEL` in .env can be either a stock model name (hey_jarvis,
-alexa, hey_mycroft, hey_rhasspy, timer, weather — openWakeWord's built-in
-free models) or a path to a custom-trained .onnx model (e.g. from
-openWakeWord's training notebook, for an actual "hey cozmo"). Swapping
-later is just changing this one value — openWakeWord's Model class already
-resolves a bare name and a file path through the same code path (verified
-against its source), no code changes needed here.
+`WAKE_WORD_MODEL` in .env is either the name of a custom-trained model in
+models/ - `hey_cozmo` loads models/hey_cozmo.onnx, trained with
+training/wake_word_training.ipynb - or a stock model name (hey_jarvis,
+alexa, hey_mycroft, hey_rhasspy, timer, weather - openWakeWord's built-in
+free models), or a path to an .onnx file anywhere. A file wins over a stock
+name; see model_files.py for the lookup order. A custom model still needs
+the download_models() step above, which also fetches the shared audio
+feature models every wake word model runs on.
 
 Verified for real (on a dev machine, not a Pi): installed this exact way,
 downloaded the hey_jarvis model via `openwakeword.utils.download_models()`,
 loaded it with `inference_framework="onnx"`, and confirmed predict() returns
-scores keyed exactly as `_score_key()` derives them, for both a bare stock
+scores keyed exactly as `_resolve_model()` derives them, for both a bare stock
 name and a file path. NOT verified: the aarch64/Pi install itself (only the
 wheel listings were checked, not a real install), or real microphone audio
 — there's no Pi or mic in this environment.
@@ -43,6 +44,8 @@ import threading
 
 import numpy as np
 
+from cozmo_brain.model_files import find_model_file
+
 logger = logging.getLogger(__name__)
 
 _SAMPLE_RATE = 16000
@@ -54,13 +57,15 @@ _CHUNK_BYTES = _CHUNK_SAMPLES * 2  # 16-bit mono
 _mic_down = False
 
 
-def _score_key(model_spec: str) -> str:
-    """The key openWakeWord's predict() uses for this model: the bare name
-    if `model_spec` was one, or the file's stem if it was a path — mirrors
-    Model.__init__'s own resolution logic exactly."""
-    if os.path.exists(model_spec):
-        return os.path.splitext(os.path.basename(model_spec))[0]
-    return model_spec
+def _resolve_model(model_spec: str) -> tuple[str, str]:
+    """What to pass to openWakeWord's Model for `model_spec`, and the key its
+    predict() scores it under: a model file's path and its stem (the name
+    without folder or extension), or a stock name passed through as is -
+    mirrors Model.__init__'s own resolution logic."""
+    path = find_model_file(model_spec)
+    if path is not None:
+        return path, os.path.splitext(os.path.basename(path))[0]
+    return model_spec, model_spec
 
 
 def wait_for_wake_word(
@@ -87,8 +92,8 @@ def wait_for_wake_word(
             "cozmo_brain/audio/wakeword.py or the README for the install command."
         ) from e
 
-    oww_model = Model(wakeword_models=[model_spec], inference_framework="onnx")
-    key = _score_key(model_spec)
+    model_arg, key = _resolve_model(model_spec)
+    oww_model = Model(wakeword_models=[model_arg], inference_framework="onnx")
 
     proc = subprocess.Popen(
         ["arecord", "-D", device, "-f", "S16_LE", "-r", str(_SAMPLE_RATE), "-c", "1", "-t", "raw"],
@@ -117,7 +122,7 @@ def wait_for_wake_word(
             scores = oww_model.predict(audio)
             score = scores.get(key, 0.0)
             if score >= threshold:
-                logger.info("Wake word '%s' detected (score %.2f).", model_spec, score)
+                logger.info("Wake word '%s' detected (score %.2f).", key, score)
                 return True
         return False
     finally:

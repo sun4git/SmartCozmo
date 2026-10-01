@@ -173,12 +173,14 @@ class Settings:
     local_stt_device: str = field(default_factory=lambda: _env_str("LOCAL_STT_DEVICE", "cpu"))
     local_stt_compute_type: str = field(default_factory=lambda: _env_str("LOCAL_STT_COMPUTE_TYPE", "int8"))
 
-    # Path to a downloaded Piper voice's .onnx file (its sibling .onnx.json
-    # must sit alongside it). "medium" quality voices are Piper's own
-    # recommended tier for Raspberry Pi-class hardware; drop to a "low"
-    # quality voice instead if it's not fast enough on the real Pi.
+    # A downloaded Piper voice: its name in models/ (en_US-lessac-medium ->
+    # models/en_US-lessac-medium.onnx) or a path to its .onnx file. Its
+    # sibling .onnx.json must sit alongside it. See model_files.py.
+    # "medium" quality voices are Piper's own recommended tier for Raspberry
+    # Pi-class hardware; drop to a "low" quality voice instead if it's not
+    # fast enough on the real Pi.
     local_tts_voice_path: str = field(
-        default_factory=lambda: _env_str("LOCAL_TTS_VOICE_PATH", "en_US-lessac-medium.onnx")
+        default_factory=lambda: _env_str("LOCAL_TTS_VOICE_PATH", "en_US-lessac-medium")
     )
 
     # Speed, same direction/semantics as GROQ_TTS_SPEED/OPENAI_TTS_SPEED
@@ -432,10 +434,11 @@ class Settings:
     tap_debounce_ms: int = field(default_factory=lambda: _env_int("TAP_DEBOUNCE_MS", 450))
 
     # --- Wake word (--mode vad) ---
-    # A stock openWakeWord model name (hey_jarvis, alexa, hey_mycroft,
-    # hey_rhasspy, timer, weather) or a path to a custom-trained .onnx model.
-    # See cozmo_brain/audio/wakeword.py — untested against real hardware.
-    wake_word_model: str = field(default_factory=lambda: _env_str("WAKE_WORD_MODEL", "hey_jarvis"))
+    # A custom model's name in models/ (hey_cozmo -> models/hey_cozmo.onnx),
+    # a stock openWakeWord model name (hey_jarvis, alexa, hey_mycroft,
+    # hey_rhasspy, timer, weather) or a path to an .onnx file.
+    # See cozmo_brain/audio/wakeword.py and model_files.py.
+    wake_word_model: str = field(default_factory=lambda: _env_str("WAKE_WORD_MODEL", "hey_cozmo"))
     wake_word_threshold: float = field(default_factory=lambda: _env_float("WAKE_WORD_THRESHOLD", 0.5))
 
     # --- Idle fidgeting ---

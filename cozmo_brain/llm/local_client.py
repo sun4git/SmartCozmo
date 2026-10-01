@@ -4,7 +4,7 @@ LOCAL_STT_MODEL / LOCAL_STT_DEVICE / LOCAL_STT_COMPUTE_TYPE /
 LOCAL_TTS_VOICE_PATH / LOCAL_TTS_SPEED in .env.example. Requires `pip install faster-whisper
 piper-tts` (commented out in requirements.txt by default, like
 webrtcvad/openwakeword) and a downloaded Piper voice
-(`python3 -m piper.download_voices <name>`).
+(`python3 -m piper.download_voices <name> --data-dir models`).
 
 Note: the currently maintained `piper-tts` package (published from the
 OHF-Voice/piper1-gpl fork, since the original rhasspy/piper repo was
@@ -24,6 +24,7 @@ import io
 import wave
 
 from cozmo_brain.config import Settings
+from cozmo_brain.model_files import find_model_file
 from cozmo_brain.llm.stt_postprocess import filter_whisper_segments
 from cozmo_brain.llm.tts_postprocess import apply_cozmo_voice_character
 
@@ -71,7 +72,10 @@ class LocalClient:
         if self._piper_voice is None:
             from piper import PiperVoice
 
-            self._piper_voice = PiperVoice.load(self._settings.local_tts_voice_path)
+            # A bare voice name resolves to models/<name>.onnx; if nothing is
+            # found, Piper gets the raw value so its own error names it.
+            voice = self._settings.local_tts_voice_path
+            self._piper_voice = PiperVoice.load(find_model_file(voice) or voice)
         return self._piper_voice
 
     def synthesize(self, text: str, out_path: str, voice: str | None = None) -> str:

@@ -33,10 +33,10 @@ pycozmo
 # confirming that's acceptable for this project before installing.
 # piper-tts
 #
-# Piper also needs a voice model downloaded once (creates <name>.onnx +
-# <name>.onnx.json in the current directory) before LOCAL_TTS_VOICE_PATH in
-# .env can point at it:
-# python3 -m piper.download_voices en_US-lessac-medium
+# Piper also needs a voice model downloaded once into models/ (creates
+# models/<name>.onnx + models/<name>.onnx.json) before LOCAL_TTS_VOICE_PATH
+# in .env can name it. Run from the project folder:
+# python3 -m piper.download_voices en_US-lessac-medium --data-dir models
 
 # Only required if TTS_PROVIDER=edge in .env — Microsoft Edge's online TTS
 # via the unofficial edge-tts library: free, no API key, needs internet.
