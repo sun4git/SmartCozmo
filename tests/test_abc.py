@@ -24,13 +24,19 @@ def tap_registered(r):
     r._tap_event.clear()
     r._last_tap_time = 0.0
     r._on_robot_state(None, Pkt(1000))      # baseline
-    r._on_robot_state(None, Pkt(1600))      # +600 spike, well over TAP_THRESHOLD
+    r._on_robot_state(None, Pkt(2567))      # +1567: a real tap measured on the Pi, over TAP_THRESHOLD (600)
     hit = r._tap_event.is_set()
     r._accel_baseline = 1000.0
     return hit
 
 r, cli = make_robot()
 check("A: genuine tap at rest registers", tap_registered(r))
+r._tap_event.clear()
+r._last_tap_time = 0.0
+r._on_robot_state(None, Pkt(1000))
+r._on_robot_state(None, Pkt(1187))          # +187: the largest false tap logged at idle under the old 150
+check("A: idle jolt below TAP_THRESHOLD (+187) is ignored", not r._tap_event.is_set())
+r._accel_baseline = 1000.0
 r.set_head_angle_deg(20, duration=0.2)
 check("A: tap right after a head move is ignored", not tap_registered(r))
 time.sleep(0.2 + _SELF_MOTION_TAP_GRACE_S + 0.05)
