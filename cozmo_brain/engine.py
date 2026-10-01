@@ -89,6 +89,11 @@ class CozmoEngine:
         # the persona plus the current memory file and date/time), so a
         # fact saved or hand-edited mid-run is seen on the next turn.
         self._system_prompt_fn = system_prompt_fn
+        # Called with ("session_start", fields) / ("session_end", fields)
+        # when --mode vad opens or closes a conversation (session_event()).
+        # main.py: resets "asked about a suggestion" and starts the
+        # after-conversation memory check (memory_suggestions.py).
+        self.session_listeners: list[Callable[[str, dict], None]] = []
         # Tracks real conversation activity for idle_fidget.py - starts at
         # construction time (not 0/unset) so idle counting begins from
         # process start rather than looking infinitely idle before the
@@ -120,6 +125,16 @@ class CozmoEngine:
         # is the reply itself.
         self.log_steps_live = False
         self._followup_thread: threading.Thread | None = None
+
+    def session_event(self, event: str, **fields) -> None:
+        """A conversation started or ended (--mode vad): marked in the
+        archive, then passed to session_listeners."""
+        self.conversation.mark(event, **fields)
+        for listener in self.session_listeners:
+            try:
+                listener(event, fields)
+            except Exception:  # noqa: BLE001 - a listener must never break the conversation loop
+                logger.exception("Session listener failed on %s.", event)
 
     def set_listening_window(self, is_open: bool) -> None:
         """Called by --mode vad when a listening window opens/closes. Closing

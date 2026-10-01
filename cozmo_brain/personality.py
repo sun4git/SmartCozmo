@@ -89,7 +89,7 @@ argument to the standalone `gesture` tool) are exactly these words — \
 never invent a new one: {_GESTURE_LIST}."""
 
 
-def build_system_prompt(memory_section: str, now: datetime | None = None) -> str:
+def build_system_prompt(memory_section: str, now: datetime | None = None, suggestions_section: str = "") -> str:
     """SYSTEM_PROMPT plus the current date/time and the memory file
     (memory.py) - rebuilt every turn (engine.py), so a newly saved or
     hand-edited fact and the right date are always there. The date lets the
@@ -111,4 +111,7 @@ remember it. Never save passwords, health, money, or address details.
 fine if it finds nothing.
 
 What you remember (may be out of date):
-{memory_section}"""
+{memory_section}""" + (f"""
+
+Things you noticed earlier but haven't confirmed - NOT facts you know, so never state them as true:
+{suggestions_section}""" if suggestions_section else "")

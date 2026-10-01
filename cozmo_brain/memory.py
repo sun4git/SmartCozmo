@@ -18,6 +18,22 @@ is never sent.
 The model edits it through the remember_fact/forget_fact tools, and
 search() looks through these facts and the conversation archive
 (history_archive.py) for the search_memory tool.
+
+Two more sections hold facts nobody has confirmed yet - never sent as
+things Cozmo knows:
+
+    ## Suggested (not yet approved)
+    - Has a dog named Bruno. [2026-10-01]
+    - Loves the dance gesture. [about Asha, 2026-10-01]
+
+    ## Declined suggestions
+    - Is tired today. [2026-09-30]
+
+memory_suggestions.py adds to the first after a conversation, when it
+heard something worth keeping. Cozmo asks about one when it fits the
+conversation (review_suggestion): keep moves it into the person's section,
+discard moves it to Declined (so it's never suggested again). Moving or
+deleting lines by hand works too. Suggestions don't expire.
 """
 
 from __future__ import annotations
@@ -47,6 +63,10 @@ who Cozmo assumes he's talking to (rename it to your name, keeping
 Don't put anything sensitive here (passwords, health, money, addresses):
 it's stored as plain text and sent to the chat provider with every turn.
 
+"Suggested (not yet approved)" below holds things Cozmo noticed but you
+haven't confirmed - never treated as known. Move a line up into a section
+(dropping its [...] tag) to keep it, or delete it.
+
 ## Primary user
 """
 
@@ -57,6 +77,14 @@ _STOPWORDS = frozenset(
     "about from they them then than but not can could would should just any all our out his her "
     "him she".split()
 )
+SUGGESTED = "Suggested (not yet approved)"
+DECLINED = "Declined suggestions"
+_SPECIAL_SECTIONS = {SUGGESTED.lower(), DECLINED.lower()}
+# A suggestion line: "<fact> [2026-10-01]" or "<fact> [about Asha, 2026-10-01]".
+_SUGGESTION = re.compile(r"^(?P<fact>.*?)\s*\[(?:about (?P<person>[^,\]]+), )?(?P<date>\d{4}-\d{2}-\d{2})\]$")
+# Most waiting suggestions shown to the model at once (newest first).
+_MAX_SUGGESTIONS_SHOWN = 5
+
 # What a search returns at most, to keep the tool result short.
 _MAX_FACT_HITS = 10
 _MAX_CONVERSATION_HITS = 8
@@ -83,6 +111,39 @@ class _Fact:
     section: str
     text: str
 
+    @property
+    def special(self) -> bool:
+        return self.section.lower() in _SPECIAL_SECTIONS
+
+
+@dataclass
+class Suggestion:
+    fact: str
+    person: str  # "" = the primary user
+    date: str
+    declined: bool = False
+
+
+def _parse_suggestion(f: _Fact) -> Suggestion:
+    m = _SUGGESTION.match(f.text)
+    if not m:  # hand-written without the [date] tag
+        return Suggestion(f.text, "", "", f.section.lower() == DECLINED.lower())
+    return Suggestion(m["fact"], (m["person"] or "").strip(), m["date"], f.section.lower() == DECLINED.lower())
+
+
+def _best_matches(items: list, text_of, query: str) -> list:
+    """The items whose text matches `query`: exact, else one containing the
+    other, else every meaningful word of the query in it ("I like cricket"
+    finds "Likes cricket.", "likes football" doesn't)."""
+    query = query.strip().lower()
+    matches = [i for i in items if text_of(i).lower() == query]
+    if not matches:
+        matches = [i for i in items if query in text_of(i).lower() or text_of(i).lower() in query]
+    if not matches:
+        wanted = _words(query)
+        matches = [i for i in items if wanted and wanted <= _words(text_of(i))]
+    return matches
+
 
 class Memory:
     def __init__(self, path: str | Path, history_dir: str | Path | None = None, max_facts: int = 40):
@@ -90,6 +151,10 @@ class Memory:
         self.history_dir = Path(history_dir) if history_dir else None
         self.max_facts = max_facts
         self._lock = threading.Lock()
+        # Whether Cozmo already brought up a suggestion this conversation
+        # (review_suggestion) - he's then told not to raise another one.
+        # Reset by new_session() when a conversation starts.
+        self.asked_this_session = False
 
     # --- file ------------------------------------------------------------
 
@@ -119,7 +184,7 @@ class Memory:
                 logger.warning("Could not create memory file %s: %s", self.path, e)
 
     @staticmethod
-    def _facts(lines: list[str]) -> list[_Fact]:
+    def _all_lines_facts(lines: list[str]) -> list[_Fact]:
         facts, section = [], None
         for i, line in enumerate(lines):
             stripped = line.strip()
@@ -128,6 +193,14 @@ class Memory:
             elif section is not None and stripped.startswith("- ") and stripped[2:].strip():
                 facts.append(_Fact(i, section, stripped[2:].strip()))
         return facts
+
+    @classmethod
+    def _facts(cls, lines: list[str]) -> list[_Fact]:
+        """Confirmed facts only - not the Suggested/Declined sections."""
+        return [f for f in cls._all_lines_facts(lines) if not f.special]
+
+    def new_session(self) -> None:
+        self.asked_this_session = False
 
     # --- prompt ----------------------------------------------------------
 
@@ -198,15 +271,7 @@ class Memory:
             return False, "Nothing to forget - say which fact."
         with self._lock:
             lines = self._read_lines()
-            facts = self._facts(lines)
-            matches = [f for f in facts if f.text.lower() == query]
-            if not matches:
-                matches = [f for f in facts if query in f.text.lower() or f.text.lower() in query]
-            if not matches:
-                # Every meaningful word of the request must be in the fact:
-                # "I like cricket" finds "Likes cricket.", "likes football" doesn't.
-                wanted = _words(query)
-                matches = [f for f in facts if wanted and wanted <= _words(f.text)]
+            matches = _best_matches(self._facts(lines), lambda f: f.text, query)
             if not matches:
                 return False, "I couldn't find that in my memory, so nothing was removed."
             if len(matches) > 1:
@@ -219,6 +284,180 @@ class Memory:
             except OSError as e:
                 return False, f"Couldn't update my memory file: {e}"
         return True, f"Forgot '{removed.text}' ({removed.section})."
+
+    # --- suggestions -----------------------------------------------------
+
+    def suggestions(self, include_declined: bool = False) -> list[Suggestion]:
+        """Waiting suggestions, oldest first (and declined ones, if asked)."""
+        out = []
+        for f in self._all_lines_facts(self._read_lines()):
+            if f.special and (include_declined or f.section.lower() == SUGGESTED.lower()):
+                out.append(_parse_suggestion(f))
+        return out
+
+    def add_suggestions(self, items: list[tuple[str, str]], date: str) -> list[str]:
+        """Add (fact, person) pairs to the Suggested section, skipping any
+        already known, waiting, or declined. Returns the facts added."""
+        added: list[str] = []
+        with self._lock:
+            lines = self._read_lines()
+            seen = [f.text for f in self._facts(lines)] + [s.fact for s in self.suggestions(include_declined=True)]
+            new_lines = []
+            for fact, person in items:
+                fact = " ".join(str(fact).split()).lstrip("- ").strip()
+                person = " ".join(str(person or "").split())
+                # Already known, waiting, or declined - in the same or nearly the same words.
+                if not fact or _best_matches(seen, lambda t: t, fact):
+                    continue
+                tag = f"[about {person}, {date}]" if person and not self._is_primary(lines, person) else f"[{date}]"
+                new_lines.append(f"- {fact} {tag}")
+                seen.append(fact)
+                added.append(fact)
+            if not new_lines:
+                return []
+            start = self._section_start(lines, SUGGESTED)
+            if start is None:
+                if lines and lines[-1].strip():
+                    lines.append("")
+                lines.append(f"## {SUGGESTED}")
+                start = len(lines) - 1
+            insert_at = self._section_end(lines, start)
+            lines[insert_at:insert_at] = new_lines
+            try:
+                self._write_lines(lines)
+            except OSError as e:
+                logger.warning("Could not save memory suggestions: %s", e)
+                return []
+        return added
+
+    def review(self, suggestion: str, decision: str) -> tuple[bool, str]:
+        """keep -> into the person's section (counts against max_facts);
+        discard -> into Declined, never suggested again; later -> unchanged."""
+        decision = decision.strip().lower()
+        if decision not in ("keep", "discard", "later"):
+            return False, "decision must be keep, discard, or later."
+        self.asked_this_session = True
+        with self._lock:
+            lines = self._read_lines()
+            waiting = [f for f in self._all_lines_facts(lines) if f.section.lower() == SUGGESTED.lower()]
+            matches = _best_matches(waiting, lambda f: _parse_suggestion(f).fact, suggestion)
+            if not matches:
+                return False, "No waiting suggestion matches that."
+            if len(matches) > 1:
+                listed = "; ".join(f"'{_parse_suggestion(f).fact}'" for f in matches[:5])
+                return False, f"Several waiting suggestions match - which one? {listed}"
+            item, parsed = matches[0], _parse_suggestion(matches[0])
+            if decision == "later":
+                return True, f"Left '{parsed.fact}' waiting - don't bring it up again this conversation."
+            if decision == "discard":
+                del lines[item.line_index]
+                start = self._section_start(lines, DECLINED)
+                if start is None:
+                    if lines and lines[-1].strip():
+                        lines.append("")
+                    lines.append(f"## {DECLINED}")
+                    start = len(lines) - 1
+                lines.insert(self._section_end(lines, start), f"- {item.text}")
+                try:
+                    self._write_lines(lines)
+                except OSError as e:
+                    return False, f"Couldn't update my memory file: {e}"
+                return True, f"Won't remember '{parsed.fact}', and won't suggest it again."
+            if len(self._facts(lines)) >= self.max_facts:
+                return False, (f"My memory is full ({self.max_facts} facts) - the suggestion is still waiting. "
+                               "Ask which fact to forget first.")
+            del lines[item.line_index]
+            try:
+                self._write_lines(lines)
+            except OSError as e:
+                return False, f"Couldn't update my memory file: {e}"
+        ok, message = self.remember(parsed.fact, parsed.person)
+        return ok, message
+
+    def clear_suggestions(self, which: str) -> tuple[bool, str]:
+        """Empty the waiting list, the declined list, or both - removing the
+        section and its heading. Declined ones may then be suggested again."""
+        which = which.strip().lower()
+        targets = {"waiting": [SUGGESTED], "declined": [DECLINED], "both": [SUGGESTED, DECLINED]}.get(which)
+        if targets is None:
+            return False, "which must be waiting, declined, or both."
+        removed = {}
+        with self._lock:
+            lines = self._read_lines()
+            for name in targets:
+                start = self._section_start(lines, name)
+                if start is None:
+                    removed[name] = 0
+                    continue
+                end = start + 1
+                while end < len(lines) and not lines[end].strip().startswith("## "):
+                    end += 1
+                removed[name] = sum(1 for line in lines[start + 1:end] if line.strip().startswith("- "))
+                del lines[start:end]
+            while lines and not lines[-1].strip():
+                lines.pop()
+            try:
+                self._write_lines(lines)
+            except OSError as e:
+                return False, f"Couldn't update my memory file: {e}"
+        parts = [f"{n} {'waiting' if name == SUGGESTED else 'declined'} suggestion(s)" for name, n in removed.items()]
+        return True, "Cleared " + " and ".join(parts) + "."
+
+    def suggestions_prompt(self) -> str:
+        """The waiting suggestions as shown to the model (plus how many are
+        declined, so the lists can be cleared by asking), or "" if neither."""
+        waiting = self.suggestions()
+        n_declined = sum(1 for s in self.suggestions(include_declined=True) if s.declined)
+        declined_line = (f"(Also {n_declined} declined suggestion(s), not shown - never suggested again "
+                         "unless cleared.)") if n_declined else ""
+        clear_hint = (" If they ask to clear these lists, use `clear_suggestions` - say how many first "
+                      "and check they mean it.")
+        if not waiting:
+            return declined_line + clear_hint if declined_line else ""
+        shown = waiting[-_MAX_SUGGESTIONS_SHOWN:][::-1]
+        lines = [f"- {s.fact} ({'about ' + s.person if s.person else 'about the primary user'}, "
+                 f"noticed {s.date or 'earlier'})" for s in shown]
+        if len(waiting) > len(shown):
+            lines.append(f"(and {len(waiting) - len(shown)} older ones)")
+        if self.asked_this_session:
+            when = ("You already asked about one this conversation - don't bring them up again unless "
+                    "they ask what you wanted to remember.")
+        else:
+            when = ("When it fits naturally - the conversation touches on it, or there's a relaxed "
+                    "moment, never in the middle of a request or when they're busy - you may ask about "
+                    "ONE of these, in your own words (\"Last time you mentioned a dog called Bruno - want "
+                    "me to remember that?\"). At most one per conversation, and most conversations "
+                    "shouldn't have one at all.")
+        if declined_line:
+            lines.append(declined_line)
+        return "\n".join(lines) + "\n" + when + (
+            " Record their answer with `review_suggestion`: keep, discard, or later (not now). If they "
+            "ask what you wanted to remember, go through them.") + clear_hint
+
+    def _is_primary(self, lines: list[str], person: str) -> bool:
+        wanted = person.strip().lower()
+        return any("primary user" in h.lower() and _person_name(h) == wanted
+                   for h in (l.strip()[3:] for l in lines if l.strip().startswith("## ")))
+
+    @staticmethod
+    def _section_start(lines: list[str], name: str) -> int | None:
+        for i, line in enumerate(lines):
+            if line.strip().lower() == f"## {name}".lower():
+                return i
+        return None
+
+    @staticmethod
+    def _section_end(lines: list[str], start: int) -> int:
+        """Where to insert a new line at the end of the section at `start`:
+        after its last "- " line (or right after the heading)."""
+        end = start + 1
+        for i in range(start + 1, len(lines)):
+            stripped = lines[i].strip()
+            if stripped.startswith("## "):
+                break
+            if stripped.startswith("- "):
+                end = i + 1
+        return end
 
     # --- search ----------------------------------------------------------
 
@@ -258,14 +497,16 @@ class Memory:
                 if record.get("type") != "message":
                     continue
                 message = record.get("message") or {}
-                for who, text in _spoken(message):
+                for who, text in spoken_lines(message):
                     score = len(wanted & _words(text))
                     if score >= need:
                         ts = record.get("ts", "")
                         yield score, ts, f"[{_when(ts)}] {who}: {_snippet(text)}"
 
 
-def _spoken(message: dict) -> list[tuple[str, str]]:
+def spoken_lines(message: dict) -> list[tuple[str, str]]:
+    """(who, text) for what a message actually said out loud: the human's
+    words, or Cozmo's `say` text - nothing else."""
     if message.get("role") == "user":
         text = str(message.get("content", "")).split("\n\n[Status:")[0].strip()
         # Engine-made captions ("[Cozmo just looked around...]") aren't speech.

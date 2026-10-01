@@ -18,6 +18,7 @@ from cozmo_brain.connection_monitor import ConnectionMonitor
 from cozmo_brain.idle_fidget import IdleFidgeter
 from cozmo_brain.llm import create_chat_client, create_speech_client
 from cozmo_brain.memory import Memory
+from cozmo_brain.memory_suggestions import SuggestionExtractor
 from cozmo_brain.personality import SYSTEM_PROMPT, build_system_prompt
 from cozmo_brain.robot import create_robot
 from cozmo_brain.robot.battery_monitor import BatteryMonitor
@@ -133,8 +134,19 @@ def main(argv: list[str] | None = None) -> int:
 
         engine = CozmoEngine(
             settings, robot, ollama, speech, tools, conversation,
-            system_prompt_fn=lambda: build_system_prompt(memory.prompt_section()),
+            system_prompt_fn=lambda: build_system_prompt(
+                memory.prompt_section(), suggestions_section=memory.suggestions_prompt()
+            ),
         )
+        extractor = SuggestionExtractor(ollama, memory, archive) if settings.memory_suggestions_enabled else None
+
+        def on_session(event: str, _fields: dict) -> None:
+            if event == "session_start":
+                memory.new_session()
+            elif event == "session_end" and extractor is not None:
+                extractor.check_in_background()
+
+        engine.session_listeners.append(on_session)
 
         # Started after the engine exists (not alongside pickup_reactor
         # above) because the low-battery return-to-charger policy speaks and
@@ -167,6 +179,10 @@ def main(argv: list[str] | None = None) -> int:
             pickup_reactor.stop()
             idle_fidgeter.stop()
             connection_monitor.stop()
+            if extractor is not None:
+                # Whatever wasn't checked yet (all of it, outside --mode vad).
+                print("Checking this conversation for anything worth remembering...")
+                extractor.check()
             archive.record_event("run_end")
 
     return 0

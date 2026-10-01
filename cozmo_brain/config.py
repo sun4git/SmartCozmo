@@ -395,6 +395,13 @@ class Settings:
     # Most facts remember_fact may save (memory.md is sent with every turn,
     # so this caps its cost). Hand-added facts beyond it are still sent.
     memory_max_facts: int = field(default_factory=lambda: _env_int("MEMORY_MAX_FACTS", 40))
+    # After each conversation, one LLM call looks for things worth
+    # remembering that Cozmo didn't save; they wait in memory.md's
+    # "Suggested" section until he asks and you say yes. See
+    # memory_suggestions.py.
+    memory_suggestions_enabled: bool = field(
+        default_factory=lambda: _env_bool("MEMORY_SUGGESTIONS_ENABLED", True)
+    )
 
     # --- Voice activity detection (--mode vad) ---
     vad_aggressiveness: int = field(default_factory=lambda: _env_int("VAD_AGGRESSIVENESS", 2))

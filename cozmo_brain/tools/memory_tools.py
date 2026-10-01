@@ -1,5 +1,6 @@
-"""The memory tools: remember_fact, forget_fact, search_memory - backed by
-memory.py (data/memory.md) and the conversation archive."""
+"""The memory tools: remember_fact, forget_fact, search_memory,
+review_suggestion and clear_suggestions - backed by memory.py (data/memory.md) and the
+conversation archive."""
 
 from __future__ import annotations
 
@@ -18,6 +19,14 @@ def build_memory_tools(memory: Memory) -> list[Tool]:
 
     def handle_search(args: dict) -> ToolResult:
         return ToolResult(True, memory.search(str(args.get("query", ""))))
+
+    def handle_clear(args: dict) -> ToolResult:
+        ok, message = memory.clear_suggestions(str(args.get("which", "")))
+        return ToolResult(ok, message)
+
+    def handle_review(args: dict) -> ToolResult:
+        ok, message = memory.review(str(args.get("suggestion", "")), str(args.get("decision", "")))
+        return ToolResult(ok, message)
 
     # remember_fact is a pure action (its result only confirms the save), so
     # a turn may end right after it. forget_fact's result says which fact
@@ -81,5 +90,40 @@ def build_memory_tools(memory: Memory) -> list[Tool]:
                 "required": ["query"],
             },
             handler=handle_search,
+        ),
+        Tool(
+            name="review_suggestion",
+            description=(
+                "Record the person's answer after you asked whether to remember one of the "
+                "'Things you noticed earlier but haven't confirmed'. keep = save it to your memory, "
+                "discard = they don't want it remembered (it won't be suggested again), later = "
+                "they don't want to decide now."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "suggestion": {"type": "string", "description": "The suggestion's words, as listed."},
+                    "decision": {"type": "string", "enum": ["keep", "discard", "later"]},
+                },
+                "required": ["suggestion", "decision"],
+            },
+            handler=handle_review,
+            safe_to_end_turn=True,
+        ),
+        Tool(
+            name="clear_suggestions",
+            description=(
+                "Delete ALL waiting suggestions ('noticed earlier but haven't confirmed'), all "
+                "declined ones, or both - only when the person asks to clear them. It can't be undone, "
+                "so first say how many will go and check they mean it. Clearing declined ones means "
+                "they may be suggested again. Doesn't touch confirmed facts (use forget_fact for those)."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {"which": {"type": "string", "enum": ["waiting", "declined", "both"]}},
+                "required": ["which"],
+            },
+            handler=handle_clear,
+            safe_to_end_turn=True,
         ),
     ]
