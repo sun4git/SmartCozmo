@@ -131,10 +131,13 @@ def run(engine: CozmoEngine, robot: RobotBackend, speech: SpeechClient, settings
         logger.info("Woke up: %s.", trigger)
         print(f"Woke up ({trigger}) - listening...")
         engine.set_listening_window(True)
+        # Each wake-to-idle stretch is one session in this run's transcript.
+        engine.conversation.mark("session_start", trigger=trigger)
         try:
             _run_listening_window(engine, robot, speech, settings)
         finally:
             engine.set_listening_window(False)
+            engine.conversation.mark("session_end")
 
 
 def _run_listening_window(engine: CozmoEngine, robot: RobotBackend, speech: SpeechClient, settings: Settings) -> None:

@@ -44,6 +44,13 @@ _KNOWN_STALE = {
     "GROQ_CHAT_MODEL": {
         "llama-3.3-70b-versatile": "removed from Groq (model_not_found) - use qwen/qwen3.8-27b",
     },
+    "CAMERA_SNAPSHOT_PATH": {
+        "look.png": "runtime files moved into data/ - use data/look.png (or delete the line)",
+    },
+    "KNOWN_PEOPLE_DIR": {
+        "known_people": "runtime files moved into data/ - use data/known_people (or delete the line), "
+                        "and move the folder: mv known_people data/",
+    },
 }
 # Settings that were renamed/replaced and are now ignored by the code.
 _REPLACED = {

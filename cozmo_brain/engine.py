@@ -10,6 +10,7 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, field
+from typing import Callable
 
 import requests
 
@@ -75,6 +76,7 @@ class CozmoEngine:
         speech: SpeechClient,
         tools: list[Tool],
         conversation: Conversation,
+        system_prompt_fn: Callable[[], str] | None = None,
     ):
         self._settings = settings
         self._robot = robot
@@ -83,6 +85,10 @@ class CozmoEngine:
         self._tools = tools
         self._tools_by_name = {t.name: t for t in tools}
         self.conversation = conversation
+        # Rebuilds the system prompt at the start of every turn (main.py:
+        # the persona plus the current memory file and date/time), so a
+        # fact saved or hand-edited mid-run is seen on the next turn.
+        self._system_prompt_fn = system_prompt_fn
         # Tracks real conversation activity for idle_fidget.py - starts at
         # construction time (not 0/unset) so idle counting begins from
         # process start rather than looking infinitely idle before the
@@ -200,7 +206,6 @@ class CozmoEngine:
         low-battery offer it never made itself). Caller must hold turn_lock."""
         self.last_interaction_monotonic = time.monotonic()
         self.conversation.add_assistant(text)
-        self.conversation.save()
 
     def _call_tool(self, name: str, arguments: dict) -> ToolResult:
         tool = self._tools_by_name.get(name)
@@ -258,6 +263,11 @@ class CozmoEngine:
         self, user_text: str, images: list[str] | None, allow_async_followup: bool
     ) -> tuple[str, bool]:
         self.last_interaction_monotonic = time.monotonic()
+        if self._system_prompt_fn is not None:
+            try:
+                self.conversation.set_system_prompt(self._system_prompt_fn())
+            except Exception as e:  # noqa: BLE001 - keep the previous prompt rather than fail the turn
+                logger.warning("Could not rebuild the system prompt (keeping the previous one): %s", e)
         charger_note = self._charger_status_note()
         if charger_note:
             user_text = f"{user_text}\n\n{charger_note}"
@@ -372,6 +382,9 @@ class CozmoEngine:
                     self.conversation.add_user(image_caption, images=[b64])
                 except OSError as e:
                     logger.warning("Could not attach captured photo: %s", e)
+            elif image_to_attach and self.conversation.archive is not None:
+                # Not sent to the model, but still kept with the transcript.
+                self.conversation.archive.record_photo(image_to_attach)
 
             if can_end_early and self._turn_is_done(batch, image_attached=bool(image_to_attach)):
                 return True, iteration + 1
@@ -415,7 +428,6 @@ class CozmoEngine:
                 if self.log_steps_live:
                     logger.info("tool say (fallback): %s", _CHARGER_BLOCKED_FALLBACK)
         self._wait_for_gestures()
-        self.conversation.save()
 
     def _wait_for_gestures(self) -> None:
         # A turn isn't over while Cozmo is still moving: a `say`'s gesture

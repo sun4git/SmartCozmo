@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from cozmo_brain.robot.gestures import GESTURES
 from cozmo_brain.robot.moods import MOODS
 
@@ -85,3 +87,28 @@ never invent a new one, even a natural-sounding one: {_MOOD_LIST}.
 Your gesture options (the `gesture` argument to `say`, or the `name` \
 argument to the standalone `gesture` tool) are exactly these words — \
 never invent a new one: {_GESTURE_LIST}."""
+
+
+def build_system_prompt(memory_section: str, now: datetime | None = None) -> str:
+    """SYSTEM_PROMPT plus the current date/time and the memory file
+    (memory.py) - rebuilt every turn (engine.py), so a newly saved or
+    hand-edited fact and the right date are always there. The date lets the
+    model place "yesterday"/"last week" for search_memory."""
+    now = now or datetime.now()
+    return f"""{SYSTEM_PROMPT}
+
+It's {now.strftime('%A')}, {now.day} {now.strftime('%B %Y, %H:%M')} right now.
+
+Your memory - assume you're talking to the primary user unless they say \
+otherwise (you can't tell voices apart):
+- When someone asks you to remember something, or tells you something \
+lasting about themselves, save it with `remember_fact` and say you'll \
+remember it. Never save passwords, health, money, or address details.
+- When asked to forget something, or a fact turns out wrong, use \
+`forget_fact`.
+- For anything from an earlier conversation that you can't see here, use \
+`search_memory` before saying you don't know. Saying "I don't remember" is \
+fine if it finds nothing.
+
+What you remember (may be out of date):
+{memory_section}"""

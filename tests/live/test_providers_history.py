@@ -66,7 +66,7 @@ def run(provider: str) -> None:
 
     robot = QuietRobot()
     tools = build_tools(robot, NoAudio(), chat, s)
-    conv = Conversation(SYSTEM_PROMPT, history_path=None)
+    conv = Conversation(SYSTEM_PROMPT)
     engine = CozmoEngine(s, robot, chat, NoAudio(), tools, conv)
 
     t1 = engine.handle_turn("Hi Cozmo! Say hello to me.")

@@ -18,10 +18,12 @@ from cozmo_brain.config import Settings
 from cozmo_brain.imaging import encode_image_b64
 from cozmo_brain.llm.chat_client import ChatClient
 from cozmo_brain.llm.speech_client import SpeechClient
+from cozmo_brain.memory import Memory
 from cozmo_brain.robot.base import MoveResult, RobotBackend
 from cozmo_brain.robot.gestures import GESTURES
 from cozmo_brain.robot.moods import MOODS
 from cozmo_brain.tools.base import Tool, ToolResult
+from cozmo_brain.tools.memory_tools import build_memory_tools
 
 _MOOD_NAMES = sorted(MOODS)
 _GESTURE_NAMES = sorted(GESTURES)
@@ -92,7 +94,10 @@ def _sanitize_name(name: str) -> str:
     return cleaned.lower() or "unnamed"
 
 
-def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, settings: Settings) -> list[Tool]:
+def build_tools(
+    robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, settings: Settings, memory: Memory | None = None
+) -> list[Tool]:
+    """Every tool, plus the memory tools (memory_tools.py) when `memory` is given."""
     def handle_say(text: str, mood: str = "neutral", gesture: str | None = None) -> ToolResult:
         # "neutral" now resets pose (see moods.py) rather than being a
         # no-op, so it must actually run, not be skipped like other moods
@@ -236,6 +241,7 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
         return ToolResult(True, "Backed onto the charger to dock.")
 
     def handle_look() -> ToolResult:
+        os.makedirs(os.path.dirname(settings.camera_snapshot_path) or ".", exist_ok=True)
         path = robot.capture_photo(settings.camera_snapshot_path)
         return ToolResult(True, "Took a photo.", extra={"image_path": path})
 
@@ -255,6 +261,7 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
         if not known_files:
             return ToolResult(True, "I don't know anyone yet — nobody has been introduced with remember_person.")
 
+        os.makedirs(os.path.dirname(settings.camera_snapshot_path) or ".", exist_ok=True)
         new_path = robot.capture_photo(settings.camera_snapshot_path)
         new_b64 = encode_image_b64(new_path)
         extra = {"image_path": new_path, "image_caption": "[Cozmo just took a photo to see who this is.]"}
@@ -275,7 +282,7 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
     # used one always goes back to the model, even if a `say` came last.
     # When adding a tool, leave it False unless its success result tells the
     # model nothing it needs.
-    return [
+    tools = [
         Tool(
             name="say",
             description=(
@@ -441,3 +448,6 @@ def build_tools(robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, s
             handler=lambda _args: handle_who_is_this(),
         ),
     ]
+    if memory is not None:
+        tools.extend(build_memory_tools(memory))
+    return tools

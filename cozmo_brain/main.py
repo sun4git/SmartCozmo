@@ -7,15 +7,18 @@ import argparse
 import logging
 import os
 import sys
+from pathlib import Path
 
 from cozmo_brain.charger_return import ChargerReturner
-from cozmo_brain.config import settings
+from cozmo_brain.config import PROJECT_ROOT, settings
 from cozmo_brain.conversation import Conversation
 from cozmo_brain.engine import CozmoEngine
+from cozmo_brain.history_archive import HistoryArchive, prune_history
 from cozmo_brain.connection_monitor import ConnectionMonitor
 from cozmo_brain.idle_fidget import IdleFidgeter
 from cozmo_brain.llm import create_chat_client, create_speech_client
-from cozmo_brain.personality import SYSTEM_PROMPT
+from cozmo_brain.memory import Memory
+from cozmo_brain.personality import SYSTEM_PROMPT, build_system_prompt
 from cozmo_brain.robot import create_robot
 from cozmo_brain.robot.battery_monitor import BatteryMonitor
 from cozmo_brain.robot.pickup_reactor import PickupReactor
@@ -54,7 +57,8 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--fresh",
         action="store_true",
-        help="Ignore any saved conversation history and start clean.",
+        help="Don't resume from earlier conversations - start with an empty context. "
+        "This run is still archived, and the memory file is still used.",
     )
     parser.add_argument(
         "--log-level",
@@ -105,17 +109,32 @@ def main(argv: list[str] | None = None) -> int:
 
         speech = create_speech_client(settings)
         ollama = create_chat_client(settings)
-        tools = build_tools(robot, speech, ollama, settings)
+
+        data_dir = Path(settings.data_dir)
+        history_dir = data_dir / "history"
+        archive = HistoryArchive(history_dir, run_info={
+            "mode": args.mode, "simulated": args.simulate, "chat_provider": settings.chat_provider,
+            "stt_provider": settings.stt_provider, "tts_provider": settings.tts_provider,
+        })
+        legacy = Path(settings.conversation_history_path)
+        archive.import_legacy(legacy if legacy.is_absolute() else PROJECT_ROOT / legacy, data_dir)
+        prune_history(history_dir, settings.history_retention_days)
+        memory = Memory(data_dir / "memory.md", history_dir, max_facts=settings.memory_max_facts)
+        memory.ensure_file()
+        tools = build_tools(robot, speech, ollama, settings, memory=memory)
 
         conversation = Conversation(
             SYSTEM_PROMPT,
             max_messages=settings.conversation_max_messages,
-            history_path=settings.conversation_history_path,
+            archive=archive,
         )
         if not args.fresh:
             conversation.load()
 
-        engine = CozmoEngine(settings, robot, ollama, speech, tools, conversation)
+        engine = CozmoEngine(
+            settings, robot, ollama, speech, tools, conversation,
+            system_prompt_fn=lambda: build_system_prompt(memory.prompt_section()),
+        )
 
         # Started after the engine exists (not alongside pickup_reactor
         # above) because the low-battery return-to-charger policy speaks and
@@ -148,6 +167,7 @@ def main(argv: list[str] | None = None) -> int:
             pickup_reactor.stop()
             idle_fidgeter.stop()
             connection_monitor.stop()
+            archive.record_event("run_end")
 
     return 0
 

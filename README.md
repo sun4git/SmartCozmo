@@ -85,6 +85,7 @@ See [Roadmap](#roadmap--open-work) for what's still open.
 ├── standalone/              # one-off scripts, not part of cozmo_brain (run from the repo root)
 │   ├── orchestrator.py      # lightweight single-file test script (no memory/tools/gestures)
 │   ├── pose_drift_test.py   # pose/dead-reckoning drift test behind return-to-charger (roadmap item 6)
+│   ├── show_history.py      # print archived conversations as a readable transcript
 │   └── sync_env.py          # after a git pull: shows/appends .env settings missing vs .env.example
 ├── tests/                   # offline tests (fakes - no robot/mic/keys): python tests/run_all.py
 │   └── live/                # opt-in tests that call real LLM providers with your .env keys
@@ -93,6 +94,11 @@ See [Roadmap](#roadmap--open-work) for what's still open.
 │   └── en_US-lessac-medium.onnx(.json)  # Piper voice for TTS_PROVIDER=local (downloaded, gitignored)
 ├── training/
 │   └── wake_word_training.ipynb  # Colab notebook that trained hey_cozmo.onnx (see "Training a custom wake word")
+├── data/                    # everything Cozmo saves at runtime (gitignored) - see "Conversation history and memory"
+│   ├── history/<date>/<time>.jsonl   # one transcript per run, photos next to it
+│   ├── memory.md            # facts about people, sent to the model every turn - edit freely
+│   ├── known_people/        # remember_person reference photos
+│   └── look.png             # last camera snapshot
 ├── run.sh                   # activates cozmo-env + runs cozmo_brain in one step (./run.sh --help)
 ├── requirements.txt        # pip install -r requirements.txt (core deps only — see setup step 1 for extras)
 ├── .env.example             # template for every config variable, annotated — copy to .env
@@ -101,7 +107,9 @@ See [Roadmap](#roadmap--open-work) for what's still open.
 └── cozmo_brain/              # the full application
     ├── main.py               # CLI entry point (--mode voice|vad|text|calibrate, --simulate)
     ├── config.py             # typed Settings, loaded from .env
-    ├── conversation.py       # chat history with trimming + save/load to disk
+    ├── conversation.py       # what the model sees: system prompt + recent messages, trimmed; resumes from the archive
+    ├── history_archive.py    # data/history/: every run's full transcript + photos, by date
+    ├── memory.py             # data/memory.md: facts about people, plus search over facts and transcripts
     ├── engine.py             # the agentic tool-calling loop (CozmoEngine)
     ├── charger_return.py     # low-battery policy: offer at LOW, return on its own at CRITICAL
     ├── personality.py        # Cozmo's system prompt / persona
@@ -136,7 +144,8 @@ See [Roadmap](#roadmap--open-work) for what's still open.
     │   └── battery_monitor.py  # background thread: checks voltage, shows the icon
     ├── tools/
     │   ├── base.py             # Tool/ToolResult contract
-    │   └── registry.py         # the 9 tools exposed to the LLM
+    │   ├── registry.py         # the tools exposed to the LLM
+    │   └── memory_tools.py     # remember_fact / forget_fact / search_memory
     └── modes/
         ├── interactive.py       # --mode voice  (push-to-talk)
         ├── vad_mode.py           # --mode vad    (hands-free, wake word + follow-up)
@@ -505,8 +514,10 @@ activating). `./run.sh` does both in one step — activates `cozmo-env` and
 forwards all arguments, e.g. `./run.sh --mode voice`. `./run.sh --help` lists
 every option.
 
-Conversation history persists to `CONVERSATION_HISTORY_PATH` between runs;
-pass `--fresh` to start clean instead.
+Every run is archived under `data/history/`, and the next run resumes where
+the last one left off; pass `--fresh` to start with an empty context instead
+(the run is still archived, and memory still applies). See
+[Conversation history and memory](#conversation-history-and-memory).
 
 `--mode vad` accepts either the wake word or a gentle tap on Cozmo's body as
 the activation trigger — whichever comes first (see
@@ -536,6 +547,94 @@ why this ended up folded into `--mode vad` instead of a standalone mode.
 | `look()` | Captures a camera frame and attaches it to the next LLM turn for vision. |
 | `remember_person(name)` | Captures a reference photo, stored under that name. |
 | `who_is_this()` | Captures a photo and asks the vision LLM if it matches anyone remembered. **Experimental.** |
+| `remember_fact(fact, person)` | Saves a fact to `data/memory.md`, under the primary user (default) or a named person. Refused when `MEMORY_MAX_FACTS` is reached. |
+| `forget_fact(fact)` | Removes the one saved fact that matches; if several match, removes nothing and lists them. |
+| `search_memory(query)` | Keyword search over saved facts and every archived conversation, with dates and times. |
+
+### Conversation history and memory
+
+Three separate things, all under `data/` (gitignored, `DATA_DIR`):
+
+| | What | Lifetime |
+|---|---|---|
+| **Context** | What the model sees each turn: the system prompt, then the last `CONVERSATION_MAX_MESSAGES` messages (`conversation.py`) | Trimmed as it goes |
+| **Archive** | `data/history/<date>/<time>.jsonl`: one file per run (start to exit), every message with a timestamp, photos saved next to it (`history_archive.py`) | Kept until deleted (`HISTORY_RETENTION_DAYS`) |
+| **Memory** | `data/memory.md`: a few facts about people, sent to the model every turn (`memory.py`) | Until removed, by Cozmo or by hand |
+
+**Archive.** Written line by line as things happen, so a crash loses at
+most one line; a run that records nothing leaves no file. In `--mode vad`,
+each wake word or tap starts a session inside the run's file
+(`session_start` with the trigger, then `session_end` when the follow-up
+window closes). Photos the model looked at (and `look` photos taken with
+`VISION_ENABLED=false`) are saved as `<time>-photo-01.png` etc. next to the
+transcript, not inside it. On startup, the context resumes from the last
+messages of earlier runs - always behind the *current* system prompt
+(the old single-file history also restored its old system prompt, so
+prompt changes didn't take effect until `--fresh`). Resumed photos aren't
+re-sent; a `[photo: ...]` note stays in their place.
+
+Read it with:
+
+```bash
+python3 standalone/show_history.py              # the latest run
+python3 standalone/show_history.py 2026-10-01   # every run that day
+python3 standalone/show_history.py --list
+```
+
+An existing `conversation_history.json` (the old format) is imported once
+as its own run, dated by the file, and moved to
+`data/conversation_history.imported.json`.
+
+**Moving an existing install** (after pulling): the history import is
+automatic. Photos and reference faces move with two `.env` changes - an
+explicit old value overrides the new `data/` defaults:
+
+```bash
+mkdir -p data
+mv known_people data/ 2>/dev/null; rm -f look.png
+# in .env: CAMERA_SNAPSHOT_PATH=data/look.png and KNOWN_PEOPLE_DIR=data/known_people
+# (or delete both lines). standalone/sync_env.py flags the old values.
+```
+
+**Memory.** Plain markdown - open it and edit it; changes apply on the
+next turn, no restart:
+
+```markdown
+## Suneel (primary user)
+- Likes cricket.
+
+## Asha
+- Suneel's daughter. Loves the dance gesture.
+```
+
+One fact per `- ` line under a `## <name>` heading. Cozmo can't tell
+voices apart, so the section with "primary user" in its heading is who he
+assumes he's talking to - rename the template's `## Primary user` to your
+name, keeping "(primary user)". Text above the first `##` heading is notes
+for humans and is never sent. Cozmo edits it himself when asked
+("remember that I like cricket", "forget that"), and also saves clearly
+lasting things people tell him about themselves, saying so out loud.
+`remember_fact` stops at `MEMORY_MAX_FACTS` (default 40) and asks to forget
+something first; facts added by hand beyond that are still sent.
+
+**Search.** `search_memory` matches keywords (a trailing "s" ignored, so
+"like" finds "likes") against saved facts and everything said in the
+archive - the human's words and Cozmo's `say` text, with dates. The system
+prompt includes the current date and time, so "what did we talk about
+yesterday?" can be placed. It's keyword search, not meaning search: "my
+trip" won't find "my vacation".
+
+**Privacy.** Both files are plain text on the Pi, never committed. The
+memory file goes to the chat provider (Groq/OpenAI) with *every* request,
+as part of the system prompt; only `CHAT_PROVIDER=ollama` keeps it local.
+The prompt tells Cozmo never to save passwords, health, money or address
+details, even if asked - keep those out of hand edits too.
+
+**What's verified:** offline tests (`tests/test_history_memory.py`, 55
+checks: archive, resume, import, retention, memory edits, search, and the
+engine calling the tools) and a simulated text-mode run. **Not verified:**
+how well each chat model actually decides when to save, forget, or search
+- that needs real conversations.
 
 **Moods** (used by `say` and inside gestures): `neutral`, `happy`, `excited`,
 `curious`, `proud`, `sad`, `sleepy`, `bored`, `scared`, `surprised`,
@@ -1740,7 +1839,11 @@ annotated list (it's the source of truth). The essentials:
 | `RETURN_TO_POSE_TIMEOUT_S` | Upper bound on one `go_to_pose()` navigation leg before it's aborted (pycozmo's own has no timeout). |
 | `MAX_TOOL_ITERATIONS` | Cap on LLM↔tool round-trips per user turn. |
 | `FINAL_LLM_CALL` | The LLM call after a reply ending in a clean `say` (usually just "done"): `async` (default) reopens the mic right away and makes it in the background, pausing the recording if the model continues (`--mode vad` only; other modes behave as `sync`); `sync` waits for it before listening again (the fallback if `async` misbehaves); `skip` drops it (fastest, but a model that says "sure!" alone and acts in its *next* step, confirmed live with Groq's `openai/gpt-oss-120b`, loses the action). Early end only happens when every tool in the batch is a pure action (`Tool.safe_to_end_turn`, opt-in per tool, so new tools default to asking again) and nothing needs the model's attention (errors, hazards, refused moves, photos). A turn never returns until background gestures finish, so the mic doesn't reopen mid-`spin`. Worked examples: [How a turn ends](#how-a-turn-ends-final_llm_call). |
-| `CONVERSATION_MAX_MESSAGES` / `CONVERSATION_HISTORY_PATH` | Memory size and persistence path. |
+| `CONVERSATION_MAX_MESSAGES` | How many messages the model sees (system prompt + recent history). |
+| `DATA_DIR` | Where runtime data goes (default `data`, relative to the project): history, memory, photos. |
+| `HISTORY_RETENTION_DAYS` | Delete archived days older than this at startup (default `0` = keep everything). |
+| `MEMORY_MAX_FACTS` | Most facts `remember_fact` may save (default 40); the memory is sent with every turn. |
+| `CONVERSATION_HISTORY_PATH` | The old single-file history - only read once, to import it into the archive. |
 | `VAD_AGGRESSIVENESS` / `VAD_SILENCE_MS` / `VAD_MAX_UTTERANCE_S` | Hands-free listening tuning. |
 | `VAD_FOLLOWUP_TIMEOUT_S` | How long a conversation stays open after a reply before the wake word is needed again. |
 | `STT_LANGUAGE` | Language hint for Whisper (Groq/OpenAI/local), default `en`; empty = auto-detect. Stops foreign-language hallucinations. |
@@ -1754,7 +1857,7 @@ annotated list (it's the source of truth). The essentials:
 | `GESTURE_ASYNC_ENABLED` | Whether `gesture` runs in the background so `say` can overlap with it, instead of blocking until the gesture finishes. |
 | `GESTURE_SPEECH_SYNC_ENABLED` | `false` (default) starts `say`'s bundled gesture before synthesizing speech (instant reaction, overlap not guaranteed if synthesis is slow). `true` synthesizes first and starts the gesture right as playback begins (overlap guaranteed regardless of synthesis speed, at the cost of a pause before Cozmo reacts). |
 | `VISION_ENABLED` | Whether `look()`'s photo gets attached to the next LLM turn. |
-| `KNOWN_PEOPLE_DIR` | Where `remember_person`'s reference photos are stored (experimental). |
+| `KNOWN_PEOPLE_DIR` | Where `remember_person`'s reference photos are stored (default `data/known_people`; experimental). |
 
 ---
 
@@ -1821,7 +1924,11 @@ annotated list (it's the source of truth). The essentials:
 
 Done, via `cozmo_brain/`:
 
-- ✅ **Conversation memory** — `Conversation` class, trimmed + persisted to disk.
+- ✅ **Conversation memory** — `Conversation` class, trimmed; every run
+  archived by date under `data/history/` (with photos) and resumed on the
+  next start; `data/memory.md` for facts about people, with
+  `remember_fact`/`forget_fact`/`search_memory`. See
+  [Conversation history and memory](#conversation-history-and-memory).
 - ✅ **Real animation API** — `play_animation`/`list_animations` tools.
 - ✅ **`turn()` calibration** — `--mode calibrate`, offering a choice of two
   checks. The original (spin the wheels for a fixed 2s, estimate the
@@ -2057,7 +2164,11 @@ Still open, roughly in priority order:
 
 1. **Smarter conversation trimming.** Current strategy is a hard message-count
    cutoff. Token-aware summarization of older turns would use the 262144
-   token context window better on long sessions.
+   token context window better on long sessions. Related, not started: an
+   end-of-run summary ("last time we talked about...") to start a new run
+   from instead of resuming raw messages, and suggested memory facts
+   extracted automatically for the user to approve - see
+   [Conversation history and memory](#conversation-history-and-memory).
 2. **Systemd service** for headless/boot-time operation, now that reconnect
    logic makes a long-running session more viable.
 3. **More real animations, curated.** Once `pycozmo_resources.py download`

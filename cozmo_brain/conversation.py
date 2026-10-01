@@ -1,11 +1,14 @@
-"""Conversation memory: keeps chat history across turns with simple trimming."""
+"""Conversation memory: what the model sees - the system prompt plus recent
+chat history, trimmed to a message budget. Every message is also copied to
+the conversation archive (history_archive.py), which keeps everything, and
+the next run resumes from there (load())."""
 
 from __future__ import annotations
 
-import json
 import logging
-from pathlib import Path
 from typing import Any
+
+from cozmo_brain.history_archive import HistoryArchive
 
 logger = logging.getLogger(__name__)
 
@@ -31,33 +34,48 @@ class Conversation:
     summarization as a future improvement).
     """
 
-    def __init__(self, system_prompt: str, max_messages: int = 40, history_path: str | None = None):
+    def __init__(self, system_prompt: str, max_messages: int = 40, archive: HistoryArchive | None = None):
         self._system_prompt = system_prompt
         self._max_messages = max_messages
-        self._history_path = Path(history_path) if history_path else None
+        self.archive = archive
         self.messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+
+    def set_system_prompt(self, system_prompt: str) -> None:
+        """Replace the system prompt (rebuilt every turn with the current
+        memory and time - see engine.py). Not archived: it's not part of
+        what was said."""
+        self._system_prompt = system_prompt
+        self.messages[0] = {"role": "system", "content": system_prompt}
+
+    def mark(self, event: str, **fields: Any) -> None:
+        """Write a marker to the archive (session_start, session_end), if any."""
+        if self.archive is not None:
+            self.archive.record_event(event, **fields)
+
+    def _append(self, msg: dict[str, Any]) -> None:
+        self.messages.append(msg)
+        if self.archive is not None:
+            self.archive.record_message(msg)
+        self._trim()
 
     def add_user(self, text: str, images: list[str] | None = None) -> None:
         msg: dict[str, Any] = {"role": "user", "content": text}
         if images:
             msg["images"] = images
-        self.messages.append(msg)
-        self._trim()
+        self._append(msg)
 
     def add_assistant(self, content: str, tool_calls: list[dict[str, Any]] | None = None) -> None:
         msg: dict[str, Any] = {"role": "assistant", "content": content}
         if tool_calls:
             msg["tool_calls"] = tool_calls
-        self.messages.append(msg)
-        self._trim()
+        self._append(msg)
 
     def add_tool_result(self, tool_name: str, result: str, tool_call_id: str = "") -> None:
         # "name" is Ollama's own convention; "tool_call_id" is what
         # OpenAI-compatible endpoints (Groq, OpenAI) require instead - see
         # openai_compatible_chat.py's _to_wire_messages(), which picks
         # whichever field its target API actually needs.
-        self.messages.append({"role": "tool", "name": tool_name, "tool_call_id": tool_call_id, "content": result})
-        self._trim()
+        self._append({"role": "tool", "name": tool_name, "tool_call_id": tool_call_id, "content": result})
 
     def reset(self) -> None:
         self.messages = [{"role": "system", "content": self._system_prompt}]
@@ -70,25 +88,14 @@ class Conversation:
         self.messages = [system, *_from_first_user(recent)]
         logger.debug("Trimmed conversation history to %d messages", len(self.messages))
 
-    def save(self) -> None:
-        if not self._history_path:
-            return
-        try:
-            self._history_path.write_text(json.dumps(self.messages, indent=2), encoding="utf-8")
-        except OSError as e:
-            logger.warning("Could not save conversation history: %s", e)
-
     def load(self) -> bool:
-        if not self._history_path or not self._history_path.exists():
+        """Resume from the archive: the most recent messages of earlier runs,
+        behind the current system prompt (the saved one may be out of date).
+        Returns whether anything was loaded."""
+        if self.archive is None:
             return False
-        try:
-            messages = json.loads(self._history_path.read_text(encoding="utf-8"))
-            if not messages:
-                return False
-            # A file saved before _trim() learned to cut at a user message
-            # may already start with an orphaned tool result.
-            self.messages = [messages[0], *_from_first_user(messages[1:])]
-            return True
-        except (OSError, json.JSONDecodeError) as e:
-            logger.warning("Could not load conversation history, starting fresh: %s", e)
+        recent = _from_first_user(self.archive.recent_messages(self._max_messages - 1))
+        if not recent:
             return False
+        self.messages = [self.messages[0], *recent]
+        return True

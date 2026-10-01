@@ -20,6 +20,10 @@ conversation_history.json
 # Reference photos for remember_person/who_is_this — personal, local only
 known_people/
 
+# Everything Cozmo saves at runtime: conversation archive, memory.md
+# (facts about people), photos. Personal - never committed.
+data/
+
 # PyCozmo reference clone / downloaded resources (not part of this project's source)
 pycozmo-src/
 

@@ -4,10 +4,20 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _project_path(value: str) -> str:
+    """A relative path is taken from the project folder, not the current
+    directory, so data lands in the same place however the app is started."""
+    path = Path(value)
+    return str(path if path.is_absolute() else PROJECT_ROOT / path)
 
 
 def _env_str(name: str, default: str) -> str:
@@ -239,11 +249,15 @@ class Settings:
     # --- Scratch audio file paths ---
     raw_input_wav: str = field(default_factory=lambda: _env_str("RAW_INPUT_WAV", "input.wav"))
     tts_output_wav: str = field(default_factory=lambda: _env_str("TTS_OUTPUT_WAV", "cozmo_reply.wav"))
-    camera_snapshot_path: str = field(default_factory=lambda: _env_str("CAMERA_SNAPSHOT_PATH", "look.png"))
+    camera_snapshot_path: str = field(
+        default_factory=lambda: _project_path(_env_str("CAMERA_SNAPSHOT_PATH", "data/look.png"))
+    )
 
     # Directory storing reference photos for remember_person/who_is_this.
     # Experimental — see cozmo_brain/tools/registry.py for how matching works.
-    known_people_dir: str = field(default_factory=lambda: _env_str("KNOWN_PEOPLE_DIR", "known_people"))
+    known_people_dir: str = field(
+        default_factory=lambda: _project_path(_env_str("KNOWN_PEOPLE_DIR", "data/known_people"))
+    )
 
     # --- Robot backend ---
     # "real" talks to an actual Cozmo over PyCozmo. "simulated" logs actions to
@@ -362,9 +376,25 @@ class Settings:
     #           (openai/gpt-oss-120b on Groq) loses the action entirely.
     final_llm_call: str = field(default_factory=lambda: _env_str("FINAL_LLM_CALL", "async").lower())
     conversation_max_messages: int = field(default_factory=lambda: _env_int("CONVERSATION_MAX_MESSAGES", 40))
+    # The old single-file history. Only read once, to import it into the
+    # archive under data/history/ (history_archive.py), then moved into
+    # data/. Kept as a setting so an existing .env pointing elsewhere still
+    # gets imported.
     conversation_history_path: str = field(
         default_factory=lambda: _env_str("CONVERSATION_HISTORY_PATH", "conversation_history.json")
     )
+
+    # --- Saved data: conversation archive and memory ---
+    # Everything Cozmo saves at runtime: history/<date>/<run>.jsonl (every
+    # conversation, with its photos), memory.md (facts about people),
+    # known_people/ and look.png. Relative to the project folder.
+    data_dir: str = field(default_factory=lambda: _project_path(_env_str("DATA_DIR", "data")))
+    # Delete archived days older than this many days at startup. 0 = keep
+    # everything forever.
+    history_retention_days: int = field(default_factory=lambda: _env_int("HISTORY_RETENTION_DAYS", 0))
+    # Most facts remember_fact may save (memory.md is sent with every turn,
+    # so this caps its cost). Hand-added facts beyond it are still sent.
+    memory_max_facts: int = field(default_factory=lambda: _env_int("MEMORY_MAX_FACTS", 40))
 
     # --- Voice activity detection (--mode vad) ---
     vad_aggressiveness: int = field(default_factory=lambda: _env_int("VAD_AGGRESSIVENESS", 2))
