@@ -442,7 +442,7 @@ any further.
 **Then, for real:**
 
 ```bash
-# Quick test script:
+# Quick test script (see "Standalone scripts"):
 python3 standalone/orchestrator.py
 
 # Full application:
@@ -781,7 +781,10 @@ much less reliable substitute built entirely on the vision LLM already in
 the loop, no new dependency:
 
 - `remember_person(name)` just saves a reference photo under
-  `KNOWN_PEOPLE_DIR/<name>.jpg` — no processing at all.
+  `KNOWN_PEOPLE_DIR/<name>.jpg` (default `data/known_people/`) — no
+  processing at all. That's a face only; facts about the person go to
+  `data/memory.md` via `remember_fact` (see
+  [Conversation history and memory](#conversation-history-and-memory)).
 - `who_is_this()` captures a new photo, then for each saved reference photo
   sends *both* images to Ollama in one message (`images: [reference, new]`)
   and asks it to judge whether they're the same person.
@@ -1754,7 +1757,104 @@ above, just what they're expected to trigger:
 - *"Remember me as \<name\>"* / *"Do you know who I am?"* → `remember_person` /
   `who_is_this` — see above for what to actually expect from this one.
 
+**Memory:**
+- *"Remember that I like cricket."* → `remember_fact`, then a line under
+  your section in `data/memory.md`.
+- *"What do you know about me?"* → answered from the memory in the prompt,
+  no tool needed.
+- *"Actually, forget that I like cricket."* → `forget_fact`.
+- *"What did we talk about yesterday?"* / *"When did I mention Goa?"* →
+  `search_memory`, answered with dates from the archive.
+
 ---
+
+## Standalone scripts
+
+One-off tools in `standalone/`, separate from the app. Run them from the
+project folder, inside `cozmo-env`.
+
+| Script | What it's for | Needs |
+|---|---|---|
+| `sync_env.py` | After a `git pull`: which `.env` settings are missing, stale, or unknown | Nothing |
+| `show_history.py` | Read archived conversations as a transcript | Nothing |
+| `orchestrator.py` | The original single-file proof of concept: mic → STT → LLM → Cozmo → TTS | Robot, mic, `GROQ_API_KEY`, Ollama |
+| `pose_drift_test.py` | How far Cozmo's own position tracking drifts from reality | Robot, tape, a ruler |
+
+### `sync_env.py` - check `.env` after a pull
+
+`.env` is gitignored, so a pull never updates it. This compares it with
+`.env.example`:
+
+```bash
+python3 standalone/sync_env.py                # report only, changes nothing
+python3 standalone/sync_env.py --apply        # append missing settings (asks first, backs up .env)
+python3 standalone/sync_env.py --apply --yes  # same, without asking
+```
+
+It lists settings missing from `.env` (with their example values), flags
+known-stale values (e.g. a removed Groq model, or `look.png`/`known_people`
+from before `data/`), and lists settings `.env.example` doesn't know - by
+name only, never printing a value. It never changes or removes an existing
+line; `--apply` only appends, with the comments from `.env.example`, after
+saving a timestamped backup.
+
+### `show_history.py` - read past conversations
+
+```bash
+python3 standalone/show_history.py              # the latest run
+python3 standalone/show_history.py 2026-10-01   # every run that day
+python3 standalone/show_history.py --list       # which days/runs exist
+python3 standalone/show_history.py data/history/2026-10-01/15-39-51.jsonl
+```
+
+Output looks like this (one run, `--mode vad`):
+
+```
+===== 2026-10-01 15:39:51  (mode: vad, simulated: False, chat_provider: groq, ...)
+
+--- 15:39:51 woke up (wake word)
+15:39:55 you: hey cozmo, remember that I like cricket
+15:39:57   (remember_fact fact=Likes cricket.)
+15:39:57 Cozmo [happy]: Cricket fan, got it! I'll remember that.
+--- 15:40:20 back to idle
+===== 15:52:03 stopped
+```
+
+It shows what was heard, what Cozmo said (with mood and gesture), the
+other tools he used, failed tools, and the photo files saved next to the
+transcript. The `.jsonl` itself has everything, including every tool
+result. It reads `DATA_DIR` from `.env`. See
+[Conversation history and memory](#conversation-history-and-memory).
+
+### `orchestrator.py` - minimal end-to-end test
+
+```bash
+python3 standalone/orchestrator.py
+```
+
+Press Enter, speak for `RECORD_SECONDS` (default 5), and Cozmo answers;
+type `quit` to exit. Groq Whisper for STT and Groq Orpheus for TTS, Ollama
+(`OLLAMA_BASE_URL`/`OLLAMA_MODEL`) for chat, PyCozmo for the robot. It reads
+the same `.env`, but only its own few settings (`GROQ_API_KEY` is
+required). No memory, history, gestures, or provider switching - useful for
+checking the mic → STT → LLM → robot → speaker chain on the Pi without the
+full app. Its `turn()` is uncalibrated (see [Known gotchas](#known-gotchas)).
+
+### `pose_drift_test.py` - position tracking drift
+
+```bash
+python3 standalone/pose_drift_test.py
+```
+
+An exploratory hardware test behind return-to-charger (roadmap item 6),
+not a routine calibration. It drives a fixed path (`DRIVE_STEPS` at the top
+of the script - edit it for your own test), prints where Cozmo *thinks* he
+is, drives back to the start with `go_to_pose()` plus a heading correction,
+and asks you to measure the real position by hand at each step. Mark the
+start on the floor with tape first; it waits for Enter before moving. Uses
+`TURN_SPEED_MMPS`/`TURN_SECONDS_PER_DEGREE` from `.env`; no LLM, STT, TTS or
+API keys. The protocol and past results are in the script's docstring and
+roadmap item 6.
 
 ## Running the tests
 
@@ -1777,8 +1877,11 @@ docking (`test_return_real`, `test_dock_*`, `test_rotation_direction`), the
 LOW/CRITICAL return policy (`test_return_policy`), fidget and charger
 interplay (`test_fidget_charger`, `test_dock_dropoff`), self-caused-tap
 suppression and VAD limits (`test_abc`), the charger-blocked reply
-(`test_blocked_speech`), and how turns end under every `FINAL_LLM_CALL`
-mode (`test_final_say`, `test_async_*`).
+(`test_blocked_speech`), how turns end under every `FINAL_LLM_CALL`
+mode (`test_final_say`, `test_async_*`), model files found by name in
+`models/` and the real `hey_cozmo` wake word loading (`test_model_paths`),
+and the conversation archive, resume, memory edits and search, including
+the engine calling the memory tools (`test_history_memory`).
 
 `tests/live/` holds **opt-in** tests that make real API calls with the keys
 in your `.env`: which providers accept the conversation history shape, how
