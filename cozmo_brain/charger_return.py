@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import logging
 
+from cozmo_brain.battery_log import BatteryLog
 from cozmo_brain.config import Settings
 from cozmo_brain.engine import CozmoEngine
 from cozmo_brain.robot.base import RobotBackend
@@ -49,10 +50,13 @@ _HELP_TEXT = "My battery's really low, and I can't find my way back to my charge
 
 
 class ChargerReturner:
-    def __init__(self, robot: RobotBackend, engine: CozmoEngine, settings: Settings):
+    def __init__(
+        self, robot: RobotBackend, engine: CozmoEngine, settings: Settings, battery_log: BatteryLog | None = None
+    ):
         self._robot = robot
         self._engine = engine
         self._settings = settings
+        self._battery_log = battery_log
         self._reset_episode()
 
     def _reset_episode(self) -> None:
@@ -125,6 +129,8 @@ class ChargerReturner:
             logger.warning("Battery critical (%.2fV) - returning to the charger on my own.", voltage)
             with self._robot.keep_backpack_light():
                 self._engine.speak(_GOING_TEXT, mood="sleepy")
+            if self._battery_log is not None:
+                self._battery_log.note_return("critical")
             try:
                 result = self._robot.return_to_charger()
                 outcome = charger_return_message(result)

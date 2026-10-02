@@ -84,6 +84,7 @@ See [Roadmap](#roadmap--open-work) for what's still open.
 .
 ├── standalone/              # one-off scripts, not part of cozmo_brain (run from the repo root)
 │   ├── orchestrator.py      # lightweight single-file test script (no memory/tools/gestures)
+│   ├── battery_report.py    # summarise data/battery.jsonl: charge sessions, time off the dock, minutes-to-low
 │   ├── pose_drift_test.py   # pose/dead-reckoning drift test behind return-to-charger (roadmap item 6)
 │   ├── show_history.py      # print archived conversations as a readable transcript
 │   └── sync_env.py          # after a git pull: shows/appends .env settings missing vs .env.example
@@ -97,6 +98,7 @@ See [Roadmap](#roadmap--open-work) for what's still open.
 ├── data/                    # everything Cozmo saves at runtime (gitignored) - see "Conversation history and memory"
 │   ├── history/<date>/<time>.jsonl   # one transcript per run, photos next to it
 │   ├── memory.md            # facts about people, sent to the model every turn - edit freely
+│   ├── battery.jsonl        # battery events: charge curve + every time off the dock (battery_log.py)
 │   ├── known_people/        # remember_person reference photos
 │   └── look.png             # last camera snapshot
 ├── run.sh                   # activates cozmo-env + runs cozmo_brain in one step (./run.sh --help)
@@ -545,6 +547,7 @@ why this ended up folded into `--mode vad` instead of a standalone mode.
 | `drive(distance_mm, speed_mmps)` | Drives straight, clamped to safe limits. |
 | `turn(angle_degrees)` | Turns in place (calibrated via `TURN_SECONDS_PER_DEGREE`). |
 | `dock()` | Goes back onto the charger. If Cozmo remembers where it is (he drove off it earlier and hasn't been picked up or reconnected since), navigates to a staging point in front of it, then reverses on until the contacts engage. Otherwise only reverses in a straight line, so it only works already close and facing away from it. See roadmap item 6. |
+| `leave_charger()` | Drives straight off the dock (the `CHARGER_EXIT_*` drive any movement does first when docked). Refuses honestly, with the voltage, if the battery is too low to leave. No timed return afterwards — the low/critical battery rules bring him back. |
 | `look()` | Captures a camera frame and attaches it to the next LLM turn for vision. |
 | `remember_person(name)` | Captures a reference photo, stored under that name. |
 | `who_is_this()` | Captures a photo and asks the vision LLM if it matches anyone remembered. **Experimental.** |
@@ -1591,6 +1594,68 @@ voltage it received, a frozen value that could otherwise falsely trigger
 `charger_return.py`'s `ChargerReturner`, which decides when to offer or start
 a return to the charger — see roadmap item 6 below.
 
+### Coming off the charger: battery line and charger break
+
+**The model now sees the real battery.** Every turn ends with a
+`[Battery: 3.92V, docked for 12 min.]` line (next to the existing charger
+status), so "are you charged?" / "come out of the charger" are answered from
+the voltage, not guessed — before this, the model only had a one-line
+"on charger / charging / not charging (probably full)" flag and said things
+like "Now I'm fully charged!" with nothing behind it. There is still no
+battery percentage, so the persona prompt tells it never to claim "full".
+Each turn's status lines are also logged at debug level. When asked to come
+out, the model calls the `leave_charger` tool (above) rather than guessing a
+`drive`.
+
+**Charger break (`CHARGER_BREAK_ENABLED`, off by default).** For an old
+device where sitting on the charger for hours isn't ideal (there is no
+temperature sensor, so this is a time limit, not an overheat detector),
+`charger_break.py` steps Cozmo off the dock now and then:
+
+1. After `CHARGER_BREAK_AFTER_MIN` (30) *continuous* minutes docked — the
+   timer resets whenever he leaves the dock for any reason or is picked up —
+   when it's quiet (`IDLE_FIDGET_AFTER_S`, no listening window, no turn
+   running) and the battery isn't too low to leave (the same rule as every
+   movement: docked at or below `BATTERY_LOW_VOLTAGE` stays put), he says
+   he's going to stretch his wheels and drives off with `leave_charger`.
+   There's deliberately no separate "high enough" voltage: the dock reads
+   high and nobody knows this robot's curve yet, so a number would only be a
+   guess — `data/battery.jsonl` (below) collects the real data first.
+2. After a random `CHARGER_BREAK_STRETCH_MIN`–`MAX` (5–10) minutes he says
+   the stretch is over and drives back with `return_to_charger()`. If he
+   can't (picked up, charger location lost) he just stays out and the
+   normal battery rules take over.
+
+Deliberately narrow, so existing behaviour is unchanged: the idle fidget is
+untouched (a `peek` still drives him off the dock at random once charging has
+stopped), and **only a break-initiated exit gets a timed return** — a peek exit
+or a "come out" request stays out until the low-battery offer (3.7V) /
+automatic return (3.5V), exactly as before. Because the break exits via the
+same `drive()` as every other movement, the false-cliff handling, charger
+position recording and low-battery block all still apply. Mind the table edge
+when first enabling it.
+
+**Battery history (`data/battery.jsonl`).** So a later "can I come out, and
+for how long?" decision can be based on *this* robot's battery instead of a
+guessed threshold, `battery_log.py` records events from the battery
+monitor's readings (every `BATTERY_CHECK_INTERVAL_S`, so times are to about
+30s) — events only, a few dozen lines a day, nothing personal:
+
+- `run_start`, `docked` / `undocked`, `charging_started` / `charging_stopped`
+  (with minutes docked so far) — the on-charger charge curve.
+- `stretch` — one per time off the dock, written when he's back: how he left
+  (`break`, `asked` = `leave_charger`, `moved` = an idle peek or any other
+  movement, `picked_up`), the voltage on the dock just before and the first
+  reading off it, minutes off, lowest voltage, minutes until the first
+  low/critical reading, and how it ended (`break_over`, `dock_tool`,
+  `critical`, `run_end`, `other` = e.g. put back by hand).
+
+The same events go to the normal log at info level (`Battery: ...`). It's
+kept until you delete it — a retention setting of its own comes with roadmap
+item 8, the feature that will use it. Nothing in the app uses these numbers
+yet — `standalone/battery_report.py` summarises them, see
+[Standalone scripts](#standalone-scripts).
+
 ### Wake word detection (zero-network)
 
 `--mode vad` originally reacted to *any* detected speech — no wake word, so
@@ -1877,6 +1942,7 @@ project folder, inside `cozmo-env`.
 |---|---|---|
 | `sync_env.py` | After a `git pull`: which `.env` settings are missing, stale, or unknown | Nothing |
 | `show_history.py` | Read archived conversations as a transcript | Nothing |
+| `battery_report.py` | How this robot's battery behaves on and off the charger (`data/battery.jsonl`) | Nothing |
 | `orchestrator.py` | The original single-file proof of concept: mic → STT → LLM → Cozmo → TTS | Robot, mic, `GROQ_API_KEY`, Ollama |
 | `pose_drift_test.py` | How far Cozmo's own position tracking drifts from reality | Robot, tape, a ruler |
 
@@ -1897,6 +1963,23 @@ from before `data/`), and lists settings `.env.example` doesn't know - by
 name only, never printing a value. It never changes or removes an existing
 line; `--apply` only appends, with the comments from `.env.example`, after
 saving a timestamped backup.
+
+### `battery_report.py` - how the battery actually behaves
+
+Reads `data/battery.jsonl` (see
+[Coming off the charger](#coming-off-the-charger-battery-line-and-charger-break))
+and prints charge sessions (voltage on docking, minutes until `IS_CHARGING`
+went off, total time docked), every stretch off the dock (how he left,
+voltages, minutes off, minutes until low/critical, how it ended), and —
+once at least 3 stretches actually reached low — a straight-line fit of
+"minutes until low" against the voltage on leaving. That's the evidence for
+deciding how a smarter "can I come out, and for how long?" should work; with
+less data it says so instead of guessing.
+
+```bash
+python3 standalone/battery_report.py          # data/battery.jsonl
+python3 standalone/battery_report.py --demo   # made-up numbers, just to see the format
+```
 
 ### `show_history.py` - read past conversations
 
@@ -1983,7 +2066,12 @@ mode (`test_final_say`, `test_async_*`), model files found by name in
 and the conversation archive, resume, memory edits and search, including
 the engine calling the memory tools (`test_history_memory`), and suggested
 facts: the after-conversation check, the Suggested/Declined sections, and
-keep/discard/later and clearing the lists (`test_memory_suggestions`).
+keep/discard/later and clearing the lists (`test_memory_suggestions`),
+the presence check — head tilt, silent for known/empty, one casual ask for a
+stranger, how it slots into the idle fidget (`test_presence`), the charger
+break, `leave_charger`, the per-turn battery line and who-moved-him labels
+(`test_charger_break`), and the battery history records and analysis
+(`test_battery_log`).
 
 `tests/live/` holds **opt-in** tests that make real API calls with the keys
 in your `.env`: which providers accept the conversation history shape, how
@@ -2040,6 +2128,7 @@ annotated list (it's the source of truth). The essentials:
 | `CHARGER_DOCK_DISTANCE_MM` / `CHARGER_DOCK_SPEED_MMPS` | How far/fast the `dock` tool reverses onto the charger (real backend only). The distance also sets how far out from the recorded charger pose the return-to-charger staging point is. |
 | `CHARGER_DOCK_OVERSHOOT_MM` | How much further than `CHARGER_DOCK_DISTANCE_MM` the dock reverse may continue; it stops the moment the charger contacts engage. |
 | `CHARGER_CONTACT_WAIT_S` | How long `dock()` waits after reversing for the charger contacts to read as engaged before calling it a miss (the flag can lag behind actually being seated). |
+| `CHARGER_BREAK_ENABLED` | Default `false`. `true` lets Cozmo step off the charger after `CHARGER_BREAK_AFTER_MIN` continuous docked minutes (30) while quiet and not too low to leave (`BATTERY_LOW_VOLTAGE`), then drive back after a random `CHARGER_BREAK_STRETCH_MIN`–`MAX` minutes (5–10). See [Coming off the charger](#coming-off-the-charger-battery-line-and-charger-break). |
 | `AUTO_RETURN_TO_CHARGER_ENABLED` | Low-battery return-to-charger: offer at `BATTERY_LOW_VOLTAGE`, go on its own at `BATTERY_CRITICAL_VOLTAGE`, ask for help if the charger location isn't known (default `true`). |
 | `RETURN_TO_POSE_TIMEOUT_S` | Upper bound on one `go_to_pose()` navigation leg before it's aborted (pycozmo's own has no timeout). |
 | `MAX_TOOL_ITERATIONS` | Cap on LLM↔tool round-trips per user turn. |
@@ -3111,6 +3200,21 @@ Still open, roughly in priority order:
    day at 9") are more work - start with one-off ones. To brainstorm
    before building: what happens to a missed reminder, whether he repeats
    one until it's acknowledged, and whether quiet hours are needed.
+8. **"Can I come out, and for how long?" from real battery data - planned,
+   data collection only so far.** Today leaving the charger (asked, idle
+   peek, or the charger break) is allowed by one fixed rule: not docked at
+   or below `BATTERY_LOW_VOLTAGE`. A guessed "high enough" voltage was
+   deliberately not added, since the dock reads high and this robot's curve
+   is unknown. Instead `data/battery.jsonl` (`battery_log.py`, see
+   [Coming off the charger](#coming-off-the-charger-battery-line-and-charger-break))
+   records every charge session and every stretch off the dock. To build,
+   once a few stretches have actually reached low:
+   - check the numbers with `python3 standalone/battery_report.py`, then
+     decide the rule (e.g. the minutes-to-low fit vs voltage on leaving);
+   - use it when asked to come out ("sure, I've got about 10 minutes") and
+     for the charger break, falling back to today's rule with too little data;
+   - add a separate retention setting for `battery.jsonl` (it is kept
+     forever until then - deliberately not tied to `HISTORY_RETENTION_DAYS`).
 
 ---
 

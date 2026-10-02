@@ -14,6 +14,8 @@ from cozmo_brain.config import PROJECT_ROOT, settings
 from cozmo_brain.conversation import Conversation
 from cozmo_brain.engine import CozmoEngine
 from cozmo_brain.history_archive import HistoryArchive, prune_history
+from cozmo_brain.battery_log import BatteryLog
+from cozmo_brain.charger_break import ChargerBreak
 from cozmo_brain.connection_monitor import ConnectionMonitor
 from cozmo_brain.idle_fidget import IdleFidgeter
 from cozmo_brain.people import Presence
@@ -125,7 +127,8 @@ def main(argv: list[str] | None = None) -> int:
         memory = Memory(data_dir / "memory.md", history_dir, max_facts=settings.memory_max_facts)
         memory.ensure_file()
         presence = Presence()
-        tools = build_tools(robot, speech, ollama, settings, memory=memory, presence=presence)
+        battery_log = BatteryLog(data_dir / "battery.jsonl", robot, settings)
+        tools = build_tools(robot, speech, ollama, settings, memory=memory, presence=presence, battery_log=battery_log)
 
         conversation = Conversation(
             SYSTEM_PROMPT,
@@ -156,13 +159,22 @@ def main(argv: list[str] | None = None) -> int:
         # Started after the engine exists (not alongside pickup_reactor
         # above) because the low-battery return-to-charger policy speaks and
         # writes to the conversation through it.
-        charger_returner = ChargerReturner(robot, engine, settings)
-        battery_monitor = BatteryMonitor(robot, settings, on_reading=charger_returner.on_battery_reading)
+        charger_returner = ChargerReturner(robot, engine, settings, battery_log=battery_log)
+
+        def on_battery_reading(voltage: float) -> None:
+            battery_log.on_reading(voltage)  # first: the returner may block on a return drive
+            charger_returner.on_battery_reading(voltage)
+
+        battery_monitor = BatteryMonitor(robot, settings, on_reading=on_battery_reading)
         battery_monitor.start()
 
         presence_checker = PresenceChecker(robot, engine, ollama, settings, presence)
         idle_fidgeter = IdleFidgeter(robot, engine, settings, presence_checker)
         idle_fidgeter.start()
+
+        charger_break = ChargerBreak(robot, engine, settings, battery_log=battery_log)
+        engine.dock_minutes_fn = charger_break.timer.minutes
+        charger_break.start()
 
         connection_monitor = ConnectionMonitor(robot, engine, settings)
         connection_monitor.start()
@@ -184,6 +196,8 @@ def main(argv: list[str] | None = None) -> int:
             battery_monitor.stop()
             pickup_reactor.stop()
             idle_fidgeter.stop()
+            charger_break.stop()
+            battery_log.close()
             connection_monitor.stop()
             if extractor is not None:
                 # Whatever wasn't checked yet (all of it, outside --mode vad).

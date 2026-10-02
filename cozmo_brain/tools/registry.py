@@ -14,6 +14,7 @@ import re
 import threading
 
 from cozmo_brain.audio.player import play_wav
+from cozmo_brain.battery_log import BatteryLog
 from cozmo_brain.config import Settings
 from cozmo_brain.imaging import encode_image_b64
 from cozmo_brain.llm.chat_client import ChatClient
@@ -78,6 +79,33 @@ def _charger_blocked_result(verb: str) -> ToolResult:
     )
 
 
+def leave_charger(robot: RobotBackend, settings: Settings) -> ToolResult:
+    """Drive straight off the dock (the same CHARGER_EXIT_* drive any other
+    movement does first when it starts docked - real.py's drive() handles the
+    false cliff trigger, records where the charger is, and refuses while the
+    battery's too low). Shared by the `leave_charger` tool and the timed
+    charger break (charger_break.py)."""
+    if not robot.is_on_charger():
+        return ToolResult(True, "Already off the charger.")
+    voltage = robot.get_battery_voltage()
+    result = robot.drive(settings.charger_exit_distance_mm, settings.charger_exit_speed_mmps)
+    if not result.moved:
+        reading = f" ({voltage:.2f}V)" if voltage is not None else ""
+        return ToolResult(
+            True,
+            f"Didn't leave the charger - the battery{reading} is too low to come off yet. "
+            "Tell them out loud you can't come out yet because you need to charge more.",
+            extra={"blocked_by_charger": True, **_ATTENTION},
+        )
+    if result.hazard:
+        return ToolResult(
+            True, f"Only made partway off the charger - {_HAZARD_MESSAGES[result.hazard]}.", extra=_ATTENTION
+        )
+    if robot.is_on_charger():
+        return ToolResult(True, "Drove forward, but the charger contacts still read as docked.", extra=_ATTENTION)
+    return ToolResult(True, "Drove off the charger.")
+
+
 def _sanitize_name(name: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", name.strip()).strip("_")
     return cleaned.lower() or "unnamed"
@@ -90,6 +118,7 @@ def build_tools(
     settings: Settings,
     memory: Memory | None = None,
     presence: Presence | None = None,
+    battery_log: BatteryLog | None = None,
 ) -> list[Tool]:
     """Every tool, plus the memory tools (memory_tools.py) when `memory` is
     given. `presence` (people.py) is told who remember_person/who_is_this
@@ -216,6 +245,8 @@ def build_tools(
     def handle_dock() -> ToolResult:
         if robot.is_on_charger():
             return ToolResult(True, "Already on the charger - no need to dock.")
+        if battery_log is not None:
+            battery_log.note_return("dock_tool")
         # Known charger location (recorded when Cozmo last drove off it, and
         # still valid - no pickup/reconnect since): navigate back to the
         # staging point first, then dock. Otherwise fall back to the plain
@@ -235,6 +266,11 @@ def build_tools(
                 True, "Got caught on the edge of the charger while backing in and stopped - not docked.", extra=_ATTENTION
             )
         return ToolResult(True, "Backed onto the charger to dock.")
+
+    def handle_leave_charger() -> ToolResult:
+        if battery_log is not None and robot.is_on_charger():
+            battery_log.note_exit("asked")
+        return leave_charger(robot, settings)
 
     def handle_look() -> ToolResult:
         os.makedirs(os.path.dirname(settings.camera_snapshot_path) or ".", exist_ok=True)
@@ -399,6 +435,19 @@ def build_tools(
             ),
             parameters={"type": "object", "properties": {}},
             handler=lambda _args: handle_dock(),
+            safe_to_end_turn=True,
+        ),
+        Tool(
+            name="leave_charger",
+            description=(
+                "Come out of the charger: drives straight off the dock a short, safe distance. "
+                "Use this whenever asked to come out, leave the charger, get off the dock, or "
+                "give the charger/battery a rest - not drive(). It works whenever the battery "
+                "status says it's OK to leave; the result says if the battery is too low. Once "
+                "out, Cozmo stays out until the battery gets low or he's asked to dock."
+            ),
+            parameters={"type": "object", "properties": {}},
+            handler=lambda _args: handle_leave_charger(),
             safe_to_end_turn=True,
         ),
         Tool(

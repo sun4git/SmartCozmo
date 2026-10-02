@@ -496,6 +496,20 @@ class Settings:
     idle_fidget_enabled: bool = field(default_factory=lambda: _env_bool("IDLE_FIDGET_ENABLED", True))
     idle_fidget_after_s: int = field(default_factory=lambda: _env_int("IDLE_FIDGET_AFTER_S", 30))
 
+    # --- Charger break (step off the dock now and then) ---
+    # After this many continuous minutes docked, Cozmo says so and drives off
+    # the charger for a short stretch, then drives back on his own - rest for
+    # the charger/battery on an old device, without waiting for it to run
+    # low. Needs real quiet (IDLE_FIDGET_AFTER_S), and the battery must not be
+    # too low to leave (the same BATTERY_LOW_VOLTAGE rule as every movement).
+    # Exits by an idle peek or by asking "come out" get no timed return.
+    # See charger_break.py. Off by default: it moves him unprompted.
+    charger_break_enabled: bool = field(default_factory=lambda: _env_bool("CHARGER_BREAK_ENABLED", False))
+    charger_break_after_min: float = field(default_factory=lambda: _env_float("CHARGER_BREAK_AFTER_MIN", 30.0))
+    # Random time off the dock before heading back, within this range.
+    charger_break_stretch_min: float = field(default_factory=lambda: _env_float("CHARGER_BREAK_STRETCH_MIN", 5.0))
+    charger_break_stretch_max: float = field(default_factory=lambda: _env_float("CHARGER_BREAK_STRETCH_MAX", 10.0))
+
     # --- Presence check (who's in front of Cozmo) ---
     # In place of an idle fidget, occasionally look up at the chair, work out
     # who's there (reference photos from remember_person) and, for a

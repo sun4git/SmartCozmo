@@ -99,6 +99,10 @@ class CozmoEngine:
         # process start rather than looking infinitely idle before the
         # first turn ever happens.
         self.last_interaction_monotonic: float = time.monotonic()
+        # Minutes Cozmo has been continuously docked, or None when he isn't
+        # (main.py sets this to charger_break.py's DockTimer.minutes) - shown
+        # in the per-turn battery line.
+        self.dock_minutes_fn: Callable[[], float | None] | None = None
         # True while --mode vad has a listening window open (after a wake
         # word/tap, until "no follow-up heard"). idle_fidget.py doesn't
         # fidget then - confirmed on real hardware that a fidget's motor
@@ -198,6 +202,24 @@ class CozmoEngine:
             return "[Status: I'm on my charger and charging.]"
         return "[Status: I'm on my charger, not currently charging (probably full).]"
 
+    def _battery_note(self) -> str | None:
+        """The real voltage (and time docked) for every turn - the model has
+        no battery percentage, and without this it guessed ("fully charged!")
+        from the one-line charger status alone."""
+        try:
+            voltage = self._robot.get_battery_voltage()
+            if voltage is None:
+                return None
+            docked_for = ""
+            if self.dock_minutes_fn is not None:
+                minutes = self.dock_minutes_fn()
+                if minutes is not None:
+                    docked_for = f", docked for {minutes:.0f} min"
+            return f"[Battery: {voltage:.2f}V{docked_for}.]"
+        except Exception as e:  # noqa: BLE001 - a status check must never break a turn
+            logger.debug("Battery note failed: %s", e)
+            return None
+
     def _movement_blocked(self) -> bool:
         try:
             return self._robot.is_movement_blocked()
@@ -286,6 +308,10 @@ class CozmoEngine:
         charger_note = self._charger_status_note()
         if charger_note:
             user_text = f"{user_text}\n\n{charger_note}"
+        battery_note = self._battery_note()
+        if battery_note:
+            user_text = f"{user_text}\n{battery_note}"
+        logger.debug("Status notes sent: %s | %s", charger_note, battery_note)
         if self._movement_blocked():
             user_text = f"{user_text}\n\n{_CHARGER_BLOCKED_NOTE}"
         self.conversation.add_user(user_text, images=images)
