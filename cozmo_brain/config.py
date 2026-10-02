@@ -496,6 +496,20 @@ class Settings:
     idle_fidget_enabled: bool = field(default_factory=lambda: _env_bool("IDLE_FIDGET_ENABLED", True))
     idle_fidget_after_s: int = field(default_factory=lambda: _env_int("IDLE_FIDGET_AFTER_S", 30))
 
+    # --- Presence check (who's in front of Cozmo) ---
+    # In place of an idle fidget, occasionally look up at the chair, work out
+    # who's there (reference photos from remember_person) and, for a
+    # stranger, ask who they are. See presence.py. Off by default: every
+    # look sends a photo of whoever is there to the VISION_PROVIDER.
+    presence_check_enabled: bool = field(default_factory=lambda: _env_bool("PRESENCE_CHECK_ENABLED", False))
+    # Head tilt for the look, in degrees (the robot's maximum is ~44).
+    presence_head_angle_deg: float = field(default_factory=lambda: _env_float("PRESENCE_HEAD_ANGLE_DEG", 35.0))
+    # Seconds before looking again after seeing a known person / nobody / a
+    # stranger (the last doubles as the minimum gap between "who are you?"s).
+    presence_recheck_s: int = field(default_factory=lambda: _env_int("PRESENCE_RECHECK_S", 900))
+    presence_empty_retry_s: int = field(default_factory=lambda: _env_int("PRESENCE_EMPTY_RETRY_S", 300))
+    presence_ask_cooldown_s: int = field(default_factory=lambda: _env_int("PRESENCE_ASK_COOLDOWN_S", 3600))
+
     # --- Gesture/speech concurrency ---
     # Whether the `gesture` tool runs asynchronously (starts the
     # choreography on a background thread and returns immediately) instead

@@ -857,6 +857,47 @@ theoretical caveat. Treat any match as Cozmo's fun guess, not a fact, and
 say so — the persona prompt already leans into this ("his eyesight isn't
 great") rather than hiding it.
 
+#### Presence check: knowing who's at the desk (`PRESENCE_CHECK_ENABLED`)
+
+Cozmo sits on the desk with the person in the chair in front of him, so he
+can occasionally look up and work out who he's talking to, without being
+asked. **Off by default** (see privacy below). When on, `presence.py` takes
+the place of an idle fidget (`idle_fidget.py`), so it only ever happens after
+`IDLE_FIDGET_AFTER_S` of quiet — never mid-conversation, never while picked
+up — and holds `turn_lock` like a fidget does:
+
+1. He tilts his head up (`PRESENCE_HEAD_ANGLE_DEG`, default 35°), takes one
+   photo, lowers his head, and **deletes the photo** straight away.
+2. The vision model is asked whether a real face is visible, then whether it
+   matches each `remember_person` reference photo (shared helpers in
+   `people.py`, also used by `who_is_this`).
+3. What happens next is deliberately low-key:
+
+| Result | What Cozmo does | Next look |
+|---|---|---|
+| Nobody in view | Nothing (clears who he last saw) | after `PRESENCE_EMPTY_RETRY_S` (300s) |
+| A known person | Nothing out loud. The name goes into the system prompt as "a guess from a blurry photo", so he can use it naturally | after `PRESENCE_RECHECK_S` (900s) |
+| A stranger | One casual spoken line ("Hi there! I don't think I know you yet. What's your name?"), at most once per `PRESENCE_ASK_COOLDOWN_S` (3600s). A note tells the model to call `remember_person` if they give a name, to drop it if they brush it off, and — if someone is already enrolled — to casually ask once where that person is | after `PRESENCE_ASK_COOLDOWN_S` |
+
+`remember_person` and `who_is_this` feed the same "who's here" state, and
+while a stranger is the last thing he saw, the prompt tells him not to assume
+it's the primary user.
+
+Caveats:
+
+- **Privacy:** every look sends a photo of whoever is there to
+  `VISION_PROVIDER` (the chat provider if blank). With a local Ollama that
+  stays on your machine; with Groq/OpenAI it is a cloud upload of whoever is
+  at the desk. Enable it only if everyone in the room is fine with that.
+- **Reliability:** same as `who_is_this` — a vision model comparing blurry
+  photos, so expect misses and the odd needless "who are you?".
+- **Answering him:** in `--mode vad` the person may need to say the wake word
+  before replying to his question (no listening window opens after it).
+- **Head angle is a guess** — tune `PRESENCE_HEAD_ANGLE_DEG` once you've seen
+  what he sees. Not yet verified on real hardware.
+- It works even with `IDLE_FIDGET_ENABLED=false` (the look still runs; the
+  gestures don't).
+
 ### Real bugs this uncovered
 
 While wiring up `drive()`/`turn()`, we found that this version of PyCozmo's
@@ -2023,6 +2064,9 @@ annotated list (it's the source of truth). The essentials:
 | `GESTURE_SPEECH_SYNC_ENABLED` | `false` (default) starts `say`'s bundled gesture before synthesizing speech (instant reaction, overlap not guaranteed if synthesis is slow). `true` synthesizes first and starts the gesture right as playback begins (overlap guaranteed regardless of synthesis speed, at the cost of a pause before Cozmo reacts). |
 | `VISION_ENABLED` | Whether `look()`'s photo gets attached to the next LLM turn. |
 | `KNOWN_PEOPLE_DIR` | Where `remember_person`'s reference photos are stored (default `data/known_people`; experimental). |
+| `PRESENCE_CHECK_ENABLED` | Default `false`. `true` lets Cozmo occasionally look up when idle to see who's at the desk, and ask strangers who they are (see [Presence check](#presence-check-knowing-whos-at-the-desk-presence_check_enabled)). Sends a photo to `VISION_PROVIDER` each look. |
+| `PRESENCE_HEAD_ANGLE_DEG` | Head tilt for the look (default 35°; robot max ≈ 44°). |
+| `PRESENCE_RECHECK_S` / `PRESENCE_EMPTY_RETRY_S` / `PRESENCE_ASK_COOLDOWN_S` | Seconds before the next look after a known person (900) / nobody (300) / a stranger (3600, also the minimum gap between "who are you?"s). |
 
 ---
 

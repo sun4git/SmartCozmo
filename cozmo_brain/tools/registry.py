@@ -19,6 +19,7 @@ from cozmo_brain.imaging import encode_image_b64
 from cozmo_brain.llm.chat_client import ChatClient
 from cozmo_brain.llm.speech_client import SpeechClient
 from cozmo_brain.memory import Memory
+from cozmo_brain.people import Presence, find_match, known_people
 from cozmo_brain.robot.base import MoveResult, RobotBackend
 from cozmo_brain.robot.gestures import GESTURES
 from cozmo_brain.robot.moods import MOODS
@@ -28,22 +29,10 @@ from cozmo_brain.tools.memory_tools import build_memory_tools
 _MOOD_NAMES = sorted(MOODS)
 _GESTURE_NAMES = sorted(GESTURES)
 
-_KNOWN_PHOTO_EXTS = (".jpg", ".jpeg", ".png")
-
 _HAZARD_MESSAGES = {
     "cliff": "detected a cliff/edge partway through and immediately backed away for safety",
     "fall": "detected a fall partway through and stopped immediately for safety",
 }
-
-_COMPARE_FACES_PROMPT = (
-    "You are comparing two photos taken by a low-resolution, often blurry robot "
-    "camera with a warm/reddish color cast — ignore lighting and color entirely "
-    "and judge only facial structure. The first photo is a reference photo of a "
-    "person named {name}. The second photo was just taken. Is the person in the "
-    "second photo the same person as in the first photo? Reply with exactly one "
-    "word: yes or no."
-)
-
 
 _CHARGER_RETURN_REASONS = {
     "no_charger_pose": "don't know where the charger is (haven't left it this session, or was picked up/reconnected since)",
@@ -95,9 +84,16 @@ def _sanitize_name(name: str) -> str:
 
 
 def build_tools(
-    robot: RobotBackend, speech: SpeechClient, ollama: ChatClient, settings: Settings, memory: Memory | None = None
+    robot: RobotBackend,
+    speech: SpeechClient,
+    ollama: ChatClient,
+    settings: Settings,
+    memory: Memory | None = None,
+    presence: Presence | None = None,
 ) -> list[Tool]:
-    """Every tool, plus the memory tools (memory_tools.py) when `memory` is given."""
+    """Every tool, plus the memory tools (memory_tools.py) when `memory` is
+    given. `presence` (people.py) is told who remember_person/who_is_this
+    identify, so the system prompt can use their name."""
     def handle_say(text: str, mood: str = "neutral", gesture: str | None = None) -> ToolResult:
         # "neutral" now resets pose (see moods.py) rather than being a
         # no-op, so it must actually run, not be skipped like other moods
@@ -249,31 +245,24 @@ def build_tools(
         os.makedirs(settings.known_people_dir, exist_ok=True)
         path = os.path.join(settings.known_people_dir, f"{_sanitize_name(name)}.jpg")
         robot.capture_photo(path)
+        if presence is not None:
+            presence.set_person(name)
         return ToolResult(True, f"Got it - I'll remember this face as {name}.")
 
     def handle_who_is_this() -> ToolResult:
-        known_dir = settings.known_people_dir
-        known_files = (
-            sorted(f for f in os.listdir(known_dir) if f.lower().endswith(_KNOWN_PHOTO_EXTS))
-            if os.path.isdir(known_dir)
-            else []
-        )
-        if not known_files:
+        people = known_people(settings.known_people_dir)
+        if not people:
             return ToolResult(True, "I don't know anyone yet — nobody has been introduced with remember_person.")
 
         os.makedirs(os.path.dirname(settings.camera_snapshot_path) or ".", exist_ok=True)
         new_path = robot.capture_photo(settings.camera_snapshot_path)
-        new_b64 = encode_image_b64(new_path)
         extra = {"image_path": new_path, "image_caption": "[Cozmo just took a photo to see who this is.]"}
 
-        for filename in known_files:
-            name = os.path.splitext(filename)[0]
-            reference_b64 = encode_image_b64(os.path.join(known_dir, filename))
-            prompt = _COMPARE_FACES_PROMPT.format(name=name)
-            response = ollama.chat([{"role": "user", "content": prompt, "images": [reference_b64, new_b64]}])
-            if response.content.strip().lower().startswith("yes"):
-                return ToolResult(True, f"This looks like it might be {name} (not certain — guess only).", extra=extra)
-
+        name = find_match(ollama, people, encode_image_b64(new_path))
+        if name:
+            if presence is not None:
+                presence.set_person(name)
+            return ToolResult(True, f"This looks like it might be {name} (not certain — guess only).", extra=extra)
         return ToolResult(True, "I took a look, but I don't recognize this person.", extra=extra)
 
     # safe_to_end_turn=True marks pure actions only (see tools/base.py). The

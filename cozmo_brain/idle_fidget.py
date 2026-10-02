@@ -17,6 +17,7 @@ import time
 
 from cozmo_brain.config import Settings
 from cozmo_brain.engine import CozmoEngine
+from cozmo_brain.presence import PresenceChecker
 from cozmo_brain.robot.base import RobotBackend
 
 logger = logging.getLogger(__name__)
@@ -30,19 +31,31 @@ _IDLE_GESTURES = ("peek", "shrug")
 
 
 class IdleFidgeter:
-    def __init__(self, robot: RobotBackend, engine: CozmoEngine, settings: Settings):
+    def __init__(
+        self,
+        robot: RobotBackend,
+        engine: CozmoEngine,
+        settings: Settings,
+        presence_checker: PresenceChecker | None = None,
+    ):
         self._robot = robot
         self._engine = engine
         self._settings = settings
+        # When given and due, replaces this cycle's gesture with a look at
+        # who's in front of Cozmo (presence.py) - same idle gate, same lock.
+        self._presence_checker = presence_checker
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._last_fidget_monotonic = time.monotonic()
 
     def start(self) -> None:
-        if not self._settings.idle_fidget_enabled:
+        if not (self._settings.idle_fidget_enabled or self._presence_due_possible()):
             return
         self._thread = threading.Thread(target=self._run, name="idle-fidget", daemon=True)
         self._thread.start()
+
+    def _presence_due_possible(self) -> bool:
+        return self._presence_checker is not None and self._settings.presence_check_enabled
 
     def stop(self) -> None:
         self._stop.set()
@@ -71,8 +84,14 @@ class IdleFidgeter:
         # docked it ran and drove him straight back off the charger at 3.2V.
         if not self._engine.turn_lock.acquire(blocking=False):
             return
+        gesture = ""
         try:
             self._last_fidget_monotonic = now
+            if self._presence_checker is not None and self._presence_checker.due():
+                self._presence_checker.run()
+                return
+            if not self._settings.idle_fidget_enabled:
+                return
             gesture = random.choice(_IDLE_GESTURES)
             # A fidget is the one thing that must not leave the charger while
             # it's still charging - there's no reason to come out. Face/head/

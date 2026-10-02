@@ -16,6 +16,8 @@ from cozmo_brain.engine import CozmoEngine
 from cozmo_brain.history_archive import HistoryArchive, prune_history
 from cozmo_brain.connection_monitor import ConnectionMonitor
 from cozmo_brain.idle_fidget import IdleFidgeter
+from cozmo_brain.people import Presence
+from cozmo_brain.presence import PresenceChecker
 from cozmo_brain.llm import create_chat_client, create_speech_client
 from cozmo_brain.memory import Memory
 from cozmo_brain.memory_suggestions import SuggestionExtractor
@@ -122,7 +124,8 @@ def main(argv: list[str] | None = None) -> int:
         prune_history(history_dir, settings.history_retention_days)
         memory = Memory(data_dir / "memory.md", history_dir, max_facts=settings.memory_max_facts)
         memory.ensure_file()
-        tools = build_tools(robot, speech, ollama, settings, memory=memory)
+        presence = Presence()
+        tools = build_tools(robot, speech, ollama, settings, memory=memory, presence=presence)
 
         conversation = Conversation(
             SYSTEM_PROMPT,
@@ -135,7 +138,9 @@ def main(argv: list[str] | None = None) -> int:
         engine = CozmoEngine(
             settings, robot, ollama, speech, tools, conversation,
             system_prompt_fn=lambda: build_system_prompt(
-                memory.prompt_section(), suggestions_section=memory.suggestions_prompt()
+                memory.prompt_section(),
+                suggestions_section=memory.suggestions_prompt(),
+                presence_section=presence.prompt_section(),
             ),
         )
         extractor = SuggestionExtractor(ollama, memory, archive) if settings.memory_suggestions_enabled else None
@@ -155,7 +160,8 @@ def main(argv: list[str] | None = None) -> int:
         battery_monitor = BatteryMonitor(robot, settings, on_reading=charger_returner.on_battery_reading)
         battery_monitor.start()
 
-        idle_fidgeter = IdleFidgeter(robot, engine, settings)
+        presence_checker = PresenceChecker(robot, engine, ollama, settings, presence)
+        idle_fidgeter = IdleFidgeter(robot, engine, settings, presence_checker)
         idle_fidgeter.start()
 
         connection_monitor = ConnectionMonitor(robot, engine, settings)

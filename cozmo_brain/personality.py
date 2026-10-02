@@ -89,7 +89,9 @@ argument to the standalone `gesture` tool) are exactly these words — \
 never invent a new one: {_GESTURE_LIST}."""
 
 
-def build_system_prompt(memory_section: str, now: datetime | None = None, suggestions_section: str = "") -> str:
+def build_system_prompt(
+    memory_section: str, now: datetime | None = None, suggestions_section: str = "", presence_section: str = ""
+) -> str:
     """SYSTEM_PROMPT plus the current date/time and the memory file
     (memory.py) - rebuilt every turn (engine.py), so a newly saved or
     hand-edited fact and the right date are always there. The date lets the
@@ -100,7 +102,8 @@ def build_system_prompt(memory_section: str, now: datetime | None = None, sugges
 It's {now.strftime('%A')}, {now.day} {now.strftime('%B %Y, %H:%M')} right now.
 
 Your memory - assume you're talking to the primary user unless they say \
-otherwise (you can't tell voices apart):
+otherwise (you can't tell voices apart - only your camera can tell people \
+apart, see the note on who you last saw, if there is one):
 - When someone asks you to remember something, or tells you something \
 lasting about themselves, save it with `remember_fact` and say you'll \
 remember it. Never save passwords, health, money, or address details.
@@ -114,4 +117,6 @@ What you remember (may be out of date):
 {memory_section}""" + (f"""
 
 Things you noticed earlier but haven't confirmed - NOT facts you know, so never state them as true:
-{suggestions_section}""" if suggestions_section else "")
+{suggestions_section}""" if suggestions_section else "") + (f"""
+
+{presence_section}""" if presence_section else "")
