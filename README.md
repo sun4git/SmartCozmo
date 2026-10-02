@@ -689,7 +689,8 @@ check off.
 
 When you quit (Ctrl+C, `quit` in text mode, or `pkill -f 'cozmo_brain --mode vad'`
 from another shell - SIGTERM is handled exactly like Ctrl+C, so systemd stops
-it cleanly too; only `kill -9` skips this), the app checks whatever
+it cleanly too; only `kill -9` skips this; it ends with `Stopped.` and exit
+code 130, no traceback - real errors still print theirs), the app checks whatever
 wasn't checked yet - it prints "Checking this conversation for anything
 worth remembering..." and exiting can take a few seconds longer. In
 `--mode vad` that's usually nothing (each conversation was already checked

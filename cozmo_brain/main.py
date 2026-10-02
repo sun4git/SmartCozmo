@@ -59,6 +59,15 @@ def _stop_cleanly_on_sigterm() -> None:
     signal.signal(signal.SIGTERM, handler)
 
 
+def _line_buffered_stdout() -> None:
+    """Redirected to a file (e.g. `./run.sh ... > cozmo.log 2>&1`), stdout is
+    block-buffered while logging (stderr) isn't, so print() lines landed late
+    and out of order - e.g. "Checking this conversation..." after the exit."""
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(line_buffering=True)
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="SmartCozmo: an LLM-driven Cozmo assistant.")
     parser.add_argument(
@@ -100,6 +109,7 @@ def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     logging.basicConfig(level=args.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     _stop_cleanly_on_sigterm()
+    _line_buffered_stdout()
 
     if args.log_level.upper() != "DEBUG":
         # PyCozmo logs periodic byte/packet counters on this logger every
