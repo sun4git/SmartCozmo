@@ -687,7 +687,9 @@ can't be undone. Cleared declined facts may be suggested again.
 Suggestions don't expire. `MEMORY_SUGGESTIONS_ENABLED=false` turns the
 check off.
 
-When you quit (Ctrl+C, or `quit` in text mode), the app checks whatever
+When you quit (Ctrl+C, `quit` in text mode, or `pkill -f 'cozmo_brain --mode vad'`
+from another shell - SIGTERM is handled exactly like Ctrl+C, so systemd stops
+it cleanly too; only `kill -9` skips this), the app checks whatever
 wasn't checked yet - it prints "Checking this conversation for anything
 worth remembering..." and exiting can take a few seconds longer. In
 `--mode vad` that's usually nothing (each conversation was already checked
@@ -2071,7 +2073,8 @@ the presence check — head tilt, silent for known/empty, one casual ask for a
 stranger, how it slots into the idle fidget (`test_presence`), the charger
 break, `leave_charger`, the per-turn battery line and who-moved-him labels
 (`test_charger_break`), and the battery history records and analysis
-(`test_battery_log`).
+(`test_battery_log`), and SIGTERM stopping the app like Ctrl+C
+(`test_sigterm`).
 
 `tests/live/` holds **opt-in** tests that make real API calls with the keys
 in your `.env`: which providers accept the conversation history shape, how
@@ -3221,6 +3224,9 @@ Still open, roughly in priority order:
 ## Troubleshooting cheat sheet
 
 ```bash
+# Stop the app cleanly from another shell (same cleanup as Ctrl+C; avoid kill -9)
+pkill -f 'cozmo_brain --mode vad'
+
 # Network health
 ip -4 route show table all
 nmcli device status

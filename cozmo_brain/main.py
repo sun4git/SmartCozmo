@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import signal
 import sys
 from pathlib import Path
 
@@ -42,6 +43,20 @@ def _default_log_level() -> str:
               file=sys.stderr)
         return "INFO"
     return level
+
+
+def _stop_cleanly_on_sigterm() -> None:
+    """pkill/systemd send SIGTERM, which by default kills Python on the spot -
+    main()'s finally (battery_log.close(), the end-of-run memory check,
+    run_end, robot disconnect) never runs. Treat it exactly like Ctrl+C
+    instead. Signal handlers always run on the main thread, where that
+    cleanup lives. SIGKILL (kill -9) can't be caught by anything."""
+
+    def handler(signum, frame):
+        logging.getLogger(__name__).info("SIGTERM received - stopping the same way as Ctrl+C.")
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, handler)
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -84,6 +99,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
     logging.basicConfig(level=args.log_level, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    _stop_cleanly_on_sigterm()
 
     if args.log_level.upper() != "DEBUG":
         # PyCozmo logs periodic byte/packet counters on this logger every
