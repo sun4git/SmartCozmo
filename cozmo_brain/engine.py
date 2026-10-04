@@ -129,6 +129,14 @@ class CozmoEngine:
         # is the reply itself.
         self.log_steps_live = False
         self._followup_thread: threading.Thread | None = None
+        # Things Cozmo should speak up about on his own, each delivered as a
+        # short turn (deliver_announcements()) - today the answers to
+        # background ask_assistant requests (assistant_relay.py).
+        # announce_event is set while any are waiting: --mode vad stops a
+        # recording for it only if no speech has started yet.
+        self.announce_event = threading.Event()
+        self._announcements: list[str] = []
+        self._announce_lock = threading.Lock()
 
     def session_event(self, event: str, **fields) -> None:
         """A conversation started or ended (--mode vad): marked in the
@@ -148,6 +156,27 @@ class CozmoEngine:
         self.listening_window_open = is_open
         if not is_open:
             self.last_interaction_monotonic = time.monotonic()
+
+    def queue_announcement(self, note: str) -> None:
+        """Queue a bracketed note for Cozmo to act on in a turn of his own
+        (see deliver_announcements()). Safe from any thread."""
+        with self._announce_lock:
+            self._announcements.append(note)
+            self.announce_event.set()
+
+    def deliver_announcements(self) -> bool:
+        """Run one turn per queued note (the note stands in for the user's
+        words). Takes turn_lock through handle_turn(), so it waits for any
+        turn in progress. Returns whether there was anything to deliver."""
+        with self._announce_lock:
+            notes, self._announcements = self._announcements, []
+            self.announce_event.clear()
+        for note in notes:
+            logger.info("Speaking up on my own: %s", note)
+            summary = self.handle_turn(note)
+            if not self.log_steps_live:  # already logged live otherwise
+                logger.info("%s", summary)
+        return bool(notes)
 
     def _turn_is_done(self, batch: list[tuple[str, ToolResult]], image_attached: bool) -> bool:
         """Whether to end the turn now instead of asking the model again.

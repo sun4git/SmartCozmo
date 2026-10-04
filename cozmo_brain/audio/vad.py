@@ -37,6 +37,7 @@ def record_until_silence(
     min_rms: int = 150,
     max_utterance_s: int | None = None,
     stop_event: threading.Event | None = None,
+    idle_stop_event: threading.Event | None = None,
 ) -> bool:
     """Record from `device` until `silence_ms` of silence follows detected speech.
     `max_seconds` bounds how long to wait for speech to *start*; once it has,
@@ -52,6 +53,11 @@ def record_until_silence(
     30ms frame and returns False with nothing written - used when Cozmo
     continues his previous reply in the background (FINAL_LLM_CALL=async,
     see engine.py), so his motors/voice never end up in the recording.
+
+    `idle_stop_event` does the same, but only while no speech has started
+    (nor begun to: a frame counting toward the onset debounce also holds
+    it off) - for Cozmo speaking up on his own (a background ask_assistant
+    answer, engine.announce_event), which must never cut someone off.
 
     A frame only counts as "speech" if BOTH `webrtcvad` classifies it as
     speech AND its RMS loudness clears `min_rms` — webrtcvad only looks at
@@ -129,6 +135,15 @@ def record_until_silence(
             if stop_event is not None and stop_event.is_set():
                 interrupted = True
                 break
+            if (
+                idle_stop_event is not None and idle_stop_event.is_set()
+                and not speech_started and consecutive_speech == 0
+            ):
+                logger.info(
+                    "Stopped listening after %.1fs (nobody talking) - Cozmo has something to say.",
+                    frame_count * _FRAME_MS / 1000.0,
+                )
+                return False
             frame_rms = audioop.rms(frame, 2)
             peak_rms_seen = max(peak_rms_seen, frame_rms)
             webrtcvad_says_speech = vad.is_speech(frame, _SAMPLE_RATE)

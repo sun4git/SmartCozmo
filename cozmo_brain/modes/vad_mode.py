@@ -162,6 +162,9 @@ def _run_listening_window(engine: CozmoEngine, robot: RobotBackend, speech: Spee
         # or speech), it stops this recording via followup_interrupt; wait
         # for it to finish, then simply listen again with the same window.
         engine.settle_followup()
+        # A background answer (ask_assistant, ASSISTANT_BACKGROUND) that
+        # arrived during the last turn is spoken now, before listening.
+        engine.deliver_announcements()
         engine.mic_active = True
         # Blinking backpack = recording right now; steady/off = not.
         _set_listening_light_safely(robot, True)
@@ -176,12 +179,18 @@ def _run_listening_window(engine: CozmoEngine, robot: RobotBackend, speech: Spee
                 settings.vad_min_rms,
                 max_utterance_s=settings.vad_max_utterance_s,
                 stop_event=engine.followup_interrupt,
+                idle_stop_event=engine.announce_event,
             )
         finally:
             engine.mic_active = False
             _set_listening_light_safely(robot, False)
         if not got_speech and engine.settle_followup():
             print("(Cozmo continued his reply - listening again)")
+            continue
+        # Stopped for (or ended with) an answer waiting: say it, and keep the
+        # window open so they can reply without the wake word.
+        if not got_speech and engine.deliver_announcements():
+            print("(Cozmo passed on an answer - listening again)")
             continue
         if not got_speech:
             print("(no follow-up heard - wake word needed again)\n")

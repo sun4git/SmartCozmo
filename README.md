@@ -115,6 +115,7 @@ See [Roadmap](#roadmap--open-work) for what's still open.
     ├── memory_suggestions.py # after a conversation: suggests facts worth keeping, for you to approve
     ├── engine.py             # the agentic tool-calling loop (CozmoEngine)
     ├── charger_return.py     # low-battery policy: offer at LOW, return on its own at CRITICAL
+    ├── assistant_relay.py    # background ask_assistant: answers spoken when they arrive (ASSISTANT_BACKGROUND)
     ├── personality.py        # Cozmo's system prompt / persona
     ├── imaging.py             # shared base64 image helper (vision attach, who_is_this)
     ├── model_files.py         # finds models/<name>.onnx for WAKE_WORD_MODEL / LOCAL_TTS_VOICE_PATH
@@ -128,6 +129,7 @@ See [Roadmap](#roadmap--open-work) for what's still open.
     │   ├── local_client.py      # Offline faster-whisper STT + Piper TTS (STT_PROVIDER/TTS_PROVIDER=local)
     │   ├── witai_client.py      # Wit.ai (Meta) STT only, free/no billing (STT_PROVIDER=witai)
     │   ├── edge_client.py       # Microsoft Edge online TTS only, free/no key (TTS_PROVIDER=edge)
+    │   ├── assistant_client.py  # external assistant agent (ask_assistant), OpenAI-compatible, e.g. OpenClaw
     │   ├── tts_postprocess.py    # shared voice character + gain, used by every TTS provider
     │   └── stt_postprocess.py    # filters known STT hallucination/fallback phrases (Whisper + Wit.ai)
     ├── audio/
@@ -148,7 +150,8 @@ See [Roadmap](#roadmap--open-work) for what's still open.
     ├── tools/
     │   ├── base.py             # Tool/ToolResult contract
     │   ├── registry.py         # the tools exposed to the LLM
-    │   └── memory_tools.py     # remember_fact / forget_fact / search_memory / review_suggestion / clear_suggestions
+    │   ├── memory_tools.py     # remember_fact / forget_fact / search_memory / review_suggestion / clear_suggestions
+    │   └── assistant_tools.py  # ask_assistant + its system-prompt section (ASSISTANT_ENABLED)
     └── modes/
         ├── interactive.py       # --mode voice  (push-to-talk)
         ├── vad_mode.py           # --mode vad    (hands-free, wake word + follow-up)
@@ -556,6 +559,7 @@ why this ended up folded into `--mode vad` instead of a standalone mode.
 | `search_memory(query)` | Keyword search over saved facts and every archived conversation, with dates and times. |
 | `review_suggestion(suggestion, decision)` | Records your answer after Cozmo asks about a suggested fact: `keep` (saved), `discard` (never suggested again) or `later`. |
 | `clear_suggestions(which)` | Empties the `waiting` suggestions, the `declined` ones, or `both`, when you ask. Cozmo says how many and checks first; confirmed facts aren't touched. |
+| `ask_assistant(request)` | Only when `ASSISTANT_ENABLED=true`. Hands a request Cozmo can't do himself (a reminder, a web lookup, a task) to your own assistant agent, called by `ASSISTANT_NAME`, and returns its answer. See [Asking your own assistant](#asking-your-own-assistant-ask_assistant). |
 
 **Moods** (used by `say` and inside gestures): `neutral`, `happy`, `excited`,
 `curious`, `proud`, `sad`, `sleepy`, `bored`, `scared`, `surprised`,
@@ -722,6 +726,83 @@ and review) and a simulated text-mode run. Saving facts live was seen
 working on the Pi (2026-10-01). **Not verified:** how well each chat model
 judges what's worth suggesting, and when it brings one up - that needs real
 conversations, on each provider.
+
+### Asking your own assistant (`ask_assistant`)
+
+If you already run a personal assistant agent, Cozmo can hand it the things
+he can't do himself: reminders, anything that needs the internet (news,
+weather, facts he isn't sure of), or tasks outside his desk. It's written
+against [OpenClaw](https://docs.openclaw.ai)'s gateway, but any endpoint
+that speaks OpenAI's `/v1/chat/completions` works. Off by default:
+
+```
+ASSISTANT_ENABLED=true
+ASSISTANT_NAME=Sunny                 # what you call it - Cozmo uses the same name
+ASSISTANT_URL=http://<host>:18789    # base URL, no /v1/...
+ASSISTANT_TOKEN=<gateway token>
+ASSISTANT_MODEL=openclaw/main        # OpenClaw: openclaw/<agentId>
+```
+
+On OpenClaw, the chat-completions endpoint has to be enabled in the gateway
+config first.
+
+**How a request goes.** "Hey Cozmo, remind me at 5 to call mom" -> Cozmo
+calls `ask_assistant` with one complete sentence. Agent runs are slow -
+measured 27-28s against a real OpenClaw for a web lookup and for setting a
+reminder, more when its model is rate-limited - so by default
+(`ASSISTANT_BACKGROUND=true`) the request runs in the background: Cozmo
+says "I've asked Sunny, I'll let you know" and carries on. When the answer
+arrives (`assistant_relay.py`) it's queued, and Cozmo gets a turn of his own
+to pass it on, in his own words:
+
+- outside a `--mode vad` listening window (or in text/push-to-talk mode)
+  he speaks up straight away, waiting only for any reply in progress
+  (`turn_lock`);
+- inside one, a recording nobody has started talking in yet is stopped
+  early for it, and the window stays open afterwards so you can answer
+  without the wake word. A recording that's already capturing someone
+  talking is never cut off - the answer comes right after that turn.
+
+`ASSISTANT_BACKGROUND=false` is the simple version: he says "let me ask
+Sunny", waits silently with the mic closed (up to `ASSISTANT_TIMEOUT_S`,
+default 180s - lower it for this), then answers. At most 3 background
+requests can be waiting at once. If the assistant can't be reached, times
+out, or rejects the token, Cozmo is told so and says it - he isn't allowed
+to make up an answer.
+
+**Sessions.** OpenClaw's endpoint starts a new session for every request
+unless the request carries an OpenAI `user` string; then all requests with
+that string share one session ([docs](https://docs.openclaw.ai/gateway/openai-http-api)).
+Every call sends `user` = `ASSISTANT_SESSION_USER` (default `cozmo`), so the
+assistant remembers earlier requests from Cozmo - change it to start a fresh
+session. Only the one request is sent, never Cozmo's own conversation;
+it's prefixed with a short note that it was relayed by a robot from speech
+(so the answer should be one to three plain spoken sentences, and a
+garbled-looking request should be questioned, not acted on).
+
+**Reminders** are set and delivered by the assistant (on OpenClaw, as a
+message on your phone), so they work even while Cozmo is off. Cozmo
+speaking them out loud himself is still roadmap item 7.
+
+**Safety.** Anything Cozmo hears can reach the assistant, including
+misheard speech and other people in the room - and an assistant like
+OpenClaw can message people and run tools. So the prompt tells Cozmo to read
+back, and wait for a yes, before anything that reaches or affects someone
+else (messaging a person or group, buying, deleting, changing settings);
+reminders for you and plain questions go straight through. That's a prompt
+rule, not a hard block: the real limits are whatever the assistant's own
+agent is allowed to do, so point `ASSISTANT_MODEL` at an agent with only the
+permissions you're happy for anyone near Cozmo to use. The token lives only
+in `.env` and is never logged. The connection is plain HTTP unless your
+`ASSISTANT_URL` is `https://` - fine on a home network, not across the
+internet.
+
+Verified offline against a fake endpoint (`tests/test_assistant.py`,
+background delivery and the vad stop rule included). Against the real
+OpenClaw gateway (2026-10-04): the session behavior (two curl calls with
+the same `user` remembered a word), and through `AssistantClient` a web
+lookup (27.0s, a clean one-sentence answer) and a WhatsApp reminder (set in
+28.3s, and received on WhatsApp 3 minutes later as asked). **Not yet run end to end through Cozmo on real hardware.**
 
 ### How a turn ends (`FINAL_LLM_CALL`)
 
@@ -2074,8 +2155,11 @@ the presence check — head tilt, silent for known/empty, one casual ask for a
 stranger, how it slots into the idle fidget (`test_presence`), the charger
 break, `leave_charger`, the per-turn battery line and who-moved-him labels
 (`test_charger_break`), and the battery history records and analysis
-(`test_battery_log`), and SIGTERM stopping the app like Ctrl+C
-(`test_sigterm`).
+(`test_battery_log`), SIGTERM stopping the app like Ctrl+C
+(`test_sigterm`), and `ask_assistant` against a fake endpoint - the
+session `user` field, failures, waiting for the answer, and background
+answers delivered on their own, including only stopping a vad recording
+nobody is talking in (`test_assistant`).
 
 `tests/live/` holds **opt-in** tests that make real API calls with the keys
 in your `.env`: which providers accept the conversation history shape, how
@@ -2159,6 +2243,13 @@ annotated list (it's the source of truth). The essentials:
 | `KNOWN_PEOPLE_DIR` | Where `remember_person`'s reference photos are stored (default `data/known_people`; experimental). |
 | `PRESENCE_CHECK_ENABLED` | Default `false`. `true` lets Cozmo occasionally look up when idle to see who's at the desk, and ask strangers who they are (see [Presence check](#presence-check-knowing-whos-at-the-desk-presence_check_enabled)). Sends a photo to `VISION_PROVIDER` each look. |
 | `PRESENCE_HEAD_ANGLE_DEG` | Head tilt for the look (default 35°; robot max ≈ 44°). |
+| `ASSISTANT_ENABLED` | Default `false`. `true` adds the `ask_assistant` tool (needs `ASSISTANT_URL`). See [Asking your own assistant](#asking-your-own-assistant-ask_assistant). |
+| `ASSISTANT_NAME` | What Cozmo calls the assistant, out loud and in the tool description (default `Assistant`). |
+| `ASSISTANT_URL` / `ASSISTANT_TOKEN` | Base URL of the OpenAI-compatible endpoint (no `/v1/...`) and its bearer token. |
+| `ASSISTANT_MODEL` | The request's `model` field; for OpenClaw it picks the agent, `openclaw/<agentId>` (default `openclaw/default`). |
+| `ASSISTANT_SESSION_USER` | Sent as `user`; OpenClaw keeps one session per value (default `cozmo`). |
+| `ASSISTANT_BACKGROUND` | `true` (default): ask in the background and speak up with the answer when it arrives. `false`: wait silently for it. |
+| `ASSISTANT_TIMEOUT_S` | Longest wait for an answer (default 180; lower it with `ASSISTANT_BACKGROUND=false`). |
 | `PRESENCE_RECHECK_S` / `PRESENCE_EMPTY_RETRY_S` / `PRESENCE_ASK_COOLDOWN_S` | Seconds before the next look after a known person (900) / nobody (300) / a stranger (3600, also the minimum gap between "who are you?"s). |
 
 ---
@@ -3186,7 +3277,15 @@ Still open, roughly in priority order:
      every turn. **Verified as logic only** (scripted reproduction of
      this exact sequence now stays docked), not yet re-run on real
      hardware.
-7. **Reminders - planned, not started.** Today Cozmo knows the date and
+7. **Reminders - via your assistant: built; spoken by Cozmo: planned.**
+   With `ASSISTANT_ENABLED=true`, "remind me at 5 to call mom" goes to your
+   own assistant agent through `ask_assistant`, which sets the reminder and
+   delivers it (OpenClaw: a message on your phone) - works while Cozmo is
+   off. See [Asking your own assistant](#asking-your-own-assistant-ask_assistant).
+   Not run end to end on real hardware yet. What follows is the still-open
+   part: Cozmo saying a reminder out loud himself.
+
+   Today Cozmo knows the date and
    time (it's in his prompt every turn), but he only thinks when spoken
    to: "remember my dentist appointment is Monday at 5" is saved as a
    memory fact, and he may mention it if you talk to him that day, but he

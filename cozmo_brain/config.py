@@ -524,6 +524,34 @@ class Settings:
     presence_empty_retry_s: int = field(default_factory=lambda: _env_int("PRESENCE_EMPTY_RETRY_S", 300))
     presence_ask_cooldown_s: int = field(default_factory=lambda: _env_int("PRESENCE_ASK_COOLDOWN_S", 3600))
 
+    # --- External assistant (the ask_assistant tool) ---
+    # A personal assistant agent Cozmo can hand requests to (reminders, web
+    # lookups, tasks) over an OpenAI-compatible /v1/chat/completions
+    # endpoint - written against OpenClaw's gateway. Off by default. See
+    # llm/assistant_client.py and tools/assistant_tools.py.
+    assistant_enabled: bool = field(default_factory=lambda: _env_bool("ASSISTANT_ENABLED", False))
+    # What Cozmo calls it, out loud and in the tool's description.
+    assistant_name: str = field(default_factory=lambda: _env_str("ASSISTANT_NAME", "Assistant"))
+    # Base URL, without /v1/chat/completions (OpenClaw's gateway port is 18789).
+    assistant_url: str = field(default_factory=lambda: _env_str("ASSISTANT_URL", ""))
+    assistant_token: str = field(default_factory=lambda: os.environ.get("ASSISTANT_TOKEN", ""))
+    # The request's `model` field. For OpenClaw it picks the agent:
+    # "openclaw/<agentId>" ("openclaw/default" = the default agent).
+    assistant_model: str = field(default_factory=lambda: _env_str("ASSISTANT_MODEL", "openclaw/default"))
+    # Sent as the request's `user` field. OpenClaw derives a stable session
+    # from it, so every call shares one ongoing conversation; change it to
+    # start a fresh one.
+    assistant_session_user: str = field(default_factory=lambda: _env_str("ASSISTANT_SESSION_USER", "cozmo"))
+    # true: the request runs in the background and Cozmo speaks up with the
+    # answer when it arrives (assistant_relay.py) - measured 27-28s for a
+    # real OpenClaw web lookup / reminder, too long to sit silent with the
+    # mic closed. false: the tool waits for the answer, Cozmo silent.
+    assistant_background: bool = field(default_factory=lambda: _env_bool("ASSISTANT_BACKGROUND", True))
+    # Longest wait for an answer. Generous for the background (a
+    # rate-limited agent model can be slow); lower it if
+    # ASSISTANT_BACKGROUND=false, since Cozmo is silent the whole time.
+    assistant_timeout_s: int = field(default_factory=lambda: _env_int("ASSISTANT_TIMEOUT_S", 180))
+
     # --- Gesture/speech concurrency ---
     # Whether the `gesture` tool runs asynchronously (starts the
     # choreography on a background thread and returns immediately) instead

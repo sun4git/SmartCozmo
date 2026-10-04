@@ -13,10 +13,12 @@ import os
 import re
 import threading
 
+from cozmo_brain.assistant_relay import AssistantRelay
 from cozmo_brain.audio.player import play_wav
 from cozmo_brain.battery_log import BatteryLog
 from cozmo_brain.config import Settings
 from cozmo_brain.imaging import encode_image_b64
+from cozmo_brain.llm.assistant_client import AssistantClient
 from cozmo_brain.llm.chat_client import ChatClient
 from cozmo_brain.llm.speech_client import SpeechClient
 from cozmo_brain.memory import Memory
@@ -24,6 +26,7 @@ from cozmo_brain.people import Presence, find_match, known_people
 from cozmo_brain.robot.base import MoveResult, RobotBackend
 from cozmo_brain.robot.gestures import GESTURES
 from cozmo_brain.robot.moods import MOODS
+from cozmo_brain.tools.assistant_tools import build_assistant_tools
 from cozmo_brain.tools.base import Tool, ToolResult
 from cozmo_brain.tools.memory_tools import build_memory_tools
 
@@ -119,9 +122,13 @@ def build_tools(
     memory: Memory | None = None,
     presence: Presence | None = None,
     battery_log: BatteryLog | None = None,
+    assistant: AssistantClient | None = None,
+    assistant_relay: AssistantRelay | None = None,
 ) -> list[Tool]:
     """Every tool, plus the memory tools (memory_tools.py) when `memory` is
-    given. `presence` (people.py) is told who remember_person/who_is_this
+    given, and ask_assistant (assistant_tools.py) when `assistant` is -
+    in the background when `assistant_relay` is given too.
+    `presence` (people.py) is told who remember_person/who_is_this
     identify, so the system prompt can use their name."""
     def handle_say(text: str, mood: str = "neutral", gesture: str | None = None) -> ToolResult:
         # "neutral" now resets pose (see moods.py) rather than being a
@@ -488,4 +495,6 @@ def build_tools(
     ]
     if memory is not None:
         tools.extend(build_memory_tools(memory))
+    if assistant is not None:
+        tools.extend(build_assistant_tools(assistant, assistant_relay))
     return tools

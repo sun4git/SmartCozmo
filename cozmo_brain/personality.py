@@ -91,7 +91,11 @@ never invent a new one: {_GESTURE_LIST}."""
 
 
 def build_system_prompt(
-    memory_section: str, now: datetime | None = None, suggestions_section: str = "", presence_section: str = ""
+    memory_section: str,
+    now: datetime | None = None,
+    suggestions_section: str = "",
+    presence_section: str = "",
+    assistant_section: str = "",
 ) -> str:
     """SYSTEM_PROMPT plus the current date/time and the memory file
     (memory.py) - rebuilt every turn (engine.py), so a newly saved or
@@ -120,4 +124,6 @@ What you remember (may be out of date):
 Things you noticed earlier but haven't confirmed - NOT facts you know, so never state them as true:
 {suggestions_section}""" if suggestions_section else "") + (f"""
 
-{presence_section}""" if presence_section else "")
+{presence_section}""" if presence_section else "") + (f"""
+
+{assistant_section}""" if assistant_section else "")

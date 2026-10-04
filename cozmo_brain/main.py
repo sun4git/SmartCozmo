@@ -18,10 +18,12 @@ from cozmo_brain.history_archive import HistoryArchive, prune_history
 from cozmo_brain.battery_log import BatteryLog
 from cozmo_brain.charger_break import ChargerBreak
 from cozmo_brain.connection_monitor import ConnectionMonitor
+from cozmo_brain.assistant_relay import AssistantRelay
 from cozmo_brain.idle_fidget import IdleFidgeter
 from cozmo_brain.people import Presence
 from cozmo_brain.presence import PresenceChecker
 from cozmo_brain.llm import create_chat_client, create_speech_client
+from cozmo_brain.llm.assistant_client import AssistantClient
 from cozmo_brain.memory import Memory
 from cozmo_brain.memory_suggestions import SuggestionExtractor
 from cozmo_brain.personality import SYSTEM_PROMPT, build_system_prompt
@@ -29,6 +31,7 @@ from cozmo_brain.robot import create_robot
 from cozmo_brain.robot.battery_monitor import BatteryMonitor
 from cozmo_brain.robot.pickup_reactor import PickupReactor
 from cozmo_brain.tools import build_tools
+from cozmo_brain.tools.assistant_tools import assistant_prompt_section
 
 
 _LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR"]
@@ -154,7 +157,24 @@ def main(argv: list[str] | None = None) -> int:
         memory.ensure_file()
         presence = Presence()
         battery_log = BatteryLog(data_dir / "battery.jsonl", robot, settings)
-        tools = build_tools(robot, speech, ollama, settings, memory=memory, presence=presence, battery_log=battery_log)
+        assistant = None
+        assistant_relay = None
+        if settings.assistant_enabled:
+            if settings.assistant_url:
+                assistant = AssistantClient(settings)
+                if settings.assistant_background:
+                    assistant_relay = AssistantRelay(assistant)
+                logging.getLogger(__name__).info(
+                    "ask_assistant enabled: %s at %s (%s)", assistant.name, settings.assistant_url,
+                    "background" if assistant_relay else "waits for the answer",
+                )
+            else:
+                logging.getLogger(__name__).warning("ASSISTANT_ENABLED is true but ASSISTANT_URL is empty - ask_assistant is off.")
+        tools = build_tools(
+            robot, speech, ollama, settings,
+            memory=memory, presence=presence, battery_log=battery_log,
+            assistant=assistant, assistant_relay=assistant_relay,
+        )
 
         conversation = Conversation(
             SYSTEM_PROMPT,
@@ -170,8 +190,14 @@ def main(argv: list[str] | None = None) -> int:
                 memory.prompt_section(),
                 suggestions_section=memory.suggestions_prompt(),
                 presence_section=presence.prompt_section(),
+                assistant_section=(
+                    assistant_prompt_section(assistant.name, background=assistant_relay is not None)
+                    if assistant else ""
+                ),
             ),
         )
+        if assistant_relay is not None:
+            assistant_relay.attach(engine)
         extractor = SuggestionExtractor(ollama, memory, archive) if settings.memory_suggestions_enabled else None
 
         def on_session(event: str, _fields: dict) -> None:
