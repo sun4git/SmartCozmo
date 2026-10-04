@@ -28,8 +28,10 @@ PyCozmo  (talks to Cozmo over its own Wi-Fi AP)
 - **`cozmo_brain/`** — the real application: conversation memory, a proper
   tool-calling agentic loop, a curated gesture/mood library built on
   confirmed PyCozmo primitives, real animation clip playback, camera-in-
-  the-loop vision, hands-free VAD listening, a turn-calibration mode, and a
-  simulated robot backend for developing away from the hardware. See
+  the-loop vision, hands-free VAD listening, a turn-calibration mode, an
+  optional hand-off to your own assistant agent (reminders, web lookups -
+  see [Asking your own assistant](#asking-your-own-assistant-ask_assistant)),
+  and a simulated robot backend for developing away from the hardware. See
   [The cozmo_brain/ application](#the-cozmo_brain-application) below.
 
 See [Roadmap](#roadmap--open-work) for what's still open.
@@ -1981,6 +1983,26 @@ genuinely accurate example of what to expect, and the persona is meant to
 own it (hedging, self-deprecating about "his eyesight") rather than
 confidently asserting a wrong answer.
 
+**Asking the assistant, answer in the background** (see
+[Asking your own assistant](#asking-your-own-assistant-ask_assistant)). A
+real run on 2026-10-04 against a real OpenClaw agent named Sunny, with
+Groq chat and the simulated robot, driven through the engine directly
+rather than `--mode text`; log lines trimmed:
+```
+you> Hey Cozmo, what's the latest news headline in India today?
+LLM step 1 (0.89s): ask_assistant
+Asking Sunny: Tell me the latest / top news headline in India today, October 4 2026.
+tool ask_assistant (0.0s): OK: Asked Sunny: "...". The answer comes later, on its own - ...
+(user turn returned after 1.0s - Cozmo is free to talk and listen)
+Sunny replied (35.5s): Top headlines today include a student protest march in New Delhi ...
+Speaking up on my own: [Sunny just answered the request you sent earlier (...): ...]
+[say] OK: Said (mood=curious) while performing 'alert': Oh, the news is in! According to
+      Sunny, there are two big ones today: First, students are marching in New Delhi ...
+```
+In that run the chat model's step after `ask_assistant` hit Groq's
+free-tier rate limit (429), so the usual "I've asked Sunny" line was never
+said; the answer was still delivered on its own.
+
 ### More things to try
 
 A few more prompts to give a sense of range — not verified transcripts like
@@ -2014,6 +2036,17 @@ above, just what they're expected to trigger:
 - *"Actually, forget that I like cricket."* → `forget_fact`.
 - *"What did we talk about yesterday?"* / *"When did I mention Goa?"* →
   `search_memory`, answered with dates from the archive.
+
+**Your own assistant** (needs `ASSISTANT_ENABLED=true`; the name is your
+`ASSISTANT_NAME`):
+- *"Remind me in 10 minutes to stretch."* → `ask_assistant`; the reminder
+  arrives as a message from the assistant (confirmed on WhatsApp with
+  OpenClaw), even if Cozmo is off by then.
+- *"What's the weather in Pune?"* / *"Any big news today?"* → `ask_assistant`,
+  "I've asked Sunny", and the answer ~30s later, spoken on its own.
+- *"Tell my friends group I'll be late."* → affects other people, so Cozmo
+  should read it back and wait for a yes before asking.
+- *"What's Sunny?"* → answered from the prompt: your assistant, by its name.
 
 ---
 
@@ -3353,6 +3386,10 @@ curl https://api.groq.com/openai/v1/audio/speech \
 
 # Test Ollama reachability
 curl "$OLLAMA_BASE_URL/api/tags"
+
+# Test the assistant endpoint (ask_assistant) - same request shape Cozmo sends;
+# repeat with the same "user" to check the session remembers
+curl -X POST "$ASSISTANT_URL/v1/chat/completions"   -H "Content-Type: application/json" -H "Authorization: Bearer <ASSISTANT_TOKEN>"   -d '{"model": "openclaw/main", "user": "cozmo", "messages": [{"role": "user", "content": "Hi"}]}'
 
 # Test PyCozmo connection only
 python3 -c "import pycozmo; cli = pycozmo.Client(); cli.start(); cli.connect(); cli.wait_for_robot(); print('Connected!'); cli.disconnect(); cli.stop()"
