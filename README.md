@@ -781,7 +781,10 @@ to pass it on, in his own words:
   (`turn_lock`);
 - inside one, a recording nobody has started talking in yet is stopped
   early for it, and the window stays open afterwards so you can answer
-  without the wake word. A recording that's already capturing someone
+  without the wake word.
+- outside one, a short listening window opens once he's said it
+  (`SPEAK_UP_LISTEN_S`, default 10s; `0` = off), so you can answer or
+  follow up without the wake word too. A recording that's already capturing someone
   talking is never cut off - the answer comes right after that turn.
 
 `ASSISTANT_BACKGROUND=false` is the simple version: he says "let me ask
@@ -2211,7 +2214,8 @@ break, `leave_charger`, the per-turn battery line and who-moved-him labels
 (`test_sigterm`), and `ask_assistant` against a fake endpoint - the
 session `user` field, failures, waiting for the answer, and background
 answers delivered on their own, including only stopping a vad recording
-nobody is talking in (`test_assistant`).
+nobody is talking in (`test_assistant`), and the short no-wake-word
+window after Cozmo speaks up on his own (`test_speak_up_listen`).
 
 `tests/live/` holds **opt-in** tests that make real API calls with the keys
 in your `.env`: which providers accept the conversation history shape, how
@@ -2281,6 +2285,7 @@ annotated list (it's the source of truth). The essentials:
 | `CONVERSATION_HISTORY_PATH` | The old single-file history - only read once, to import it into the archive. |
 | `VAD_AGGRESSIVENESS` / `VAD_SILENCE_MS` / `VAD_MAX_UTTERANCE_S` | Hands-free listening tuning. |
 | `VAD_FOLLOWUP_TIMEOUT_S` | How long a conversation stays open after a reply before the wake word is needed again. |
+| `SPEAK_UP_LISTEN_S` | After Cozmo speaks up on his own with something you may answer (a background `ask_assistant` answer, the low-battery offer), `--mode vad` listens this many seconds without the wake word (default 10; `0` = off). |
 | `STT_LANGUAGE` | Language hint for Whisper (Groq/OpenAI/local), default `en`; empty = auto-detect. Stops foreign-language hallucinations. |
 | `STT_NO_SPEECH_PROB` / `STT_MIN_AVG_LOGPROB` / `STT_MAX_COMPRESSION_RATIO` | Per-segment Whisper confidence filters; see [Keeping speech-to-text from hallucinating](#keeping-speech-to-text-from-hallucinating). Every segment's scores are logged for tuning. |
 | `SPEECH_GATE_ENABLED` / `SPEECH_GATE_MIN_SPEECH_MS` / `SPEECH_GATE_THRESHOLD` | Silero speech check on every clip before any STT call (skipped if faster-whisper isn't installed). A clip with less than the minimum detected speech (default 150ms) isn't sent. |
@@ -3173,9 +3178,11 @@ Still open, roughly in priority order:
      - **Trigger policy** (`cozmo_brain/charger_return.py`, fed every
        valid reading by `BatteryMonitor`). At `BATTERY_LOW_VOLTAGE` Cozmo
        *offers* out loud to head back. The offer is written into the
-       conversation as an assistant message, so a normal-activation "yes"
-       (wake word/tap/push-to-talk/typing, no mode changes) makes sense to
-       the model, which calls `dock`. At `BATTERY_CRITICAL_VOLTAGE` he
+       conversation as an assistant message, so a "yes" makes sense to the
+       model, which calls `dock`. In `--mode vad` a listening window opens
+       right after the offer for `SPEAK_UP_LISTEN_S` (default 10s), so a
+       plain "yes" works without the wake word; other modes (and
+       `SPEAK_UP_LISTEN_S=0`) need the usual activation. At `BATTERY_CRITICAL_VOLTAGE` he
        announces it and goes on his own, the backstop for an unanswered
        offer. Either level needs 2 consecutive readings off the charger
        (so motor-load voltage sag mid-drive can't trigger it), fires at

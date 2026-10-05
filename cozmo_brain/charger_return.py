@@ -112,6 +112,8 @@ class ChargerReturner:
                 f"[Battery low ({voltage:.2f}V). I said this out loud on my own, not in reply to "
                 f"anything: \"{_OFFER_TEXT}\" If they agree, call the dock tool.]"
             )
+            # A yes/no question: listen for the answer without the wake word.
+            self._engine.request_listen()
         finally:
             self._engine.turn_lock.release()
 

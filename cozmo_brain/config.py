@@ -443,6 +443,15 @@ class Settings:
     # again. See modes/vad_mode.py.
     vad_followup_timeout_s: int = field(default_factory=lambda: _env_int("VAD_FOLLOWUP_TIMEOUT_S", 15))
 
+    # When Cozmo speaks up on his own with something you may want to answer
+    # - a background ask_assistant answer, or the low-battery "head back to
+    # the charger?" offer - --mode vad opens a listening window for this many
+    # seconds afterwards, as if you'd said the wake word, so a plain "yes"
+    # works. 0 = off (the wake word or a tap is needed, as before). Not for
+    # announcements that need no reply (the critical-battery "heading back
+    # now", a charger break).
+    speak_up_listen_s: int = field(default_factory=lambda: _env_int("SPEAK_UP_LISTEN_S", 10))
+
     # --- Tap-to-talk (an alternate --mode vad activation trigger, alongside
     # the wake word — see modes/vad_mode.py) ---
     # A tap is detected as a brief spike in accelerometer magnitude above a

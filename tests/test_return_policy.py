@@ -58,6 +58,10 @@ class FakeEngine:
     def __init__(self):
         self.turn_lock = threading.Lock()
         self.said, self.notes = [], []
+        self.listen_requests = 0
+
+    def request_listen(self):
+        self.listen_requests += 1
 
     def speak(self, text, mood="neutral"):
         self.said.append(text)
@@ -82,6 +86,7 @@ feed(cr, robot, [3.65])
 check("two low readings: offer spoken", len(eng.said) == 1 and "head back" in eng.said[0])
 check("offer written to conversation", eng.notes and "call the dock tool" in eng.notes[0])
 check("LOW does not drive", robot.returns == 0)
+check("LOW offer asks to listen for the answer (no wake word)", eng.listen_requests == 1)
 feed(cr, robot, [3.65, 3.65, 3.8, 3.65, 3.65])
 check("offer not repeated in same episode (even after bounce)", len(eng.said) == 1)
 
@@ -90,6 +95,7 @@ feed(cr, robot, [3.45])
 check("one critical reading: no return yet", robot.returns == 0)
 feed(cr, robot, [3.45])
 check("two critical readings: returned", robot.returns == 1 and "heading back" in eng.said[-1])
+check("critical 'heading back now' doesn't ask to listen (no question)", eng.listen_requests == 1)
 check("return outcome noted", "Result: Drove back to the charger and docked." in eng.notes[-1])
 feed(cr, robot, [3.45, 3.45])
 check("no repeat critical return", robot.returns == 1)
@@ -114,6 +120,7 @@ cr = ChargerReturner(robot, eng, S)
 feed(cr, robot, [3.65, 3.65, 3.45, 3.45])
 check("no pose: help asked exactly once, no return", eng.said == [eng.said[0]] and "put me on it" in eng.said[0]
       and robot.returns == 0)
+check("help request (put me on it) doesn't ask to listen", eng.listen_requests == 0)
 
 # 6. Return fails (picked up) -> ask for help.
 robot, eng = FakeRobot(), FakeEngine()

@@ -137,6 +137,11 @@ class CozmoEngine:
         self.announce_event = threading.Event()
         self._announcements: list[str] = []
         self._announce_lock = threading.Lock()
+        # Set by request_listen() when Cozmo has just spoken up on his own
+        # with something that wants an answer, outside a listening window:
+        # --mode vad then opens a short window (SPEAK_UP_LISTEN_S) without
+        # the wake word. Other modes never read it.
+        self.listen_request = threading.Event()
 
     def session_event(self, event: str, **fields) -> None:
         """A conversation started or ended (--mode vad): marked in the
@@ -157,6 +162,13 @@ class CozmoEngine:
         if not is_open:
             self.last_interaction_monotonic = time.monotonic()
 
+    def request_listen(self) -> None:
+        """Ask --mode vad to listen for a reply without the wake word, after
+        Cozmo spoke up on his own. No-op inside a listening window (it's
+        already listening) or with SPEAK_UP_LISTEN_S=0."""
+        if self._settings.speak_up_listen_s > 0 and not self.listening_window_open:
+            self.listen_request.set()
+
     def queue_announcement(self, note: str) -> None:
         """Queue a bracketed note for Cozmo to act on in a turn of his own
         (see deliver_announcements()). Safe from any thread."""
@@ -176,6 +188,10 @@ class CozmoEngine:
             summary = self.handle_turn(note)
             if not self.log_steps_live:  # already logged live otherwise
                 logger.info("%s", summary)
+        if notes:
+            # Delivered outside a window (by assistant_relay.py's thread):
+            # let them reply without the wake word.
+            self.request_listen()
         return bool(notes)
 
     def _turn_is_done(self, batch: list[tuple[str, ToolResult]], image_attached: bool) -> bool:

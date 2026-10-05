@@ -68,9 +68,13 @@ def _apply_mood_safely(robot: RobotBackend, mood: str) -> None:
         logger.warning("Could not show '%s' mood: %s", mood, e)
 
 
-def _wait_for_wake_word_or_tap(robot: RobotBackend, settings: Settings) -> str:
+def _wait_for_wake_word_or_tap(
+    robot: RobotBackend, settings: Settings, listen_request: threading.Event | None = None
+) -> str:
     """Blocks until either the wake word is heard or Cozmo is tapped,
-    whichever comes first, and returns which one ("wake word"/"tap").
+    whichever comes first, and returns which one ("wake word"/"tap") - or
+    "spoke up" when `listen_request` (CozmoEngine.request_listen()) is set:
+    Cozmo just said something on his own that wants an answer.
     Races the two on separate threads (wake-word listening owns a mic
     subprocess + model inference, so it's given a cancel signal rather than
     just abandoned once a tap wins).
@@ -103,6 +107,10 @@ def _wait_for_wake_word_or_tap(robot: RobotBackend, settings: Settings) -> str:
                 stop_wake_word.set()
                 thread.join(timeout=2)
                 return "tap"
+            if listen_request is not None and listen_request.is_set():
+                stop_wake_word.set()  # frees the mic for the recording
+                thread.join(timeout=2)
+                return "spoke up"
 
         thread.join()
         if heard and heard[0]:
@@ -116,6 +124,8 @@ def _wait_for_wake_word_or_tap(robot: RobotBackend, settings: Settings) -> str:
         while time.monotonic() < deadline:
             if robot.wait_for_tap(timeout=0.2):
                 return "tap"
+            if listen_request is not None and listen_request.is_set():
+                return "spoke up"
 
 
 def run(engine: CozmoEngine, robot: RobotBackend, speech: SpeechClient, settings: Settings) -> None:
@@ -127,22 +137,37 @@ def run(engine: CozmoEngine, robot: RobotBackend, speech: SpeechClient, settings
     speech_gate_warm_up(settings)
     _go_idle(robot, apply_neutral=False)
     while True:
-        trigger = _wait_for_wake_word_or_tap(robot, settings)
-        logger.info("Woke up: %s.", trigger)
-        print(f"Woke up ({trigger}) - listening...")
+        trigger = _wait_for_wake_word_or_tap(robot, settings, engine.listen_request)
+        # Whatever opened it, this window covers any pending request.
+        engine.listen_request.clear()
+        if trigger == "spoke up":
+            logger.info("Spoke up on my own - listening %ds for a reply (no wake word needed).",
+                        settings.speak_up_listen_s)
+            print(f"Listening {settings.speak_up_listen_s}s for a reply (no wake word needed)...")
+        else:
+            logger.info("Woke up: %s.", trigger)
+            print(f"Woke up ({trigger}) - listening...")
         engine.set_listening_window(True)
         # Each wake-to-idle stretch is one session in this run's transcript.
         engine.session_event("session_start", trigger=trigger)
         try:
-            _run_listening_window(engine, robot, speech, settings)
+            _run_listening_window(
+                engine, robot, speech, settings,
+                first_timeout_s=settings.speak_up_listen_s if trigger == "spoke up" else None,
+            )
         finally:
             engine.set_listening_window(False)
             engine.session_event("session_end")
 
 
-def _run_listening_window(engine: CozmoEngine, robot: RobotBackend, speech: SpeechClient, settings: Settings) -> None:
+def _run_listening_window(
+    engine: CozmoEngine, robot: RobotBackend, speech: SpeechClient, settings: Settings,
+    first_timeout_s: int | None = None,
+) -> None:
     """One activation's worth of conversation: listen, reply, keep listening
-    for follow-ups, until nothing is heard within the window."""
+    for follow-ups, until nothing is heard within the window.
+    `first_timeout_s` replaces the first wait for speech (SPEAK_UP_LISTEN_S
+    after Cozmo spoke up on his own; after that, follow-ups as usual)."""
     _apply_mood_safely(robot, "curious")
 
     # How long to wait for speech to *start*: VAD_MAX_UTTERANCE_S right
@@ -153,7 +178,7 @@ def _run_listening_window(engine: CozmoEngine, robot: RobotBackend, speech: Spee
     # (max_utterance_s below) - it used to share this same budget, so
     # speech starting late in the window got cut off at the window's end
     # (confirmed on real hardware: 0.4s captured, "hit the 15s cap").
-    listen_timeout = settings.vad_max_utterance_s
+    listen_timeout = settings.vad_max_utterance_s if first_timeout_s is None else first_timeout_s
 
     while True:
         # FINAL_LLM_CALL=async: the previous reply's follow-up LLM call may
