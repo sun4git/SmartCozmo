@@ -121,6 +121,18 @@ dd = tmp / "data"
     json.dumps({"ts": "2026-10-05T10:00:00+00:00", "event": "run_start", "v": 3.9, "docked": True}) + "\n"
     + json.dumps({"ts": "2026-10-05T10:05:00+00:00", "event": "undocked", "v": 3.88}) + "\n", encoding="utf-8")
 check("memory view parses people and facts", data.memory_view(dd)["sections"] == [{"name": "Suneel (primary user)", "facts": ["Likes cricket."]}])
+# live reading written by the app (battery_now.json)
+from datetime import timedelta  # noqa: E402
+stamp = lambda secs: (datetime.now().astimezone() - timedelta(seconds=secs)).isoformat(timespec="seconds")  # noqa: E731
+(dd / "battery_now.json").write_text(json.dumps({"ts": stamp(4), "v": 3.77, "docked": False, "charging": False, "picked_up": False, "interval_s": 15.0}), encoding="utf-8")
+live = data.battery_now(dd)
+check("battery now: fresh reading", live["v"] == 3.77 and live["stale"] is False and live["age_s"] < 15)
+check("battery view: chart ends at the live reading", data.battery_view(dd)["points"][-1]["event"] == "now")
+(dd / "battery_now.json").write_text(json.dumps({"ts": stamp(300), "v": 3.77, "docked": False, "interval_s": 15.0}), encoding="utf-8")
+check("battery now: old reading is stale", data.battery_now(dd)["stale"] is True)
+(dd / "battery_now.json").write_text("{not json", encoding="utf-8")
+check("battery now: unreadable file -> None", data.battery_now(dd) is None)
+(dd / "battery_now.json").write_text(json.dumps({"ts": stamp(2), "v": 3.9, "docked": True, "interval_s": 15.0}), encoding="utf-8")
 check("battery view: latest and state", data.battery_view(dd)["latest"]["v"] == 3.88 and data.battery_view(dd)["state"]["event"] == "undocked")
 for evil in ("../.env", "history/../../.env", "/etc/passwd"):
     try:
@@ -215,6 +227,8 @@ code, body = call("/api/status")
 check("http: status", code == 200 and body["runner"]["state"] == "stopped")
 code, page = call("/", raw=True)
 check("http: index page served", code == 200 and b"Cozmo Control Room" in page)
+code, body = call("/api/battery/now")
+check("http: battery now", code == 200 and body["now"]["v"] == 3.9)
 code, body = call("/api/env")
 check("http: env view has no secret values", code == 200 and "gsk_realsecret" not in json.dumps(body))
 code, body = call("/api/history")

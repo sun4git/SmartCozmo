@@ -283,7 +283,7 @@ class Settings:
     # until the robot is on the charger or disconnects.
     battery_low_voltage: float = field(default_factory=lambda: _env_float("BATTERY_LOW_VOLTAGE", 3.7))
     battery_critical_voltage: float = field(default_factory=lambda: _env_float("BATTERY_CRITICAL_VOLTAGE", 3.5))
-    battery_check_interval_s: float = field(default_factory=lambda: _env_float("BATTERY_CHECK_INTERVAL_S", 30.0))
+    battery_check_interval_s: float = field(default_factory=lambda: _env_float("BATTERY_CHECK_INTERVAL_S", 15.0))
 
     # Low-battery return-to-charger (cozmo_brain/charger_return.py). At
     # BATTERY_LOW_VOLTAGE Cozmo *offers* out loud to head back; at

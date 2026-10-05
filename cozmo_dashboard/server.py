@@ -111,14 +111,24 @@ class Handler(BaseHTTPRequestHandler):
     def _error(self, status: int, message: str) -> None:
         self._json({"error": message}, status)
 
+    def _read_body(self) -> None:
+        """Read the request body up front, whatever happens next. Replying
+        (e.g. a 403) while the client's body is still unread can make the OS
+        reset the connection, so the browser would see a network error
+        instead of our message."""
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        self._too_big = length > MAX_BODY
+        self._raw = b"" if self._too_big or length <= 0 else self.rfile.read(length)
+
     def _body_json(self) -> dict[str, Any]:
         if "application/json" not in self.headers.get("Content-Type", ""):
             raise ValueError("Expected a JSON body")
-        length = int(self.headers.get("Content-Length") or 0)
-        if length > MAX_BODY:
+        if self._too_big:
             raise ValueError("Body too large")
-        raw = self.rfile.read(length) if length else b"{}"
-        obj = json.loads(raw or b"{}")
+        obj = json.loads(self._raw or b"{}")
         if not isinstance(obj, dict):
             raise ValueError("Expected a JSON object")
         return obj
@@ -157,6 +167,8 @@ class Handler(BaseHTTPRequestHandler):
         self._route("PUT")
 
     def _route(self, method: str) -> None:
+        if method != "GET":
+            self._read_body()
         url = urlparse(self.path)
         path, query = url.path, {k: v[-1] for k, v in parse_qs(url.query).items()}
         if not self._host_ok():
@@ -188,8 +200,7 @@ class Handler(BaseHTTPRequestHandler):
             self._error(500, "Internal error - see the dashboard's terminal")
 
     def _login(self) -> None:
-        length = min(int(self.headers.get("Content-Length") or 0), 4096)
-        form = parse_qs(self.rfile.read(length).decode("utf-8", errors="replace"))
+        form = parse_qs(self._raw[:4096].decode("utf-8", errors="replace"))
         supplied = (form.get("token") or [""])[0]
         if self.dash.token and hmac.compare_digest(supplied.encode(), self.dash.token.encode()):
             self._send(303, b"", "text/plain", {
@@ -236,6 +247,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(data.read_text(d.data_dir, q.get("path", "")))
         if path == "/api/env":
             return self._json(envfile.view(d.env_path, d.example_path))
+        if path == "/api/battery/now":
+            return self._json({"now": data.battery_now(d.data_dir)})
         if path == "/api/battery":
             return self._json(data.battery_view(d.data_dir))
         if path == "/api/memory":

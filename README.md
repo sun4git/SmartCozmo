@@ -1675,7 +1675,7 @@ Cozmo streams his own `battery_voltage` (a real field on PyCozmo's
 discrete "low battery" status flag — just the raw voltage. `BatteryMonitor`
 (`cozmo_brain/robot/battery_monitor.py`) runs on a background thread from
 `main.py`, polling `robot.get_battery_voltage()` every
-`BATTERY_CHECK_INTERVAL_S` (default 30s). Below `BATTERY_LOW_VOLTAGE`
+`BATTERY_CHECK_INTERVAL_S` (default 15s). Below `BATTERY_LOW_VOLTAGE`
 (default 3.7V) it shows a battery icon on Cozmo's face plus a red backpack
 light for a few seconds; below `BATTERY_CRITICAL_VOLTAGE` (default 3.5V) the
 icon switches from a shrinking fill level to a solid warning mark, since a
@@ -1747,7 +1747,7 @@ when first enabling it.
 for how long?" decision can be based on *this* robot's battery instead of a
 guessed threshold, `battery_log.py` records events from the battery
 monitor's readings (every `BATTERY_CHECK_INTERVAL_S`, so times are to about
-30s) — events only, a few dozen lines a day, nothing personal:
+15s) — events only, a few dozen lines a day, nothing personal:
 
 - `run_start`, `docked` / `undocked`, `charging_started` / `charging_stopped`
   (with minutes docked so far) — the on-charger charge curve.

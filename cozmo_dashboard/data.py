@@ -346,6 +346,23 @@ def memory_view(data_dir: Path) -> dict[str, Any]:
 
 # --- battery -------------------------------------------------------------------
 
+def battery_now(data_dir: Path) -> dict[str, Any] | None:
+    """The app's latest reading (battery_now.json, rewritten every
+    BATTERY_CHECK_INTERVAL_S), with its age. None if there isn't one yet."""
+    path = data_dir / "battery_now.json"
+    try:
+        rec = json.loads(path.read_text(encoding="utf-8"))
+        ts = datetime.fromisoformat(rec["ts"])
+        age = (datetime.now(ts.tzinfo) - ts).total_seconds()
+        interval = float(rec.get("interval_s") or 30)
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    rec["age_s"] = max(0, round(age))
+    # Written every `interval` seconds while the app runs; well past that = it stopped (or lost the robot).
+    rec["stale"] = age > max(3 * interval, 45)
+    return rec
+
+
 def battery_view(data_dir: Path, limit: int = 400) -> dict[str, Any]:
     path = data_dir / "battery.jsonl"
     records = list(read_jsonl(path))
@@ -354,8 +371,11 @@ def battery_view(data_dir: Path, limit: int = 400) -> dict[str, Any]:
     latest = points[-1] if points else None
     last_docked = next((r for r in reversed(records) if r.get("event") in ("docked", "undocked", "run_start")), None)
     stretches = [r for r in records if r.get("event") == "stretch"][-10:]
+    now = battery_now(data_dir)
+    if now and (not latest or str(now["ts"]) > str(latest["ts"])):
+        points.append({"ts": now["ts"], "event": "now", "v": now["v"]})  # the chart ends at the live reading
     return {"points": points, "latest": latest, "state": last_docked, "stretches": stretches,
-            "events": len(records)}
+            "events": len(records), "now": now}
 
 
 # --- host --------------------------------------------------------------------

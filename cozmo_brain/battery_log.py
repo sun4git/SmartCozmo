@@ -18,6 +18,10 @@ End reasons: "break_over", "dock_tool" (asked to dock, incl. agreeing to the
 low-battery offer), "critical" (autonomous critical return), "run_end",
 "other" (put back by hand, or anything unannounced).
 
+Separately, every reading (not just events) overwrites data/battery_now.json
+with the latest voltage and dock state - a tiny file for a live display (the
+dashboard's battery card); it is not history.
+
 This is the raw data for a later "can I come out, and for how long?" call
 based on this robot's own battery; standalone/battery_report.py summarises it.
 Nothing personal is stored. Readings only arrive every 30s, so every time is
@@ -29,6 +33,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import threading
 import time
 from datetime import datetime
@@ -88,6 +93,7 @@ class BatteryLog:
             logger.debug("Battery log status read failed: %s", e)
             return
         now = self._clock()
+        self._write_now(now, voltage, docked, charging, picked_up)
         with self._lock:
             if self._docked is None:
                 self._write("run_start", now, v=voltage, docked=docked, charging=charging)
@@ -184,6 +190,22 @@ class BatteryLog:
     @staticmethod
     def _minutes_since(start: float | None, now: float) -> float | None:
         return None if start is None else round((now - start) / 60.0, 1)
+
+    def _write_now(self, now: float, voltage: float, docked: bool, charging: bool, picked_up: bool) -> None:
+        """Overwrite battery_now.json with this reading. Written to a temp file
+        and renamed, so a reader never sees half a file."""
+        record = {
+            "ts": _iso(now), "v": voltage, "docked": docked, "charging": charging, "picked_up": picked_up,
+            "interval_s": self._settings.battery_check_interval_s,
+        }
+        target = self._path.with_name("battery_now.json")
+        tmp = target.with_name(target.name + ".tmp")
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp.write_text(json.dumps(record), encoding="utf-8")
+            os.replace(tmp, target)
+        except OSError as e:
+            logger.debug("Could not write %s: %s", target, e)
 
     def _write(self, event: str, now: float, **fields) -> None:
         record = {"ts": _iso(now), "event": event, **fields}

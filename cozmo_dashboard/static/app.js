@@ -504,9 +504,24 @@ async function pollBattery() {
   const b = await api("/api/battery").catch(() => null);
   if (b) { S.battery = b; renderBattery(); }
 }
+async function pollBatteryNow() {
+  const r = await api("/api/battery/now").catch(() => null);
+  if (r) { S.now = r.now; renderBattery(); }
+}
 function renderBattery() {
   if (!control.battBox) return;
-  const b = S.battery;
+  const b = S.battery, live = S.now;
+  if (live) {
+    const v = live.v, pct = Math.max(0, Math.min(100, ((v - 3.3) / (4.2 - 3.3)) * 100));
+    const how = live.charging ? "Charging" : live.docked ? "On the charger" : live.picked_up ? "Picked up" : "Off the charger";
+    control.battBox.replaceChildren(
+      h("div", { class: "row" }, stat("Voltage", v.toFixed(2) + " V"),
+        h("span", { class: "chip " + (live.docked ? "good" : "warn"), text: how }),
+        live.stale ? h("span", { class: "chip bad", text: `no reading for ${fmtDur(live.age_s)} — app stopped?` })
+          : h("span", { class: "muted", text: `updated ${fmtDur(live.age_s)} ago` })),
+      h("div", { class: "meter", style: { marginTop: "10px", opacity: live.stale ? .45 : 1 }, title: "3.3 V to 4.2 V" }, h("i", { style: { width: pct + "%" } })));
+    return;
+  }
   if (!b || !b.latest) { control.battBox.replaceChildren(h("div", { class: "muted", text: "No battery readings yet — they're logged while the real robot is connected." })); return; }
   const v = b.latest.v, pct = Math.max(0, Math.min(100, ((v - 3.3) / (4.2 - 3.3)) * 100));
   const st = b.state || {};
@@ -793,7 +808,7 @@ function chart(points, low, crit) {
   for (let v = Math.ceil(lo * 10) / 10; v <= hi; v += .2) g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v.toFixed(1)}</text>`;
   const line = (v, color, label) => v ? `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="${color}" stroke-dasharray="5 4"/><text x="${W - R - 2}" y="${y(v) - 4}" text-anchor="end" style="fill:${color}">${label} ${v}</text>` : "";
   const path = points.map((p, i) => `${i ? "L" : "M"}${x(+new Date(p.ts)).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
-  const dots = points.filter((p) => p.event && p.event !== "run_start").map((p) => `<circle cx="${x(+new Date(p.ts))}" cy="${y(p.v)}" r="3.5" fill="${p.event === "docked" ? "#19b36b" : "#f0a30f"}"><title>${p.event} · ${p.v} V · ${clock(p.ts)}</title></circle>`).join("");
+  const dots = points.filter((p) => p.event && p.event !== "run_start" && p.event !== "now").map((p) => `<circle cx="${x(+new Date(p.ts))}" cy="${y(p.v)}" r="3.5" fill="${p.event === "docked" ? "#19b36b" : "#f0a30f"}"><title>${p.event} · ${p.v} V · ${clock(p.ts)}</title></circle>`).join("");
   const d0 = new Date(t0), d1 = new Date(t1);
   const fmt = (d) => `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   svg.innerHTML = `${g}${line(low, "#f0a30f", "low")}${line(crit, "#e5484d", "critical")}
@@ -841,5 +856,6 @@ function init() {
   connectLog(); connectConv();
   pollStatus(); setInterval(pollStatus, 2000);
   pollBattery(); setInterval(pollBattery, 20000);
+  pollBatteryNow(); setInterval(pollBatteryNow, 5000);
 }
 init();

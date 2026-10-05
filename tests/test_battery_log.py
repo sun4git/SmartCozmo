@@ -1,4 +1,5 @@
 """Test: battery.jsonl events, stretch records, causes/end reasons, analysis."""
+import json
 import logging
 import os
 import sys
@@ -62,6 +63,14 @@ clock.advance(5); log.on_reading(4.11)  # no change: no record
 events = [x["event"] for x in read_battery_log(path)]
 check("run_start then charging_stopped, steady readings write nothing", events == ["run_start", "charging_stopped"])
 check("charging_stopped carries docked minutes", read_battery_log(path)[-1]["docked_min"] == 40.0)
+
+# every reading (even one that writes no event) refreshes battery_now.json
+now_file = path.with_name("battery_now.json")
+now = json.loads(now_file.read_text(encoding="utf-8"))
+check("battery_now.json holds the latest reading", now["v"] == 4.11 and now["docked"] is True and now["charging"] is False)
+check("battery_now.json carries the check interval", now["interval_s"] == S.battery_check_interval_s)
+check("no temp file left behind", not now_file.with_name("battery_now.json.tmp").exists())
+check("default check interval is 15s", Settings().battery_check_interval_s == 15.0)
 
 # break exit: note -> undock, cause recorded; off-dock readings tracked
 log.note_exit("break")
