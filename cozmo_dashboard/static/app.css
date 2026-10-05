@@ -187,6 +187,8 @@ input:focus, select:focus, textarea:focus { border-color: var(--brand); box-shad
 .opts { display: flex; gap: 18px; flex-wrap: wrap; align-items: center; }
 .opt { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 14px; }
 .opts select { width: auto; background: rgba(255, 255, 255, .95); color: #0d2238; }
+.hero input[type=text] { background: rgba(255, 255, 255, .96); color: #0d2238; border-color: transparent; }
+.hero input::placeholder { color: #5d7590; opacity: 1; }
 .big-actions { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .big-actions .btn { padding: 14px 28px; font-size: 17px; border-radius: 18px; }
 .hero .btn.primary { background: #fff; color: #0a5fc0; border-color: #fff; box-shadow: 0 8px 24px rgba(0, 20, 60, .3); }
