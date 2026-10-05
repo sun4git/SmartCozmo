@@ -121,7 +121,7 @@ nav svg { width: 20px; height: 20px; flex: none; }
 .chip.bad { background: rgba(229, 72, 77, .12); color: var(--bad); border-color: rgba(229, 72, 77, .3); }
 .btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 18px; border-radius: 14px; cursor: pointer;
-  border: 1px solid var(--line); background: var(--card); font-weight: 800; transition: transform .1s, box-shadow .15s, background .15s;
+  border: 1px solid var(--line); background: var(--card); font-weight: 800; white-space: nowrap; transition: transform .1s, box-shadow .15s, background .15s;
 }
 .btn:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
 .btn:active { transform: translateY(0); }

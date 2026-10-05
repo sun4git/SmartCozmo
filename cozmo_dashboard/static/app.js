@@ -16,7 +16,7 @@ function h(tag, attrs, ...kids) {
     else if (v === true) el.setAttribute(k, "");
     else el.setAttribute(k, v);
   }
-  for (const kid of kids.flat()) {
+  for (const kid of kids.flat(Infinity)) {
     if (kid == null || kid === false) continue;
     el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
   }
@@ -89,8 +89,8 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("#lightb
 // Eyes: height (px of 56), how far the top/bottom lids cover, and the top lid's tilt.
 const MOODS = {
   asleep: { h: 5, top: 0, bot: 0, tilt: 0 }, neutral: { h: 56, top: 0, bot: 0, tilt: 0 },
-  happy: { h: 50, top: 0, bot: .42, tilt: 0 }, excited: { h: 60, top: 0, bot: .3, tilt: 0 },
-  curious: { h: 62, top: 0, bot: 0, tilt: -5 }, proud: { h: 52, top: .08, bot: .36, tilt: 0 },
+  happy: { h: 52, top: 0, bot: .28, tilt: 0 }, excited: { h: 60, top: 0, bot: .18, tilt: 0 },
+  curious: { h: 62, top: 0, bot: 0, tilt: -5 }, proud: { h: 52, top: .08, bot: .24, tilt: 0 },
   sad: { h: 52, top: .22, bot: 0, tilt: -18 }, sleepy: { h: 40, top: .45, bot: 0, tilt: 0 },
   bored: { h: 46, top: .4, bot: 0, tilt: 0 }, scared: { h: 64, top: 0, bot: 0, tilt: -10 },
   surprised: { h: 68, top: 0, bot: 0, tilt: 0 }, confused: { h: 54, top: .05, bot: 0, tilt: 8 },
@@ -116,12 +116,12 @@ function makeFace(opts) {
     <rect x="6" y="6" width="188" height="128" rx="34" fill="#05080f"/>
     <g clip-path="url(#clip-${id})">
       <g class="blinker" style="transform-box:view-box;transform-origin:100px 70px;transition:transform .09s">
-        <rect class="eye eL" x="51" y="42" width="34" height="56" rx="11" fill="#46d3ff" filter="url(#glow-${id})"/>
-        <rect class="eye eR" x="115" y="42" width="34" height="56" rx="11" fill="#46d3ff" filter="url(#glow-${id})"/>
-        <rect class="lid tL" x="36" y="-40" width="64" height="82" fill="#05080f"/>
-        <rect class="lid tR" x="100" y="-40" width="64" height="82" fill="#05080f"/>
-        <rect class="lid bL" x="36" y="98" width="64" height="60" fill="#05080f"/>
-        <rect class="lid bR" x="100" y="98" width="64" height="60" fill="#05080f"/>
+        <rect class="eye eL" x="45" y="46" width="48" height="48" rx="14" fill="#46d3ff" filter="url(#glow-${id})"/>
+        <rect class="eye eR" x="107" y="46" width="48" height="48" rx="14" fill="#46d3ff" filter="url(#glow-${id})"/>
+        <rect class="lid tL" x="34" y="-36" width="70" height="82" fill="#05080f"/>
+        <rect class="lid tR" x="96" y="-36" width="70" height="82" fill="#05080f"/>
+        <rect class="lid bL" x="34" y="94" width="70" height="60" fill="#05080f"/>
+        <rect class="lid bR" x="96" y="94" width="70" height="60" fill="#05080f"/>
       </g>
     </g>
     <text class="zzz" x="150" y="40" font-size="20" font-weight="800" fill="#46d3ff" opacity="0" style="transition:opacity .4s">z z</text>`;
@@ -132,11 +132,11 @@ function makeFace(opts) {
 
   function set(name) {
     mood = MOODS[name] ? name : "neutral";
-    const m = MOODS[mood], cy = 70, he = m.h;
-    for (const [side, cx, sgn] of [["L", 68, 1], ["R", 132, -1]]) {
+    const m = MOODS[mood], cy = 70, he = m.h * 48 / 56;  // MOODS heights are in 56ths; the neutral eye is a 48px square
+    for (const [side, cx, sgn] of [["L", 69, 1], ["R", 131, -1]]) {
       const o = `transform-origin:${cx}px ${cy}px;`;
-      q(".e" + side).setAttribute("style", `${T}${o}transform:scaleY(${he / 56});`);
-      const topY = (28 - he / 2) + m.top * he, botY = (he / 2 - 28) - m.bot * he;
+      q(".e" + side).setAttribute("style", `${T}${o}transform:scaleY(${he / 48});`);
+      const topY = (24 - he / 2) + m.top * he, botY = (he / 2 - 24) - m.bot * he;
       q(".t" + side).setAttribute("style", `${T}${o}transform:rotate(${m.tilt * sgn}deg) translateY(${topY}px);`);
       q(".b" + side).setAttribute("style", `${T}${o}transform:translateY(${botY}px);`);
     }
