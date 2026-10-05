@@ -1,7 +1,7 @@
 """Real PyCozmo-backed robot control.
 
 Every method here maps to a confirmed PyCozmo API (verified against the
-installed pycozmo 0.8.0 package — see README for the full list). Notably:
+installed pycozmo 0.8.0 package — see docs/ for the full list). Notably:
 
 - `cli.drive_wheels(..., duration=...)` accepts a `duration` kwarg but does
   NOT actually use it to stop the robot — it's silently ignored in this
@@ -9,12 +9,12 @@ installed pycozmo 0.8.0 package — see README for the full list). Notably:
   with `stop_all_motors()` after sleeping for the computed duration instead
   of relying on that parameter.
 - Real Anki animation clips (`play_anim`/`play_anim_group`) require assets
-  downloaded via `pycozmo_resources.py download` (see README setup). If
+  downloaded via `pycozmo_resources.py download` (see docs/setup.md). If
   they aren't present, animation playback degrades gracefully — everything
   else (face, lights, head, lift, wheels, camera) still works.
 - `connect()` optionally joins Cozmo's Wi-Fi AP itself first, via
   `cozmo_brain.robot.wifi` — opt-in with `COZMO_WIFI_SSID` (see that
-  module and README). PyCozmo itself has no concept of Wi-Fi association;
+  module and docs/setup.md). PyCozmo itself has no concept of Wi-Fi association;
   it only ever talks over whatever network interface the OS already has
   routed to Cozmo's IP.
 - Connection health/reconnect: `cli.send()` (used by drive/head/lift/lights/
@@ -247,7 +247,7 @@ class PyCozmoRobot(RobotBackend):
         except pycozmo.exception.ResourcesNotFound:
             logger.warning(
                 "Cozmo animation resources not found — play_animation()/list_animations() "
-                "will be unavailable. Run 'pycozmo_resources.py download' to fix (see README)."
+                "will be unavailable. Run 'pycozmo_resources.py download' to fix (see docs/setup.md)."
             )
 
         # Cozmo's head is wherever it physically was before connecting (often
@@ -861,7 +861,7 @@ class PyCozmoRobot(RobotBackend):
                 logger.info("Already within %.0fmm of the target - only correcting heading.", _MIN_NAV_DISTANCE_MM)
 
             # go_to_pose()'s own point-turn is unreliable (confirmed on real
-            # hardware, intermittent - see README roadmap item 6), but
+            # hardware, intermittent - see docs/return-to-charger.md), but
             # cli.pose's heading readback tracked reality correctly every
             # time. So correct the heading ourselves with the calibrated
             # turn(), unconditionally: near-zero if go_to_pose() already got

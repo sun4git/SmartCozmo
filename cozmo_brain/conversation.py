@@ -30,7 +30,7 @@ class Conversation:
 
     Trimming keeps the system prompt plus the most recent messages. This is a
     simple, predictable strategy rather than token-aware summarization — good
-    enough while conversations stay short (see README roadmap for
+    enough while conversations stay short (see docs/roadmap.md for
     summarization as a future improvement).
     """
 

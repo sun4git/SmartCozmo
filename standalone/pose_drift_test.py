@@ -5,7 +5,7 @@ Pose / dead-reckoning drift test - standalone, NOT part of cozmo_brain or
 
 Why separate: this is one-off exploratory hardware testing (see the
 "Switching speech providers"-adjacent PyCozmo localization research in
-README/this project's history), not a regular calibration workflow. It
+docs/ and this project's history), not a regular calibration workflow. It
 answers a single question: how much does `cli.pose`/`cli.go_to_pose()`
 actually drift from physical reality over a real commanded path, on this
 specific unit and floor. `Client.pose` and `Client.go_to_pose()` are real,
@@ -68,7 +68,7 @@ load_dotenv()
 #
 # Desk-scale, turn-heavy path (~800mm total, 4 tighter turns) - two
 # room-scale runs already confirmed dead-reckoning is tight over a longer
-# ~2.1m/2-turn path (see README's roadmap item 6), but Cozmo mostly stays
+# ~2.1m/2-turn path (see docs/return-to-charger.md), but Cozmo mostly stays
 # on a desk in actual use, not crossing a room - a smaller area with more
 # frequent, tighter maneuvering. More turns over a *shorter* total distance
 # is actually a different (and in one way harder) stress test: each turn

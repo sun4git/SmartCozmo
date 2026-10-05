@@ -16,8 +16,8 @@ declares and resamples from that to Cozmo's required 22050/48000Hz — the
 same audioop.ratecv() primitive already used for the pitch-shift effect,
 just used here for a plain format conversion instead of a deliberate one.
 
-See groq_client.py / openai_client.py for where this gets called; see the
-README's "Making the voice sound less generic" section for what each
+See groq_client.py / openai_client.py for where this gets called; see
+docs/audio-output.md, "Making the voice sound less generic", for what each
 effect is actually for.
 """
 

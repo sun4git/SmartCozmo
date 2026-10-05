@@ -26,7 +26,7 @@ This is the raw data for a later "can I come out, and for how long?" call
 based on this robot's own battery; standalone/battery_report.py summarises it.
 Nothing personal is stored. Readings only arrive every 30s, so every time is
 to that resolution. Kept until deleted for now - a retention setting of its
-own comes with the "can I come out?" feature (README roadmap item 8).
+own comes with the "can I come out?" feature (docs/roadmap.md item 8).
 """
 
 from __future__ import annotations

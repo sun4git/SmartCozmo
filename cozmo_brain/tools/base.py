@@ -30,7 +30,7 @@ class Tool:
     # purpose: a new tool that returns information the model must read
     # (a photo, a list, a status) is safe automatically - the engine
     # keeps asking the model, the old behavior - and only needs opting in
-    # if it's a pure action. Worked examples: README "How a turn ends".
+    # if it's a pure action. Worked examples: docs/turn-flow.md.
     safe_to_end_turn: bool = False
 
     def schema(self) -> dict[str, Any]:

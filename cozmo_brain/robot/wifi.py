@@ -9,8 +9,8 @@ check his face for the current ones). If a saved NetworkManager profile no
 longer matches what he's currently broadcasting, this falls back to logging
 a clear instruction to reconnect manually, rather than guessing.
 
-Note: on some systems `nmcli` Wi-Fi actions require root (see README's
-"nmcli commands may need sudo" gotcha). This module never adds `sudo`
+Note: on some systems `nmcli` Wi-Fi actions require root (see
+docs/known-gotchas.md, "nmcli commands may need sudo"). This module never adds `sudo`
 itself — silently blocking on an interactive password prompt from a
 non-interactive process (e.g. under systemd) is worse than just failing
 loudly. If you hit permission errors, set up passwordless sudo/polkit for
@@ -67,7 +67,7 @@ def ensure_connected(ssid: str, password: str = "", timeout: float = 15.0) -> bo
         )
         return False
 
-    # CRITICAL: keep the wired connection as the default route (see README) —
+    # CRITICAL: keep the wired connection as the default route (see docs/setup.md) —
     # otherwise this machine loses its route to the internet/Ollama/Groq.
     _nmcli(["connection", "modify", ssid, "ipv4.never-default", "yes"], timeout=timeout, log_failure=False)
     logger.info("Connected to Cozmo's Wi-Fi ('%s') for the first time and saved the profile.", ssid)

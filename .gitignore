@@ -34,7 +34,7 @@ pycozmo-src/
 Thumbs.db
 
 # models/: downloaded Piper voices are large and re-downloadable (see
-# README), so they stay out of git. Custom-trained wake word models are
+# docs/providers.md), so they stay out of git. Custom-trained wake word models are
 # committed - add a `!models/<name>.onnx` line for each new one.
 models/*.onnx
 models/*.onnx.json

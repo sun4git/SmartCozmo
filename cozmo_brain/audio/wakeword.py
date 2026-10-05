@@ -89,7 +89,7 @@ def wait_for_wake_word(
         raise RuntimeError(
             "Wake-word mode requires openwakeword, installed without its usual "
             "(broken, on Python 3.12) tflite-runtime dependency. See "
-            "cozmo_brain/audio/wakeword.py or the README for the install command."
+            "cozmo_brain/audio/wakeword.py or docs/wake-word.md for the install command."
         ) from e
 
     model_arg, key = _resolve_model(model_spec)
