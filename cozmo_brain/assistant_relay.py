@@ -30,6 +30,18 @@ logger = logging.getLogger(__name__)
 # model (or a mishearing loop) shouldn't be able to flood the assistant.
 _MAX_IN_FLIGHT = 3
 
+# The word-for-word fallback (said only if Cozmo's own turn can't get a
+# `say` out) is cut to about this much - it's read straight out, unedited.
+_FALLBACK_MAX_CHARS = 400
+
+
+def _spoken(reply: str) -> str:
+    if len(reply) <= _FALLBACK_MAX_CHARS:
+        return reply
+    cut = reply[:_FALLBACK_MAX_CHARS]
+    end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+    return cut[: end + 1] if end > 0 else cut.rstrip() + "..."
+
 
 class AssistantRelay:
     def __init__(self, assistant: AssistantClient):
@@ -62,6 +74,7 @@ class AssistantRelay:
         name = self._assistant.name
         try:
             reply = self._assistant.ask(request)
+            fallback = f"{name} says: {_spoken(reply)}"
             note = (
                 f"[{name} just answered the request you sent earlier (\"{request}\"): {reply} "
                 f"Tell them now with `say`, in your own words - it's been a little while, so "
@@ -69,6 +82,7 @@ class AssistantRelay:
             )
         except Exception as e:  # noqa: BLE001 - every failure must still reach the person
             logger.warning("Background request to %s failed: %s", name, e)
+            fallback = f"Sorry, I couldn't get an answer from {name} just now."
             note = (
                 f"[The request you sent {name} earlier (\"{request}\") failed: {e} "
                 f"Tell them now with `say` - honestly, don't make up an answer. Nobody said "
@@ -81,7 +95,7 @@ class AssistantRelay:
         if engine is None:
             logger.warning("Answer from %s arrived but no engine is attached - dropped: %s", name, note)
             return
-        engine.queue_announcement(note)
+        engine.queue_announcement(note, fallback)
         # Inside a vad listening window the vad loop delivers it between
         # recordings, so it can't land in the middle of someone talking.
         if not engine.listening_window_open:

@@ -231,6 +231,70 @@ check(f"at most 3 requests in flight ({results})", results == [True, True, True,
 check("empty request refused", relay.submit("  ")[0] is False)
 time.sleep(1.6)
 
+# --- delivery fallback: chat failing when the answer arrives ----------------------------
+import requests  # noqa: E402
+from cozmo_brain import engine as engine_mod  # noqa: E402
+from cozmo_brain import assistant_relay as relay_mod  # noqa: E402
+engine_mod._ANNOUNCE_RETRY_S = 0.05
+
+class SaidSpeech:
+    def __init__(self): self.said = []
+    def synthesize(self, t, p): self.said.append(t); return p
+
+class FlakyChat:
+    """Raises a 429-style error for the first `fails` calls, then scripted."""
+    def __init__(self, fails, script=()):
+        self.fails, self.script, self.n = fails, list(script), 0
+    def chat(self, messages, tools=None):
+        self.n += 1
+        if self.n <= self.fails: raise requests.HTTPError("429 Too Many Requests")
+        return self.script.pop(0) if self.script else fe.DONE
+
+def fallback_engine(chat):
+    speech = SaidSpeech()
+    eng = CozmoEngine(S, robot, chat, speech, build_tools(robot, speech, chat, S), Conversation("sys"))
+    eng.listening_window_open = True  # deliver from the test, not a thread
+    return eng, speech
+
+eng, speech = fallback_engine(FlakyChat(fails=99))
+eng.queue_announcement("[Sunny just answered: It's 24 degrees.]", "Sunny says: It's 24 degrees.")
+eng.deliver_announcements()
+check(f"chat down twice -> fallback said word for word ({speech.said})", speech.said == ["Sunny says: It's 24 degrees."])
+check("fallback recorded in the conversation", any("[I said this out loud:] Sunny says" in (m.get("content") or "")
+      for m in eng.conversation.messages if m["role"] == "assistant"))
+check("retried once before falling back (2 LLM attempts)", eng._ollama.n == 2)
+
+eng, speech = fallback_engine(FlakyChat(fails=1, script=[fe.NS(content="", tool_calls=[fe.call("say", text="It's 24 and sunny!")])]))
+eng.queue_announcement("[Sunny just answered: It's 24 degrees.]", "Sunny says: It's 24 degrees.")
+eng.deliver_announcements()
+check(f"chat fails once -> retry speaks in Cozmo's words, no fallback ({speech.said})", speech.said == ["It's 24 and sunny!"])
+
+eng, speech = fallback_engine(fe.Chat([fe.NS(content="", tool_calls=[fe.call("say", text="Got it!")])]))
+eng.queue_announcement("[note]", "FALLBACK")
+eng.deliver_announcements()
+check("normal delivery: one turn, no fallback", speech.said == ["Got it!"] and eng._ollama.n == 1)
+
+eng, speech = fallback_engine(FlakyChat(fails=99))
+eng.queue_announcement("[note with no fallback]")
+eng.deliver_announcements()
+check("no fallback given -> nothing said, no crash", speech.said == [])
+
+# The relay supplies the fallback, for answers and for failures.
+queued = []
+class QEngine:
+    listening_window_open = True
+    def queue_announcement(self, note, fallback=None): queued.append(fallback)
+Fake.reply = (200, {"choices": [{"message": {"content": "Reminder set for 5pm."}}]})
+r = AssistantRelay(client); r.attach(QEngine()); r.submit("remind me at 5")
+check("relay fallback for an answer: '<name> says: <reply>'", wait_for(lambda: queued) and queued[0] == "Sunny says: Reminder set for 5pm.")
+queued.clear(); Fake.reply = (500, "down")
+r.submit("hi")
+check("relay fallback for a failure: honest sorry", wait_for(lambda: queued) and "couldn't get an answer from Sunny" in queued[0])
+long = "This is a sentence. " * 40
+check("long answers cut at a sentence end for the fallback",
+      len(relay_mod._spoken(long)) <= 400 and relay_mod._spoken(long).endswith("."))
+check("short answers kept whole", relay_mod._spoken("Hi there.") == "Hi there.")
+
 # --- vad: idle_stop_event only stops a recording nobody is talking in -----------------
 import io, math, struct, types  # noqa: E401,E402
 fake_vad = types.ModuleType("webrtcvad")

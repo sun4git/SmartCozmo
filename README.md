@@ -787,6 +787,18 @@ to pass it on, in his own words:
   follow up without the wake word too. A recording that's already capturing someone
   talking is never cut off - the answer comes right after that turn.
 
+Passing an answer on takes one chat-model call. If that turn gets no
+`say` out - usually the chat provider failing right then (429 rate limits
+are common on free tiers) - it's retried once after 5s, and if that fails
+too, Cozmo reads the answer out word for word ("Sunny says: ...", cut to
+about 400 characters at a sentence end), or "Sorry, I couldn't get an
+answer from Sunny just now." for a failed request. So while the app is
+running, an answer that arrives is always heard. This covers the
+assistant's immediate replies (an answer, or "I've set your reminder") -
+the reminder itself, when it fires later, is sent by the assistant on its
+own (WhatsApp) and never reaches Cozmo (spoken reminders: roadmap item 7).
+A pending request is lost if the app restarts or stops before it's answered.
+
 `ASSISTANT_BACKGROUND=false` is the simple version: he says "let me ask
 Sunny", waits silently with the mic closed (up to `ASSISTANT_TIMEOUT_S`,
 default 180s - lower it for this), then answers. At most 3 background
@@ -2213,7 +2225,8 @@ break, `leave_charger`, the per-turn battery line and who-moved-him labels
 (`test_battery_log`), SIGTERM stopping the app like Ctrl+C
 (`test_sigterm`), and `ask_assistant` against a fake endpoint - the
 session `user` field, failures, waiting for the answer, and background
-answers delivered on their own, including only stopping a vad recording
+answers delivered on their own (with the retry and word-for-word fallback
+when the chat model fails), including only stopping a vad recording
 nobody is talking in (`test_assistant`), and the short no-wake-word
 window after Cozmo speaks up on his own (`test_speak_up_listen`).
 

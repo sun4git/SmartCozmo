@@ -44,6 +44,11 @@ _GESTURE_WAIT_S = 15.0
 # in-progress recording to actually stop before it acts - the recorder
 # checks its stop signal every 30ms frame, so this is generous.
 _MIC_RELEASE_WAIT_S = 1.0
+# deliver_announcements(): if the turn that should pass an answer on never
+# got a `say` out (usually the chat provider failing - 429s seen on both
+# Ollama and Groq), wait this long and try once more, then say the
+# fallback text directly (no LLM needed).
+_ANNOUNCE_RETRY_S = 5.0
 
 # Spoken by the engine itself if a drive/turn was refused for that reason
 # and the model never said anything after finding out (e.g. it ran out of
@@ -135,7 +140,7 @@ class CozmoEngine:
         # announce_event is set while any are waiting: --mode vad stops a
         # recording for it only if no speech has started yet.
         self.announce_event = threading.Event()
-        self._announcements: list[str] = []
+        self._announcements: list[tuple[str, str | None]] = []
         self._announce_lock = threading.Lock()
         # Set by request_listen() when Cozmo has just spoken up on his own
         # with something that wants an answer, outside a listening window:
@@ -169,11 +174,13 @@ class CozmoEngine:
         if self._settings.speak_up_listen_s > 0 and not self.listening_window_open:
             self.listen_request.set()
 
-    def queue_announcement(self, note: str) -> None:
+    def queue_announcement(self, note: str, fallback: str | None = None) -> None:
         """Queue a bracketed note for Cozmo to act on in a turn of his own
-        (see deliver_announcements()). Safe from any thread."""
+        (see deliver_announcements()). `fallback` is said word for word if
+        that turn can't get a `say` out, even after a retry. Safe from any
+        thread."""
         with self._announce_lock:
-            self._announcements.append(note)
+            self._announcements.append((note, fallback))
             self.announce_event.set()
 
     def deliver_announcements(self) -> bool:
@@ -183,16 +190,31 @@ class CozmoEngine:
         with self._announce_lock:
             notes, self._announcements = self._announcements, []
             self.announce_event.clear()
-        for note in notes:
+        for note, fallback in notes:
             logger.info("Speaking up on my own: %s", note)
-            summary = self.handle_turn(note)
-            if not self.log_steps_live:  # already logged live otherwise
-                logger.info("%s", summary)
+            if self._announce_turn(note):
+                continue
+            logger.warning("Nothing was said for that - trying again in %.0fs.", _ANNOUNCE_RETRY_S)
+            time.sleep(_ANNOUNCE_RETRY_S)
+            if self._announce_turn(note):
+                continue
+            if fallback:
+                logger.warning("Still nothing said - saying it directly instead: %s", fallback)
+                with self.turn_lock:
+                    if self.speak(fallback):
+                        self.add_note(f"[I said this out loud:] {fallback}")
         if notes:
             # Delivered outside a window (by assistant_relay.py's thread):
             # let them reply without the wake word.
             self.request_listen()
         return bool(notes)
+
+    def _announce_turn(self, note: str) -> bool:
+        """One turn for a queued note; whether a `say` succeeded in it."""
+        summary = self.handle_turn(note)
+        if not self.log_steps_live:  # already logged live otherwise
+            logger.info("%s", summary)
+        return any(line.startswith("[say] OK") for line in summary.splitlines())
 
     def _turn_is_done(self, batch: list[tuple[str, ToolResult]], image_attached: bool) -> bool:
         """Whether to end the turn now instead of asking the model again.
