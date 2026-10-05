@@ -104,6 +104,8 @@ See [Roadmap](#roadmap--open-work) for what's still open.
 │   ├── known_people/        # remember_person reference photos
 │   └── look.png             # last camera snapshot
 ├── run.sh                   # activates cozmo-env + runs cozmo_brain in one step (./run.sh --help)
+├── dashboard.sh             # starts the Control Room web dashboard (start/stop Cozmo, live log, history, .env editor)
+├── cozmo_dashboard/         # the dashboard: stdlib-only Python server + static page (see "The dashboard")
 ├── requirements.txt        # pip install -r requirements.txt (core deps only — see setup step 1 for extras)
 ├── .env.example             # template for every config variable, annotated — copy to .env
 ├── .env                      # your real config (gitignored, not in repo)
@@ -474,6 +476,23 @@ single run.
 
 (See [Modes](#modes) below if you'd rather activate `cozmo-env` and call
 `python3 -m cozmo_brain` directly instead of using `run.sh`.)
+
+
+### The dashboard (Control Room)
+
+A web page for running Cozmo without a terminal: start/stop him in any mode,
+live log and conversation, history, files, and a `.env` editor. Separate from
+`cozmo_brain/` and standard-library only.
+
+```bash
+./dashboard.sh                    # then open http://localhost:30540
+```
+
+Listens on this machine only by default; to open it from another computer
+you must set `DASHBOARD_HOST` and `DASHBOARD_TOKEN`. There is no default
+token; make one with
+`python3 -c "import secrets; print(secrets.token_urlsafe(24))"`. Full guide (pages,
+security, token, notes): [cozmo_dashboard/README.md](cozmo_dashboard/README.md).
 
 ---
 

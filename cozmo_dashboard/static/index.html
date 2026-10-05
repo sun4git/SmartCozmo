@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cozmo Control Room</title>
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="stylesheet" href="/static/app.css">
+<script>
+  // Set the theme before first paint so it doesn't flash.
+  try {
+    var t = localStorage.getItem("cozmo-theme");
+    if (!t) t = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    document.documentElement.dataset.theme = t;
+  } catch (e) { document.documentElement.dataset.theme = "light"; }
+</script>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <svg class="brand-face" viewBox="0 0 64 44" aria-hidden="true"><rect width="64" height="44" rx="12" fill="#05080f"/><rect x="12" y="12" width="14" height="20" rx="4" fill="#46d3ff"/><rect x="38" y="12" width="14" height="20" rx="4" fill="#46d3ff"/></svg>
+      <div><div class="wordmark">COZMO</div><div class="subbrand">Control Room</div></div>
+    </div>
+    <nav id="nav"></nav>
+    <div class="sidebar-foot">
+      <div class="cubes" title="Left to right: Cozmo app, live log stream, live conversation stream">
+        <span class="cube" id="cube-app"></span><span class="cube" id="cube-log"></span><span class="cube" id="cube-conv"></span>
+      </div>
+      <button class="icon-btn" id="theme-btn" title="Light / dark" aria-label="Toggle light or dark theme"></button>
+    </div>
+  </aside>
+  <main class="main">
+    <header class="topbar">
+      <div class="top-left"><h1 id="page-title">Control</h1></div>
+      <div class="top-right">
+        <span class="pill" id="top-state"><i class="dot"></i><span>Stopped</span></span>
+        <span class="muted" id="top-host"></span>
+      </div>
+    </header>
+    <div class="banner" id="banner" hidden></div>
+    <section class="page" id="page-control"></section>
+    <section class="page" id="page-live" hidden></section>
+    <section class="page" id="page-history" hidden></section>
+    <section class="page" id="page-files" hidden></section>
+    <section class="page" id="page-settings" hidden></section>
+    <section class="page" id="page-cozmo" hidden></section>
+  </main>
+</div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<div class="lightbox" id="lightbox" hidden><img alt=""></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

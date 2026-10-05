@@ -1,5 +1,7 @@
 # Secrets / local config
 .env
+# Timestamped backups of .env (written by standalone/sync_env.py and the dashboard) - they hold the same secrets
+.env.bak-*
 
 # Original personal handoff notes — superseded by README.md, kept locally only
 cozmo-llm-project-handoff.md
