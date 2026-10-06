@@ -205,6 +205,51 @@ sim.run_gesture = lambda name, **kw: ran.append(name) or ""
 sim.wake_up(); sim.go_to_sleep()
 check("base wake_up/go_to_sleep run the wake_up and sleep gestures", ran == ["wake_up", "sleep"])
 
+# 9b. connect(): the idle face (open eyes) stays off until the wake-up has played.
+from fake_pycozmo import FakeCli
+import dataclasses as _dc
+
+events = []
+
+class FakeClient(FakeCli):
+    def __init__(self, **kw):
+        super().__init__()
+        self.face = kw.get("enable_procedural_face", True)
+        events.append(("init", dict(kw)))
+        names = (clips.WAKE_CLIP,) + clips.SLEEP_CLIPS
+        self._clip_metadata = {n: NS(has_lift_height_track=False, fspec="x") for n in names}
+        self._clips, self._ppclips = {}, {n: fake_ppclip() for n in names}
+        self.animation_groups = {}
+        self.handlers = []
+    def start(self): pass
+    def connect(self): pass
+    def wait_for_robot(self): pass
+    def set_volume(self, v): pass
+    def add_handler(self, evt, fn, one_shot=False): self.handlers.append(fn)
+    def load_anims(self): pass
+    def get_anim_names(self): return set(self._clip_metadata)
+    def enable_procedural_face(self, on=True):
+        self.face = on
+        events.append(("face", on))
+    def play_anim_ppclip(self, pp):
+        events.append(("clip", "face_on" if self.face else "face_off"))
+        for fn in self.handlers: fn(None)
+
+from fake_pycozmo import PyCozmoRobot
+real_client = pycozmo.Client
+pycozmo.Client = FakeClient
+try:
+    for label, overrides in (("clips on", {}), ("clips off (gesture wake-up)", {"wake_sleep_clips": False})):
+        events.clear()
+        robot = PyCozmoRobot(_dc.replace(Settings(), **overrides))
+        robot.connect()
+        check(f"connect, {label}: client created with the idle face OFF", events[0] == ("init", {"enable_procedural_face": False}))
+        check(f"connect, {label}: idle face switched back ON afterwards", events[-1] == ("face", True))
+        if not overrides:
+            check("connect, clips on: the wake-up clip played while the idle face was off", ("clip", "face_off") in events)
+finally:
+    pycozmo.Client = real_client
+
 # 10. The model asking play_animation for a gesture ("dance") gets the gesture, not an error.
 class R(SimulatedRobot):
     def show_expression(self, name, duration=None): pass

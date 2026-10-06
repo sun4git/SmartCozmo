@@ -224,7 +224,12 @@ class PyCozmoRobot(RobotBackend):
     def connect(self) -> None:
         wifi.ensure_connected(self._settings.cozmo_wifi_ssid, self._settings.cozmo_wifi_password)
 
-        cli = pycozmo.Client()
+        # PyCozmo's idle face (blinking open eyes) starts the moment it connects
+        # and would sit on screen through load_anims() below, so the wake-up
+        # clip starts from open eyes instead of being the first thing seen.
+        # Off until wake_up() has played; turned back on at the end of this
+        # method whatever happens.
+        cli = pycozmo.Client(enable_procedural_face=False)
         cli.start()
         try:
             cli.connect()
@@ -267,6 +272,8 @@ class PyCozmoRobot(RobotBackend):
             self.wake_up()
         except Exception as e:  # noqa: BLE001 - a cosmetic startup animation shouldn't block connect()
             logger.warning("Could not play the wake-up animation: %s", e)
+        finally:
+            cli.enable_procedural_face(True)
 
     def disconnect(self) -> None:
         # Also covers reconnect(), which calls this first. A new pycozmo
