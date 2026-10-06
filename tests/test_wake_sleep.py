@@ -19,6 +19,7 @@ from PIL import Image
 from cozmo_brain.config import Settings
 from cozmo_brain.robot import clips, real
 from cozmo_brain.robot.simulated import SimulatedRobot
+from cozmo_brain.tools import build_tools
 
 logging.disable(logging.CRITICAL)
 failures = []
@@ -84,10 +85,29 @@ check("self-caused taps suppressed while it plays", r._tap_suppress_until > time
 r, cli = make()
 order = []
 orig = r.play_animation
-r.play_animation = lambda n: (order.append(n), orig(n))[1]
+r.play_animation = lambda n, **kw: (order.append(n), orig(n, **kw))[1]
 r.go_to_sleep()
 check("go_to_sleep plays the sleep clips in order", order == list(clips.SLEEP_CLIPS))
 check("...as two plays", len(cli.played) == 2)
+
+# 2b. The long "sleeping" loop is not waited on in full: shutdown carries on while it plays.
+r, cli = make(fire_completion=False)
+real._CLIP_COMPLETION_SLACK_S = 2.0   # no completion event arrives here, so each full wait costs this much
+real._SLEEP_HOLD_S = 0.2
+t0 = time.monotonic()
+r.go_to_sleep()
+took = time.monotonic() - t0
+check(f"go_to_sleep: first clip waits in full, second only for the hold ({took:.1f}s; both in full would be ~4.8s)",
+      2.0 < took < 3.6)
+real._CLIP_COMPLETION_SLACK_S = 5.0
+r, cli = make()
+real._SLEEP_HOLD_S = 3.0
+waited = []
+orig_wait = r.play_animation
+r.play_animation = lambda n, **kw: (waited.append((n, kw)), orig_wait(n, **kw))[1]
+r.go_to_sleep()
+check("only the last sleep clip is given a max wait",
+      waited == [(clips.SLEEP_CLIPS[0], {}), (clips.SLEEP_CLIPS[1], {"max_wait_s": 3.0})])
 
 # 3. Setting off -> built-in gestures, no clip.
 r, cli = make(wake_sleep_clips=False)
@@ -129,7 +149,38 @@ t0 = time.monotonic()
 r.play_animation(clips.WAKE_CLIP)
 check("no 'completed' event: gives up after clip length + slack instead of hanging", time.monotonic() - t0 < 2.0)
 
-# 7. strip_wheels is idempotent.
+# 6b. Suppression covers the clip's real play length, not just its last keyframe.
+r, cli = make()
+cli._ppclips[clips.WAKE_CLIP] = pycozmo.anim.PreprocessedClip(keyframes=defaultdict(list, {t: [] for t in range(0, 3000, 33)}))
+t0 = time.monotonic()
+r.play_animation(clips.WAKE_CLIP)
+real_len = clips.ppclip_duration_s(cli._ppclips[clips.WAKE_CLIP])
+check(f"dense clip (keyframe every 33 ms to 3.0s) plays ~{real_len:.1f}s, about twice its timeline",
+      5.5 < real_len < 6.5)
+check("taps stay suppressed past the timeline's end (the bug: they were detected mid-clip)",
+      r._tap_suppress_until - t0 > 5.5)
+
+# 7. The arithmetic matches PyCozmo's own play_anim_ppclip() exactly.
+from pycozmo import anim_encoder as ae
+clip = ae.AnimClip(name="t", keyframes=[
+    ae.AnimHeadAngle(trigger_time_ms=0, duration_ms=200, angle_deg=10),
+    ae.AnimLiftHeight(trigger_time_ms=100, duration_ms=300, height_mm=40),
+    ae.AnimBodyMotion(trigger_time_ms=250, duration_ms=400, radius_mm="STRAIGHT", speed=50),
+    ae.AnimBackpackLights(trigger_time_ms=500, duration_ms=300),
+    ae.AnimFaceAnimation(trigger_time_ms=2000, anim_name="x"),
+    ae.AnimRobotAudio(trigger_time_ms=3000),
+    ae.AnimEvent(trigger_time_ms=4000, event_id="e"),
+] + [ae.AnimHeadAngle(trigger_time_ms=t, duration_ms=30, angle_deg=1) for t in range(900, 1800, 33)])
+pp = pycozmo.anim.PreprocessedClip.from_anim_clip(clip)
+frames = []
+fake = NS(cancel_anim=lambda: None, _next_anim_id=0, anim_controller=NS(play_anim_frame=lambda *a: frames.append(a)))
+pycozmo.Client.play_anim_ppclip(fake, pp)
+check(f"ppclip_duration_s == frames PyCozmo really queues / 30 ({len(frames)} frames)",
+      abs(clips.ppclip_duration_s(pp) - len(frames) / 30) < 1e-9)
+check("clip_playback_seconds (no rendering) agrees", abs(clips.clip_playback_seconds(clip) - len(frames) / 30) < 1e-9)
+check("...and is well over the last keyframe time (1.8s)", clips.ppclip_duration_s(pp) > 3.0)
+
+# 7b. strip_wheels is idempotent.
 c = fake_ppclip()
 first, second = clips.strip_wheels(c), clips.strip_wheels(c)
 check("strip_wheels removes 3 wheel commands, then nothing", (first, second) == (3, 0))
@@ -153,6 +204,22 @@ ran = []
 sim.run_gesture = lambda name, **kw: ran.append(name) or ""
 sim.wake_up(); sim.go_to_sleep()
 check("base wake_up/go_to_sleep run the wake_up and sleep gestures", ran == ["wake_up", "sleep"])
+
+# 10. The model asking play_animation for a gesture ("dance") gets the gesture, not an error.
+class R(SimulatedRobot):
+    def show_expression(self, name, duration=None): pass
+sr = R()
+ran = []
+sr.run_gesture = lambda name, **kw: ran.append(name) or "A quick wheel shimmy."
+sr.run_gesture_async = sr.run_gesture
+S = dataclasses.replace(Settings())
+tools = {t.name: t for t in build_tools(sr, NS(synthesize=lambda t, p: p), NS(), S)}
+res = tools["play_animation"].handler({"name": "group:dance"})
+check("play_animation('group:dance') -> performs the dance gesture, ok result", res.ok and ran == ["dance"])
+check("...and tells the model it was a gesture", "gesture" in res.message)
+clip_name = sr.list_animations()[0]
+res = tools["play_animation"].handler({"name": clip_name})
+check("a real clip name still goes to play_animation", res.ok and clip_name in res.message and ran == ["dance"])
 
 print("FAILURES:", failures or "none")
 sys.exit(1 if failures else 0)

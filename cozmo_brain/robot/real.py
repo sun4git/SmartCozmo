@@ -87,6 +87,11 @@ _CLIFF_POLL_S = 0.05
 # how long past the clip's own length to keep waiting before giving up.
 _CLIP_COMPLETION_SLACK_S = 5.0
 
+# go_to_sleep(): the second clip (the long "sleeping" loop) is only watched for
+# this long, then left running while shutdown carries on (the end-of-run memory
+# check etc.), so a quick Ctrl+C isn't held up for the whole loop.
+_SLEEP_HOLD_S = 3.0
+
 # Extra grace period (on top of a commanded move's own duration) that tap
 # detection stays suppressed for after any self-commanded movement (lift,
 # head, wheels - see _suppress_taps()) - accounts for residual mechanical
@@ -1155,9 +1160,10 @@ class PyCozmoRobot(RobotBackend):
         names += sorted(f"group:{g}" for g in self._client.animation_groups)
         return names
 
-    def play_animation(self, name: str) -> None:
+    def play_animation(self, name: str, *, max_wait_s: float | None = None) -> None:
         """Plays a real clip (or a random member of a `group:` one) and
-        blocks until the robot reports it finished. Wheel commands are always
+        blocks until the robot reports it finished - or, with `max_wait_s`,
+        stops waiting after that long and leaves it playing. Wheel commands are always
         stripped (see clips.py): face, head, lift and lights play, but he
         never drives, so a clip can't take him off a table or the charger.
         Lowers the lift afterwards if the clip raised it (it would cover the
@@ -1195,8 +1201,12 @@ class PyCozmoRobot(RobotBackend):
         done = threading.Event()
         cli.add_handler(pycozmo.event.EvtAnimationCompleted, lambda *_: done.set(), one_shot=True)
         cli.play_anim_ppclip(ppclip)
-        if not done.wait(duration + _CLIP_COMPLETION_SLACK_S):
-            logger.warning("No completion event for animation '%s' after %.1fs.", clip, duration + _CLIP_COMPLETION_SLACK_S)
+        timeout = duration + _CLIP_COMPLETION_SLACK_S
+        if max_wait_s is not None and max_wait_s < timeout:
+            done.wait(max_wait_s)  # deliberately cut short - not a missing event
+            return
+        if not done.wait(timeout):
+            logger.warning("No completion event for animation '%s' after %.1fs.", clip, timeout)
         if cli._clip_metadata[clip].has_lift_height_track:
             self.lower_lift_fully()
 
@@ -1212,8 +1222,10 @@ class PyCozmoRobot(RobotBackend):
     def go_to_sleep(self) -> None:
         if self._animations_loaded and self._settings.wake_sleep_clips:
             try:
-                for clip in clips.SLEEP_CLIPS:
+                *first, last = clips.SLEEP_CLIPS
+                for clip in first:
                     self.play_animation(clip)
+                self.play_animation(last, max_wait_s=_SLEEP_HOLD_S)
                 return
             except Exception as e:  # noqa: BLE001 - fall back to the built-in gesture
                 logger.warning("Go-to-sleep clip failed (%s) - using the sleep gesture.", e)

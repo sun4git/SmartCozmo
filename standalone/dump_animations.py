@@ -34,21 +34,20 @@ sys.path.insert(0, str(ROOT))
 import pycozmo  # noqa: E402
 from pycozmo import anim, anim_encoder, util  # noqa: E402
 
+from cozmo_brain.robot.clips import clip_playback_seconds  # noqa: E402
+
 OUT_DIR = ROOT / "data"
 
 
 def clip_durations(clips: dict) -> dict[str, float]:
-    """Approximate play length in seconds: the latest keyframe end in each clip
-    (trigger time plus its own duration, where it has one). Needs the full clip
-    files, not just the metadata, so each .bin is loaded once."""
+    """How long PyCozmo actually takes to play each clip, in seconds (see
+    clips.playback_seconds - NOT just the last keyframe time: every keyframe
+    adds ~33 ms, so dense face clips run about twice their timeline). Needs
+    the full clip files, not just the metadata, so each .bin is loaded once."""
     out: dict[str, float] = {}
     for fspec in sorted({c.fspec for c in clips.values()}):
         for clip in anim_encoder.AnimClips.from_fb_file(fspec).clips:
-            end_ms = max(
-                (k.trigger_time_ms + getattr(k, "duration_ms", 0) for k in clip.keyframes),
-                default=0,
-            )
-            out[clip.name] = end_ms / 1000.0
+            out[clip.name] = clip_playback_seconds(clip)
     return {name: out.get(name, 0.0) for name in clips}
 
 

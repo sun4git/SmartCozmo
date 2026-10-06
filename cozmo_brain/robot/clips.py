@@ -78,6 +78,48 @@ def strip_wheels(ppclip) -> int:
     return removed
 
 
+_FRAME_MS = 33  # the step PyCozmo's play_anim_ppclip() advances its own clock by
+
+
+def playback_seconds(keyframe_times_ms) -> float:
+    """How long PyCozmo takes to play a clip with keyframes at these times.
+
+    NOT the time of the last keyframe: play_anim_ppclip() queues one 33 ms
+    frame per keyframe on top of the gap to the next one, so every keyframe
+    adds ~33 ms (a clip with a keyframe every frame plays about twice as long
+    as its timeline says - seen on the robot: a clip whose last keyframe is at
+    3.1 s ran for ~6 s). This mirrors that loop, plus the start and end frames.
+    """
+    times = sorted(set(keyframe_times_ms))
+    frames = 2  # StartAnimation + EndAnimation
+    clock = 0
+    for i, t in enumerate(times):
+        frames += 1
+        clock += _FRAME_MS
+        if i < len(times) - 1:
+            target = clock + times[i + 1] - t
+            while target > clock:
+                frames += 1
+                clock += _FRAME_MS
+    return frames / pycozmo.robot.FRAME_RATE
+
+
 def ppclip_duration_s(ppclip) -> float:
-    """Approximate play length: the time of the clip's last keyframe."""
-    return max(ppclip.keyframes, default=0) / 1000.0
+    """How long a preprocessed clip takes to play (see playback_seconds)."""
+    return playback_seconds(ppclip.keyframes.keys())
+
+
+def clip_playback_seconds(clip) -> float:
+    """playback_seconds() for an un-preprocessed AnimClip, without rendering
+    its face frames: derives the same keyframe times PreprocessedClip does
+    (wheel and backpack-light keyframes also add one at their end; face-sprite,
+    audio and event keyframes add none, PyCozmo skips them)."""
+    ae = pycozmo.anim_encoder
+    times: set[int] = set()
+    for k in clip.keyframes:
+        if isinstance(k, (ae.AnimFaceAnimation, ae.AnimRobotAudio, ae.AnimEvent)):
+            continue
+        times.add(k.trigger_time_ms)
+        if isinstance(k, (ae.AnimBodyMotion, ae.AnimBackpackLights)):
+            times.add(k.trigger_time_ms + k.duration_ms)
+    return playback_seconds(times)

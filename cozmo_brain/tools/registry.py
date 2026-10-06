@@ -216,6 +216,17 @@ def build_tools(
         return ToolResult(True, f"Performed gesture '{name}': {description}")
 
     def handle_play_animation(name: str) -> ToolResult:
+        # Seen on real hardware: asked to dance, the model called
+        # play_animation('group:dance') - a gesture's name, not a clip - got an
+        # error, and spent two more LLM steps recovering. The intent is
+        # obvious, so do it. Exact match: real clip names ("anim_...") and
+        # group names (CamelCase) never equal a gesture name.
+        gesture_name = name.removeprefix("group:")
+        if gesture_name in GESTURES:
+            result = handle_gesture(gesture_name)
+            return ToolResult(
+                True, f"'{gesture_name}' is a gesture, not an animation clip - did it as a gesture. {result.message}"
+            )
         robot.play_animation(name)
         return ToolResult(True, f"Played animation '{name}'.")
 
@@ -377,7 +388,9 @@ def build_tools(
             description=(
                 "Play one of Cozmo's real built-in animation clips or groups by exact name. "
                 "Call list_animations first to see what's actually available on this robot — "
-                "names vary by robot and may be empty if animation assets aren't installed."
+                "names vary by robot and may be empty if animation assets aren't installed. "
+                "Built-in gestures like dance or cheer are not animation clips: use the `gesture` "
+                "tool (or `say`'s gesture) for those."
             ),
             parameters={
                 "type": "object",
