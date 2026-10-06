@@ -24,6 +24,12 @@ import dotenv  # noqa: E402
 
 dotenv.load_dotenv = lambda *args, **kwargs: False  # cozmo_brain.config calls this at import
 
+# Clip sounds come from a folder that is NOT in the repo (data/clip_sounds, see
+# standalone/extract_clip_sounds.py). Default them off so no test depends on
+# whether this machine happens to have it; the tests that exercise sounds turn
+# them on explicitly (dataclasses.replace(Settings(), clip_sounds="full", clip_sounds_dir=...)).
+os.environ.setdefault("CLIP_SOUNDS", "off")
+
 
 def tmp(name: str) -> str:
     """A scratch file path outside the repo, for tests that write files."""

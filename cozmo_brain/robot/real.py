@@ -43,6 +43,7 @@ import pycozmo
 
 from cozmo_brain.config import Settings
 from cozmo_brain.robot import clips, curated, wifi
+from cozmo_brain.robot.clip_sounds import ClipSounds, read_wav
 from cozmo_brain.robot.base import MoveResult, Pose2D, RobotBackend
 
 logger = logging.getLogger(__name__)
@@ -231,6 +232,8 @@ class PyCozmoRobot(RobotBackend):
         # Serialises preparing a clip (a prewarm thread and a conversation turn
         # can ask for the same one).
         self._clip_prep_lock = threading.Lock()
+        # Cozmo's own sounds for clips (clip_sounds.py); None = clips stay silent.
+        self._clip_sounds: ClipSounds | None = None
 
     def connect(self) -> None:
         wifi.ensure_connected(self._settings.cozmo_wifi_ssid, self._settings.cozmo_wifi_password)
@@ -270,6 +273,10 @@ class PyCozmoRobot(RobotBackend):
             cli.load_anims()
             self._animations_loaded = True
             logger.info("Loaded %d real animation clips.", len(cli.get_anim_names()))
+            if self._settings.clips_enabled:
+                self._clip_sounds = ClipSounds.load(
+                    self._settings.clip_sounds_dir, self._settings.clip_sounds, self._settings.clip_sound_volume
+                )
         except pycozmo.exception.ResourcesNotFound:
             logger.warning(
                 "Cozmo animation resources not found — play_animation()/list_animations() "
@@ -1258,8 +1265,22 @@ class PyCozmoRobot(RobotBackend):
         def mark(name: str, event: threading.Event):
             return lambda *_: (stamps.setdefault(name, time.monotonic() - t0), event.set())
 
+        if self._robot_is_animating():
+            logger.info("The robot still reports it is animating before clip '%s' starts.", clip)
         clip_done = threading.Event()
         cli.add_handler(pycozmo.event.EvtAnimationCompleted, mark("clip", clip_done), one_shot=True)
+        if speech:
+            # What the robot itself sends back, to see why the animation-completed
+            # event never comes with audio merged in (see the wait below).
+            for packet, label in ((pycozmo.protocol_encoder.AnimationStarted, "started"),
+                                  (pycozmo.protocol_encoder.AnimationEnded, "ended")):
+                cli.add_handler(
+                    packet,
+                    lambda _cli, pkt, label=label: logger.info(
+                        "Robot sent AnimationEnded/Started packet: animation %s (id %s) %.2fs into clip '%s'.",
+                        label, getattr(pkt, "anim_id", "?"), time.monotonic() - t0, clip),
+                    one_shot=True,
+                )
         speech_done = threading.Event()
         if speech:
             cli.add_handler(pycozmo.event.EvtAudioCompleted, mark("audio", speech_done), one_shot=True)
@@ -1295,7 +1316,7 @@ class PyCozmoRobot(RobotBackend):
         elif not clip_done.wait(timeout):
             logger.warning("No completion event for animation '%s' after %.1fs.", clip, timeout)
         if speech and "clip" not in stamps:
-            self._end_animation(clip)
+            self._settle_animation(clip)
         if cli._clip_metadata[clip].has_backpack_lights_track:
             # A clip with a lights track writes its own colours and switches
             # them off at the end. Confirmed on the robot: the listening blink
@@ -1309,6 +1330,41 @@ class PyCozmoRobot(RobotBackend):
                 )
         if cli._clip_metadata[clip].has_lift_height_track:
             self.lower_lift_fully()
+
+    def _robot_is_animating(self) -> bool:
+        """What the robot itself reports (the IS_ANIMATING bit of its status)."""
+        return bool(self._latest_status & pycozmo.RobotStatusFlag.IS_ANIMATING)
+
+    def _settle_animation(self, clip: str) -> None:
+        """After a clip with audio merged in, make sure the robot is not left
+        thinking an animation is still running. Seen on the robot: it never
+        reports such a clip as ended, and afterwards the backpack light ignored
+        the app's commands (consistent with the animation's own lights layer
+        still owning it). If its status still says it is animating, end the
+        animation, and if it STILL does, play an empty clip - the robot then sees
+        a complete start/end cycle, which is what normal clips give it. Logs what
+        the robot reported at each step, so the cause can be pinned down."""
+        before = self._robot_is_animating()
+        self._end_animation(clip)
+        if not before:
+            logger.info("Clip '%s': the robot did not report itself animating afterwards.", clip)
+            return
+        time.sleep(0.15)  # let a fresh status packet arrive
+        after_end = self._robot_is_animating()
+        if not after_end:
+            logger.info("Clip '%s': the robot reported animating after the clip, and stopped after EndAnimation.", clip)
+            return
+        cli = self._client
+        ended = threading.Event()
+        cli.add_handler(pycozmo.event.EvtAnimationCompleted, lambda *_: ended.set(), one_shot=True)
+        cli.play_anim_ppclip(pycozmo.anim.PreprocessedClip(keyframes={0: []}))
+        confirmed = ended.wait(0.6)
+        time.sleep(0.1)
+        logger.info(
+            "Clip '%s': the robot still reported animating after EndAnimation; played an empty clip (completion %s) "
+            "- animating now: %s.",
+            clip, "confirmed" if confirmed else "not confirmed", self._robot_is_animating(),
+        )
 
     def _end_animation(self, clip: str) -> None:
         """Send EndAnimation ourselves and see whether the robot acknowledges it.
@@ -1339,7 +1395,24 @@ class PyCozmoRobot(RobotBackend):
         stripped (see clips.py): face, head, lift and lights play, but he
         never drives, so a clip can't take him off a table or the charger."""
         clip = self._resolve_clip(name)
-        self._play_ppclip(clip, self._prepared_clip(clip), max_wait_s=max_wait_s)
+        ppclip = self._prepared_clip(clip)
+        self._play_ppclip(clip, ppclip, speech=self._sound_audio(clip, ppclip), max_wait_s=max_wait_s)
+
+    def _sound_audio(self, clip: str, ppclip, wav_path: str | None = None) -> list | None:
+        """The clip's own sounds mixed with the speech in `wav_path` (if any), as
+        packets - or None when this clip has none or they're switched off, in which
+        case the caller plays what it always did. Never raises: a sound problem
+        must not cost the clip or the speech."""
+        if self._clip_sounds is None or not self._clip_sounds.has_sounds(clip):
+            return None
+        try:
+            speech = read_wav(wav_path) if wav_path else None
+            if speech is not None and speech[1] not in (22050, 48000):
+                return None
+            return self._clip_sounds.build_audio(clip, ppclip, speech)
+        except Exception as e:  # noqa: BLE001 - see above
+            logger.warning("Could not mix the sounds for clip '%s' (%s) - playing without them.", clip, e)
+            return None
 
     def say_wav_with_clip(self, wav_path: str, clip: str) -> None:
         """Speak while a real clip plays (CLIP_SPEECH_OVERLAP) - or the clip
@@ -1349,7 +1422,9 @@ class PyCozmoRobot(RobotBackend):
         try:
             clip_id = self._resolve_clip(clip)
             ppclip = self._prepared_clip(clip_id)
-            speech = pycozmo.audio.load_wav(wav_path) if self._settings.clip_speech_overlap else None
+            speech = None
+            if self._settings.clip_speech_overlap:
+                speech = self._sound_audio(clip_id, ppclip, wav_path) or pycozmo.audio.load_wav(wav_path)
         except Exception as e:  # noqa: BLE001 - speak anyway
             logger.warning("Could not prepare clip '%s' (%s) - speaking without it.", clip, e)
             self.say_wav(wav_path)
@@ -1357,7 +1432,7 @@ class PyCozmoRobot(RobotBackend):
         prepared = time.monotonic() - started
         if speech is None:
             self.say_wav(wav_path)
-            self._play_ppclip(clip_id, ppclip)
+            self._play_ppclip(clip_id, ppclip, speech=self._sound_audio(clip_id, ppclip))
         else:
             self._play_ppclip(clip_id, ppclip, speech=speech)
         # Where the time went, for judging whether a clip makes a reply feel slow.

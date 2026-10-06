@@ -35,7 +35,10 @@ break, `leave_charger`, the per-turn battery line and who-moved-him labels
 (`test_charger_break`), and the battery history records and analysis
 (`test_battery_log`), SIGTERM stopping the app like Ctrl+C
 (`test_sigterm`), the real wake-up/go-to-sleep clips, clip lengths and the clip-plus-speech player
-(`test_wake_sleep`, `test_curated_clips`), and `ask_assistant` against a fake endpoint - the
+(`test_wake_sleep`, `test_curated_clips`), Cozmo's own sounds in clips - the mu-law frames checked
+against PyCozmo's, where each sound lands, the modes, mixing with speech
+(`test_clip_sounds`), the Wwise sound-bank reader on a synthetic bank
+(`test_wwise_banks`), and `ask_assistant` against a fake endpoint - the
 session `user` field, failures, waiting for the answer, and background
 answers delivered on their own (with the retry and word-for-word fallback
 when the chat model fails), including only stopping a vad recording

@@ -257,10 +257,10 @@ Still open, roughly in priority order:
    [Architecture](architecture.md)), played without wheels, with speech merged
    into the clip. Still open: hooking the `cue` clips (before a photo) and the
    `idle` clips (fidgets) and a recognised-face greeting up to their events;
-   per-clip "wheels allowed" for the few that look better driving; and the
-   clips' original sounds, which PyCozmo skips (`standalone/dump_clip_sounds.py`
-   names them; the sound banks are extracted, but PyCozmo can't yet follow most
-   Wwise events to a file or decode `.wem`).
+   per-clip "wheels allowed" for the few that look better driving. Built, not yet
+   tried on the robot: the clips' original sounds (`CLIP_SOUNDS`, see
+   [Architecture](architecture.md)); the song and other music-bank sounds aren't
+   covered.
 4. **React to physical sensors — picked up, touched, shaken, cliff-detected,
    placed on the charger. Mostly done now** (see the ✅ sub-items below);
    The full detail (what is confirmed on real hardware vs. simulated only) is in

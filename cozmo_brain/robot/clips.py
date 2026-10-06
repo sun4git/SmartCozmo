@@ -138,6 +138,48 @@ def build_ticks(ppclip, anim_id: int) -> list[tuple]:
     return ticks
 
 
+def key_tick_map(ppclip) -> list[tuple[int, int]]:
+    """(keyframe time in ms, tick index it is played on) for every keyframe, the
+    way build_ticks() lays the clip out. Tick 0 is the StartAnimation tick, the
+    first keyframe is tick 1. Because every keyframe costs an extra tick, a clip
+    plays slower than its own timeline; this is the map between the two."""
+    times = sorted(ppclip.keyframes)
+    out: list[tuple[int, int]] = []
+    tick = 1
+    clock = 0
+    for i, t in enumerate(times):
+        out.append((t, tick))
+        tick += 1
+        clock += _FRAME_MS
+        if i < len(times) - 1:
+            target = clock + times[i + 1] - t
+            while target > clock:
+                tick += 1
+                clock += _FRAME_MS
+    return out
+
+
+def seconds_at(tick_map: list[tuple[int, int]], t_ms: float) -> float:
+    """When (in seconds from the start of playback) the clip-timeline moment
+    `t_ms` is actually played. Used to put a sound where its picture is: linear
+    between keyframes, and at real-time scale before the first / after the last."""
+    fps = pycozmo.robot.FRAME_RATE
+    if not tick_map:
+        return max(0.0, t_ms) / 1000.0
+    first_t, first_tick = tick_map[0]
+    if t_ms <= first_t:
+        return max(0.0, first_tick - (first_t - t_ms) * fps / 1000.0) / fps
+    last_t, last_tick = tick_map[-1]
+    if t_ms >= last_t:
+        return (last_tick + (t_ms - last_t) * fps / 1000.0) / fps
+    for (t0, k0), (t1, k1) in zip(tick_map, tick_map[1:]):
+        if t0 <= t_ms <= t1:
+            span = t1 - t0
+            tick = k0 if span == 0 else k0 + (t_ms - t0) * (k1 - k0) / span
+            return tick / fps
+    return last_tick / fps
+
+
 def play_with_audio(cli, ppclip, audio_packets) -> None:
     """Play a clip with audio (speech) in its frames, from the first frame.
 

@@ -114,11 +114,10 @@ How clips are played ([clips.py](../cozmo_brain/robot/clips.py),
 - **Wheels are always removed.** A clip's own drive/turn commands are stripped
   before it plays, so it never drives him off a table or the charger. Face,
   head, lift and lights play as authored.
-- **Clips are silent.** PyCozmo skips a clip's audio keyframes (Wwise event
-  IDs, a TODO in its source), so a clip only ever moves and lights up. The
-  original sounds live in the app's sound banks, which `pycozmo_resources.py`
-  does extract - `standalone/dump_clip_sounds.py` names what each clip would
-  play; nothing plays them yet.
+- **Clips are silent by themselves.** PyCozmo skips a clip's audio keyframes
+  (Wwise event IDs, a TODO in its source). The original sounds live in the app's
+  sound banks, which `pycozmo_resources.py` does extract. They can be recovered
+  and played - see "Cozmo's own sounds" below.
 - **A clip plays longer than its timeline.** PyCozmo adds one 33 ms frame per
   keyframe, so a clip with a keyframe on every frame runs about twice as long as
   its last keyframe time (`clips.playback_seconds`); tap suppression and
@@ -131,6 +130,23 @@ How clips are played ([clips.py](../cozmo_brain/robot/clips.py),
   into the clip's own frames (`clips.play_with_audio`), so both start together.
   That needs the speech file first, so the *clip* (not the speech) starts after
   synthesis; the mood shows immediately as before.
+
+**Cozmo's own sounds** ([clip_sounds.py](../cozmo_brain/robot/clip_sounds.py),
+[wwise_banks.py](../cozmo_brain/wwise_banks.py)). Anki's sounds are Wwise audio:
+`standalone/dump_clip_sounds.py` (on the Pi) lists which sound events each clip
+fires and when; `standalone/extract_clip_sounds.py` (on a PC with the sound
+folder copied from the Pi, and `vgmstream-cli` to decode `.wem`) follows each
+event through the sound banks - PyCozmo's own reader can't follow Wwise
+containers, so `wwise_banks.py` does - and writes mono 22050 Hz WAVs plus a
+`manifest.json` into `data/clip_sounds/`, which you copy to the robot's machine.
+They are Anki/DDL's material and are **never committed** (`data/` is
+gitignored). `CLIP_SOUNDS=off|effects|full` and `CLIP_SOUND_VOLUME` control
+them; with no folder/manifest the clips stay silent. A clip's sounds are mixed
+into its audio at the moment each is meant to play - placed by where PyCozmo
+actually plays that moment, since it plays dense clips slower than their own
+timeline - together with the speech when there is any, then sent as the same
+frames PyCozmo's `play_audio` makes. Alongside speech `effects` keeps only the
+screen/servo blips (not his voice); with no speech everything plays.
 
 **Curated clips** ([curated.py](../cozmo_brain/robot/curated.py)): ~25 hand-picked
 clips by friendly name (`happy`, `chicken`, `fist_bump`, `dunno`, ...) offered to

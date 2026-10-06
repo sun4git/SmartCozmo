@@ -209,6 +209,48 @@ check("merged clip, animation event never seen: the animation is ended explicitl
       len(cancels) == 2 and cancels[-1] > max(i for i, e in enumerate(cli.log) if e[0] == "frame"))
 check(f"...without waiting for the robot's confirmation ({took:.1f}s total, ~0.6s clip + 0.2s grace + 0.4s lift)", took < 1.7)
 
+# The robot's own IS_ANIMATING status after a merged clip decides what is done to settle it.
+ANIMATING = pycozmo.RobotStatusFlag.IS_ANIMATING
+real._CLIP_END_GRACE_S = 0.2
+
+
+def settled(still_animating_after_end, reset_clears):
+    """Run a merged clip with the robot reporting it is animating; returns (empty clips played, final flag)."""
+    r, cli = make()
+    r._latest_status = ANIMATING
+    played = []
+    orig_cancel = cli.cancel_anim
+
+    def cancel():
+        orig_cancel()
+        if not still_animating_after_end:
+            r._latest_status = 0
+    cli.cancel_anim = cancel
+
+    def play_plain(pp):
+        cli.log.append(("play_anim_ppclip",))
+        played.append(sorted(pp.keyframes))
+        if reset_clears:
+            r._latest_status = 0
+        for fn in cli.handlers[pycozmo.event.EvtAnimationCompleted]:
+            fn(None)
+    cli.play_anim_ppclip = play_plain
+    r.say_wav_with_clip(wav_short, chicken)
+    return played, bool(r._latest_status & ANIMATING)
+
+
+played, flag = settled(still_animating_after_end=False, reset_clears=True)
+check("robot stops animating after EndAnimation: nothing more is done", played == [] and not flag)
+played, flag = settled(still_animating_after_end=True, reset_clears=True)
+check("robot still animating after EndAnimation: an empty clip is played to close the cycle, and it clears", played == [[0]] and not flag)
+played, flag = settled(still_animating_after_end=True, reset_clears=False)
+check("...and if that doesn't clear it either, it is not retried forever", len(played) == 1 and flag)
+r, cli = make()
+r._latest_status = 0
+r.say_wav_with_clip(wav_short, chicken)
+check("robot never reports animating: no empty clip", not any(e == ("play_anim_ppclip",) for e in cli.log))
+real._CLIP_END_GRACE_S = 1.0
+
 # overlap off: the speech is spoken normally, THEN the clip
 r, cli = make(clip_speech_overlap=False)
 r.say_wav_with_clip(wav_short, chicken)

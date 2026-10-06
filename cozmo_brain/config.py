@@ -521,6 +521,16 @@ class Settings:
     # speech instead - speech timing is unaffected either way.
     clip_speech_overlap: bool = field(default_factory=lambda: _env_bool("CLIP_SPEECH_OVERLAP", True))
 
+    # Cozmo's own sounds in the real clips (PyCozmo plays clips silent; the
+    # sounds are recovered offline by standalone/extract_clip_sounds.py and live
+    # in CLIP_SOUNDS_DIR, which is NOT in the repo). "off", "effects" (only the
+    # screen/servo blips under speech, never his voice) or "full". Without
+    # speech (start/end animations, a standalone clip) "effects" and "full"
+    # both play everything. Nothing plays if the folder or manifest is missing.
+    clip_sounds: str = field(default_factory=lambda: _env_str("CLIP_SOUNDS", "full"))
+    clip_sound_volume: float = field(default_factory=lambda: _env_float("CLIP_SOUND_VOLUME", 0.6))
+    clip_sounds_dir: str = field(default_factory=lambda: _project_path(_env_str("CLIP_SOUNDS_DIR", "data/clip_sounds")))
+
     # --- Charger break (step off the dock now and then) ---
     # After this many continuous minutes docked, Cozmo says so and drives off
     # the charger for a short stretch, then drives back on his own - rest for
