@@ -90,6 +90,9 @@ _CLIP_COMPLETION_SLACK_S = 5.0
 # With speech merged into a clip, how long past its computed length to still wait
 # for the robot's completion events before going by the clock.
 _CLIP_END_GRACE_S = 1.0
+# ...and how long after a clip's computed end its last packets (a lights track
+# switching off, say) are given to arrive before the app re-sends its own state.
+_CLIP_TAIL_S = 0.25
 
 # go_to_sleep(): the second clip (the long "sleeping" loop) is only watched for
 # this long, then left running while shutdown carries on (the end-of-run memory
@@ -1103,7 +1106,12 @@ class PyCozmoRobot(RobotBackend):
 
     def set_listening_indicator(self, listening: bool) -> None:
         with self._light_lock:
-            if listening == self._listening_light:
+            # Turning it OFF when it already is changes nothing. Turning it ON
+            # always sends the blink, even if the app already thinks it is on:
+            # the physical light can have been changed behind our back (a clip's
+            # own lights track, a firmware reaction), and the app can't read it
+            # back - the one moment we know it must be blinking is a new recording.
+            if not listening and not self._listening_light:
                 return
             self._listening_light = listening
             self._send_backpack_light()
@@ -1270,9 +1278,14 @@ class PyCozmoRobot(RobotBackend):
             # before every reply), so here the events only end the wait early:
             # we know how long this takes (frames queued / 30 fps), so don't
             # wait past that plus a short grace.
-            deadline = t0 + expected + _CLIP_END_GRACE_S
-            clip_done.wait(max(0.0, deadline - time.monotonic()))
-            speech_done.wait(max(0.0, deadline - time.monotonic()))
+            # Seen on the robot since: the animation-completed event is never
+            # seen with speech merged in (even when the speech outlasts the
+            # clip), while the audio-completed one arrives right at the end of
+            # the speech. So: wait for that (the grace only covers it going
+            # missing too), then for the clip's own end by the clock - the
+            # animation event, if it ever does come, just ends that wait early.
+            speech_done.wait(max(0.0, t0 + expected + _CLIP_END_GRACE_S - time.monotonic()))
+            clip_done.wait(max(0.0, t0 + duration + _CLIP_TAIL_S - time.monotonic()))
             logger.info(
                 "Clip '%s' + speech ended: expected %.1fs, animation-completed event %s, audio-completed event %s.",
                 clip, expected,
@@ -1281,6 +1294,8 @@ class PyCozmoRobot(RobotBackend):
             )
         elif not clip_done.wait(timeout):
             logger.warning("No completion event for animation '%s' after %.1fs.", clip, timeout)
+        if speech and "clip" not in stamps:
+            self._end_animation(clip)
         if cli._clip_metadata[clip].has_backpack_lights_track:
             # A clip with a lights track writes its own colours and switches
             # them off at the end. Confirmed on the robot: the listening blink
@@ -1288,8 +1303,34 @@ class PyCozmoRobot(RobotBackend):
             # app set it once and (rightly, by its own state) never re-sends it.
             with self._light_lock:
                 self._send_backpack_light()
+                logger.info(
+                    "Re-sent the backpack light after clip '%s' (colour %s, listening %s).",
+                    clip, self._light_color, self._listening_light,
+                )
         if cli._clip_metadata[clip].has_lift_height_track:
             self.lower_lift_fully()
+
+    def _end_animation(self, clip: str) -> None:
+        """Send EndAnimation ourselves and see whether the robot acknowledges it.
+        With speech merged into a clip the robot never reports the animation
+        ended on its own, so as far as it (and PyCozmo's controller, which keeps
+        the idle face off while it thinks an animation is playing) can tell, the
+        animation may still be running - and a lights track from it can sit on
+        top of the app's own blink. Ending it explicitly is what the next clip's
+        start does anyway; the log says whether it made a difference."""
+        cli = self._client
+        sent = time.monotonic()
+        # Not waited for (a reply must not get slower for a log line): the
+        # confirmation, if it comes, logs itself. No "confirmed" line = it didn't.
+        cli.add_handler(
+            pycozmo.event.EvtAnimationCompleted,
+            lambda *_: logger.info(
+                "The robot confirmed animation '%s' ended, %.2fs after we sent EndAnimation.", clip, time.monotonic() - sent
+            ),
+            one_shot=True,
+        )
+        cli.cancel_anim()
+        logger.info("Sent EndAnimation for '%s' (the robot had not reported it ended).", clip)
 
     def play_animation(self, name: str, *, max_wait_s: float | None = None) -> None:
         """Plays a real clip (or a random member of a `group:` one) and

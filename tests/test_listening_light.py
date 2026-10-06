@@ -43,7 +43,8 @@ check("battery red mid-recording still blinks", on == RED and on_f > 0)
 
 n = len([c for c in cli.calls if c[0] == "lights"])
 r.set_listening_indicator(True)
-check("repeat start: no extra packet", len([c for c in cli.calls if c[0] == "lights"]) == n)
+check("repeat start: the blink is re-sent (the physical light may have been changed meanwhile)",
+      len([c for c in cli.calls if c[0] == "lights"]) == n + 1 and last_light(cli)[3] > 0)
 
 r.set_listening_indicator(False)
 check("recording stopped: back to solid current color", last_light(cli) == ("lights", RED, RED, 0, 0))
@@ -53,6 +54,18 @@ try:
     check("unknown color rejected", False)
 except ValueError:
     check("unknown color rejected", True)
+
+# Turning the blink ON always re-sends it - the physical light may have been changed behind our back.
+r, cli = make_robot()
+r.set_listening_indicator(True)
+before = len([c for c in cli.calls if c[0] == "lights"])
+r.set_listening_indicator(True)
+check("listening already on: turning it on again still re-sends the blink",
+      len([c for c in cli.calls if c[0] == "lights"]) == before + 1 and last_light(cli)[3] > 0)
+r.set_listening_indicator(False)
+before = len([c for c in cli.calls if c[0] == "lights"])
+r.set_listening_indicator(False)
+check("listening already off: turning it off again sends nothing", len([c for c in cli.calls if c[0] == "lights"]) == before)
 
 print("FAILURES:", failures or "none")
 sys.exit(1 if failures else 0)

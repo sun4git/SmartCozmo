@@ -170,6 +170,45 @@ cli.calls.clear(); cli.log.clear()
 r.say_wav_with_clip(wav_short, chicken)
 check("clip without a lights track: lights are left alone", not [c for c in cli.calls if c[0] == "lights"])
 
+# Seen after that: with speech merged in, only the AUDIO-completed event arrives (right at the end of
+# the speech); the animation-completed one never does. The reply must not sit out the grace for it.
+real._CLIP_END_GRACE_S = 3.0
+real._CLIP_TAIL_S = 0.1
+r, cli = make()
+speech_len = len(__import__("pycozmo").audio.load_wav(wav_short)) / 30.0
+import threading as _th
+orig_add = cli.add_handler
+def add(evt, fn, one_shot=False):
+    orig_add(evt, fn, one_shot)
+    if evt is pycozmo.event.EvtAudioCompleted:
+        _th.Timer(speech_len, lambda: fn(None)).start()
+cli.add_handler = add
+t0 = time.monotonic()
+r.say_wav_with_clip(wav_short, chicken)
+took = time.monotonic() - t0
+expected = max(clips.ppclip_duration_s(cli._ppclips[chicken]), speech_len)
+check(f"merged clip, only the audio-completed event arrives: done at ~the clip/speech end, not the 3s grace ({took:.1f}s, expected {expected:.1f}s)",
+      took < expected + 1.0)
+real._CLIP_END_GRACE_S = 1.0
+real._CLIP_TAIL_S = 0.25
+
+# The robot never reports a merged clip as ended: end it explicitly (and the lights come back after).
+r, cli = make()
+fire_when_frames_queued(cli)
+cancels_before = [e for e in cli.log if e == ("cancel",)]
+r.say_wav_with_clip(wav_short, chicken)
+check("merged clip, event seen: no extra EndAnimation needed", [e for e in cli.log if e == ("cancel",)] == cancels_before + [("cancel",)])
+r, cli = make()          # no animation-completed event ever
+real._CLIP_END_GRACE_S = 0.2   # (no audio event either here, so the grace is waited out)
+t0 = time.monotonic()
+r.say_wav_with_clip(wav_short, chicken)
+took = time.monotonic() - t0
+real._CLIP_END_GRACE_S = 1.0
+cancels = [i for i, e in enumerate(cli.log) if e == ("cancel",)]
+check("merged clip, animation event never seen: the animation is ended explicitly after playing",
+      len(cancels) == 2 and cancels[-1] > max(i for i, e in enumerate(cli.log) if e[0] == "frame"))
+check(f"...without waiting for the robot's confirmation ({took:.1f}s total, ~0.6s clip + 0.2s grace + 0.4s lift)", took < 1.7)
+
 # overlap off: the speech is spoken normally, THEN the clip
 r, cli = make(clip_speech_overlap=False)
 r.say_wav_with_clip(wav_short, chicken)
