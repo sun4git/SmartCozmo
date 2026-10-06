@@ -109,6 +109,56 @@ def ppclip_duration_s(ppclip) -> float:
     return playback_seconds(ppclip.keyframes.keys())
 
 
+def build_ticks(ppclip, anim_id: int) -> list[tuple]:
+    """The (image_packet, other_packets) pair for every 33 ms tick
+    Client.play_anim_ppclip() would queue for this clip, start and end
+    included - the same loop, but returned instead of sent, so audio can be put
+    into the ticks (see play_with_audio). Wheel commands are not removed here:
+    strip them from `ppclip` first (strip_wheels)."""
+    pe = pycozmo.protocol_encoder
+    ticks: list[tuple] = [(None, (pe.StartAnimation(anim_id=anim_id),))]
+    times = sorted(ppclip.keyframes)
+    clock = 0
+    for i, t in enumerate(times):
+        image = None
+        pkts = []
+        for action in ppclip.keyframes[t]:
+            if isinstance(action, pe.DisplayImage):
+                image = action
+            elif isinstance(action, pe.Packet):
+                pkts.append(action)
+        ticks.append((image, pkts))
+        clock += _FRAME_MS
+        if i < len(times) - 1:
+            target = clock + times[i + 1] - t
+            while target > clock:
+                ticks.append((None, None))
+                clock += _FRAME_MS
+    ticks.append((None, (pe.EndAnimation(),)))
+    return ticks
+
+
+def play_with_audio(cli, ppclip, audio_packets) -> None:
+    """Play a clip with audio (speech) in its frames, from the first frame.
+
+    PyCozmo has one audio queue shared by speech and clips: Client.play_anim
+    clears it, and speech queued after a clip waits behind the clip's frames,
+    so the two can't be started separately and overlap. Its own design for
+    clip sound is one audio packet per 33 ms frame, so that is what this does:
+    packet i goes into frame i. Whatever speech outlasts the clip is queued
+    after it. A clip longer than the speech is just silent for the rest."""
+    cli.cancel_anim()
+    anim_id = cli._next_anim_id
+    cli._next_anim_id += 1
+    ticks = build_ticks(ppclip, anim_id)
+    controller = cli.anim_controller
+    for i, (image, pkts) in enumerate(ticks):
+        controller.play_anim_frame(audio_packets[i] if i < len(audio_packets) else None, image, pkts)
+    rest = audio_packets[len(ticks):]
+    if rest:
+        controller.play_audio(rest)
+
+
 def clip_playback_seconds(clip) -> float:
     """playback_seconds() for an un-preprocessed AnimClip, without rendering
     its face frames: derives the same keyframe times PreprocessedClip does

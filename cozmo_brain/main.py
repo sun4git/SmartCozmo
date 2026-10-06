@@ -26,7 +26,7 @@ from cozmo_brain.llm import create_chat_client, create_speech_client
 from cozmo_brain.llm.assistant_client import AssistantClient
 from cozmo_brain.memory import Memory
 from cozmo_brain.memory_suggestions import SuggestionExtractor
-from cozmo_brain.personality import SYSTEM_PROMPT, build_system_prompt
+from cozmo_brain.personality import SYSTEM_PROMPT, build_system_prompt, clips_prompt_section
 from cozmo_brain.robot import create_robot
 from cozmo_brain.robot.battery_monitor import BatteryMonitor
 from cozmo_brain.robot.pickup_reactor import PickupReactor
@@ -194,6 +194,7 @@ def main(argv: list[str] | None = None) -> int:
                     assistant_prompt_section(assistant.name, background=assistant_relay is not None)
                     if assistant else ""
                 ),
+                clips_section=clips_prompt_section() if settings.clips_enabled else "",
             ),
         )
         if assistant_relay is not None:

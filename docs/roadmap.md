@@ -252,10 +252,15 @@ Still open, roughly in priority order:
    (Suggested memory facts for the user to approve: done, same section.)
 2. **Systemd service** for headless/boot-time operation, now that reconnect
    logic makes a long-running session more viable.
-3. **More real animations, curated.** Once `pycozmo_resources.py download`
-   assets are available, consider hand-picking a "greatest hits" subset of
-   real clip names to seed into the `gesture` tool's enum, instead of
-   requiring the model to call `list_animations` first every time.
+3. **More real animations, curated.** First batch built: ~25 hand-picked
+   clips by friendly name in the `say`/`gesture` tools (see
+   [Architecture](architecture.md)), played without wheels, with speech merged
+   into the clip. Still open: hooking the `cue` clips (before a photo) and the
+   `idle` clips (fidgets) and a recognised-face greeting up to their events;
+   per-clip "wheels allowed" for the few that look better driving; and the
+   clips' original sounds, which PyCozmo skips (`standalone/dump_clip_sounds.py`
+   names them; the sound banks are extracted, but PyCozmo can't yet follow most
+   Wwise events to a file or decode `.wem`).
 4. **React to physical sensors — picked up, touched, shaken, cliff-detected,
    placed on the charger. Mostly done now** (see the ✅ sub-items below);
    The full detail (what is confirmed on real hardware vs. simulated only) is in

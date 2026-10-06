@@ -169,7 +169,16 @@ class SimulatedRobot(RobotBackend):
         return list(_FAKE_ANIMATIONS)
 
     def play_animation(self, name: str) -> None:
-        if name not in _FAKE_ANIMATIONS:
+        # Real clip names ("anim_...", e.g. the curated ones) are accepted
+        # too: there's nothing to check them against here.
+        if name not in _FAKE_ANIMATIONS and not name.startswith("anim_"):
             raise ValueError(f"Unknown animation '{name}'. Call list_animations() first.")
         logger.info("[sim] \U0001f3ac playing animation: %s", name)
         time.sleep(0.2)
+
+    def clips_available(self) -> bool:
+        return True
+
+    def say_wav_with_clip(self, wav_path: str, clip: str) -> None:
+        logger.info("[sim] \U0001f3ac playing clip %s while speaking", clip)
+        self.say_wav(wav_path)

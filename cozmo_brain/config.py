@@ -510,6 +510,17 @@ class Settings:
     # Clips need `pycozmo_resources.py download`; without it the gestures play.
     wake_sleep_clips: bool = field(default_factory=lambda: _env_bool("WAKE_SLEEP_CLIPS", True))
 
+    # Master switch for ALL real Anki clips (robot/clips.py, robot/curated.py):
+    # the start/end animations, the curated clip names the model can use in
+    # `say`/`gesture`, and the play_animation/list_animations tools. Off = only
+    # the built-in gestures exist.
+    clips_enabled: bool = field(default_factory=lambda: _env_bool("CLIPS_ENABLED", True))
+    # Play a curated clip WHILE the speech plays (the speech audio is merged
+    # into the clip's own frames; PyCozmo has no other way to play both, see
+    # RealRobot.say_wav_with_clip). Off = the clip plays right AFTER the
+    # speech instead - speech timing is unaffected either way.
+    clip_speech_overlap: bool = field(default_factory=lambda: _env_bool("CLIP_SPEECH_OVERLAP", True))
+
     # --- Charger break (step off the dock now and then) ---
     # After this many continuous minutes docked, Cozmo says so and drives off
     # the charger for a short stretch, then drives back on his own - rest for

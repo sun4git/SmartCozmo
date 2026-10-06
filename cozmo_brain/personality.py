@@ -61,8 +61,6 @@ asks "do you know who I am", use `who_is_this`. Your eyesight is honestly \
 not great (low-res, blurry camera) — treat any match as a fun guess, not a \
 sure thing, and say so if you're wrong or unsure. Being a little unreliable \
 about this is on-brand, not a flaw to hide.
-- If you don't know what real animations are available, call \
-`list_animations` before trying `play_animation` — never guess a name.
 - Each turn ends with a "[Battery: ...]" line: the real voltage, and whether you're docked and for how long. Go by it, never guess - you have no percentage, so don't claim to be "fully charged" or "full", say what the voltage line shows. When asked to come out of the charger (or to rest it), call `leave_charger` unless the status says the battery is too low to leave. Staying docked too long isn't great for an old battery, so offering to step off for a bit is fine.
 - Keep movement modest and safe: small drives and turns, not huge ones.
 
@@ -90,12 +88,36 @@ argument to the standalone `gesture` tool) are exactly these words — \
 never invent a new one: {_GESTURE_LIST}."""
 
 
+def clips_prompt_section() -> str:
+    """How to use the named real clips (robot/curated.py). Only added to the
+    prompt when CLIPS_ENABLED, so a robot without clips never hears about them."""
+    from cozmo_brain.robot.curated import describe_for_prompt, model_clips
+
+    long_names = [n for n, c in model_clips().items() if c.tier == "long"]
+    long_rule = (
+        f"The long ones ({', '.join(long_names)}) take many seconds - only use them when "
+        "the person actually asked for that (a dance, a song) and you have something to say alongside. "
+        if long_names else ""
+    )
+    return (
+        "Besides the gestures, you have real animation clips from Cozmo's own app, by these exact names "
+        "(use them as `say`'s `gesture`, or as the standalone `gesture` name): "
+        + describe_for_prompt()
+        + ". They are silent on their own, so the best use is WHILE you speak: pass one as `gesture` in your "
+        "`say`. "
+        + long_rule
+        + "Prefer these over `play_animation`; if you really want a different one, call `list_animations` "
+        "first - never guess a clip name."
+    )
+
+
 def build_system_prompt(
     memory_section: str,
     now: datetime | None = None,
     suggestions_section: str = "",
     presence_section: str = "",
     assistant_section: str = "",
+    clips_section: str = "",
 ) -> str:
     """SYSTEM_PROMPT plus the current date/time and the memory file
     (memory.py) - rebuilt every turn (engine.py), so a newly saved or
@@ -126,4 +148,6 @@ Things you noticed earlier but haven't confirmed - NOT facts you know, so never 
 
 {presence_section}""" if presence_section else "") + (f"""
 
-{assistant_section}""" if assistant_section else "")
+{assistant_section}""" if assistant_section else "") + (f"""
+
+{clips_section}""" if clips_section else "")

@@ -212,6 +212,19 @@ class RobotBackend(abc.ABC):
     def play_animation(self, name: str) -> None:
         """Play a real animation clip or group by exact name."""
 
+    def clips_available(self) -> bool:
+        """True when real Anki clips can be played right now (resources
+        downloaded and CLIPS_ENABLED). The default backend has none."""
+        return False
+
+    def say_wav_with_clip(self, wav_path: str, clip: str) -> None:
+        """Speak `wav_path` while playing the real clip `clip`, blocking until
+        both are done. The default can't overlap them: speech, then the clip
+        (RealRobot merges the speech into the clip's own frames)."""
+        self.say_wav(wav_path)
+        if self.clips_available():
+            self.play_animation(clip)
+
     def wake_up(self) -> None:
         """Played once when the program connects. The default is the built-in
         `wake_up` gesture; RealRobot uses a real Anki clip when it can."""

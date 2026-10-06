@@ -24,6 +24,7 @@ from cozmo_brain.llm.speech_client import SpeechClient
 from cozmo_brain.memory import Memory
 from cozmo_brain.people import Presence, find_match, known_people
 from cozmo_brain.robot.base import MoveResult, RobotBackend
+from cozmo_brain.robot.curated import CURATED, describe_for_prompt, model_clips
 from cozmo_brain.robot.gestures import GESTURES
 from cozmo_brain.robot.moods import MOODS
 from cozmo_brain.tools.assistant_tools import build_assistant_tools
@@ -131,10 +132,22 @@ def build_tools(
     `presence` (people.py) is told who remember_person/who_is_this
     identify, so the system prompt can use their name."""
     def handle_say(text: str, mood: str = "neutral", gesture: str | None = None) -> ToolResult:
+        gesture_arg = gesture
         # "neutral" now resets pose (see moods.py) rather than being a
         # no-op, so it must actually run, not be skipped like other moods
         # used to be for efficiency.
         applied_mood = robot.apply_mood(mood) if mood else None
+
+        # A curated real clip, not a built-in gesture: it needs the speech
+        # audio merged into its frames, so it starts once synthesis is done
+        # (the mood above already shows at once) - see RobotBackend.say_wav_with_clip.
+        clip_name = gesture if (gesture and gesture not in GESTURES and gesture in model_clips()) else None
+        clip_note = ""
+        if clip_name:
+            gesture = None
+            if not (settings.clips_enabled and robot.clips_available()):
+                clip_name = None
+                clip_note = f" (clip '{gesture_arg}' unavailable here - spoke without it)"
 
         # Bundled into this one call, rather than relying on the model
         # calling the separate `gesture` tool right before/after, because
@@ -179,19 +192,39 @@ def build_tools(
             if gesture and settings.gesture_speech_sync_enabled:
                 gesture_note = start_gesture()
 
+        speak_on_robot = robot.say_wav
+        clip_id = None
+        if clip_name:
+            clip_id = CURATED[clip_name].clip
+            speak_on_robot = lambda path: robot.say_wav_with_clip(path, clip_id)  # noqa: E731
+            description = CURATED[clip_name].description
+            gesture_note = f" while playing the '{clip_name}' clip ({description})"
+            if not settings.clip_speech_overlap:
+                gesture_note = f" then playing the '{clip_name}' clip ({description})"
+
         output = settings.audio_output.lower()
         if output == "system":
-            play_wav(wav_path, settings.playback_device)
+            if clip_id and settings.clip_speech_overlap:
+                # Speech comes out of the Pi's speaker, so nothing on the
+                # robot's audio queue to collide with: just run the clip beside it.
+                clip_thread = threading.Thread(target=robot.play_animation, args=(clip_id,))
+                clip_thread.start()
+                play_wav(wav_path, settings.playback_device)
+                clip_thread.join()
+            else:
+                play_wav(wav_path, settings.playback_device)
+                if clip_id:
+                    robot.play_animation(clip_id)
         elif output == "both":
             # Simultaneous, not sequential — a background thread for system
             # audio while the main thread drives Cozmo's own speaker, then
             # wait for both so this call still blocks until speech is done.
             system_thread = threading.Thread(target=play_wav, args=(wav_path, settings.playback_device))
             system_thread.start()
-            robot.say_wav(wav_path)
+            speak_on_robot(wav_path)
             system_thread.join()
         else:
-            robot.say_wav(wav_path)
+            speak_on_robot(wav_path)
 
         # "Arms up" moods (happy/excited/proud/smug - see moods.py) raise
         # the lift and deliberately don't lower it as part of apply_mood()
@@ -206,14 +239,32 @@ def build_tools(
         if applied_mood is not None and applied_mood.lift_mm is not None:
             robot.lower_lift_fully()
 
-        return ToolResult(True, f"Said (mood={mood}){gesture_note}: {text}")
+        return ToolResult(True, f"Said (mood={mood}){gesture_note}{clip_note}: {text}")
 
     def handle_gesture(name: str) -> ToolResult:
+        if name not in GESTURES and name in model_clips():
+            return handle_clip(name)
         if settings.gesture_async_enabled:
             description = robot.run_gesture_async(name)
             return ToolResult(True, f"Started gesture '{name}': {description}")
         description = robot.run_gesture(name)
         return ToolResult(True, f"Performed gesture '{name}': {description}")
+
+    def handle_clip(name: str) -> ToolResult:
+        """A curated real clip on its own (no speech). Always blocks until it
+        is done, never in the background: it shares the robot's one audio
+        queue with speech, so a `say` that follows would be cut off or delayed."""
+        clip = CURATED[name]
+        if clip.tier == "long":
+            return ToolResult(
+                False,
+                f"'{name}' is a long clip (~{clip.seconds:.0f}s) and it is silent on its own - "
+                f"use it as `say`'s gesture while you are saying something, not as a standalone gesture.",
+            )
+        if not (settings.clips_enabled and robot.clips_available()):
+            return ToolResult(False, f"Animation clips aren't available right now, so '{name}' didn't play.")
+        robot.play_animation(clip.clip)
+        return ToolResult(True, f"Played the '{name}' clip: {clip.description}")
 
     def handle_play_animation(name: str) -> ToolResult:
         # Seen on real hardware: asked to dance, the model called
@@ -222,6 +273,8 @@ def build_tools(
         # obvious, so do it. Exact match: real clip names ("anim_...") and
         # group names (CamelCase) never equal a gesture name.
         gesture_name = name.removeprefix("group:")
+        if gesture_name in model_clips() and gesture_name not in GESTURES:
+            return handle_clip(gesture_name)
         if gesture_name in GESTURES:
             result = handle_gesture(gesture_name)
             return ToolResult(
@@ -325,6 +378,13 @@ def build_tools(
     # used one always goes back to the model, even if a `say` came last.
     # When adding a tool, leave it False unless its success result tells the
     # model nothing it needs.
+    # Built-in gestures, plus the curated real clips when clips are on.
+    gesture_names = list(_GESTURE_NAMES) + (sorted(model_clips()) if settings.clips_enabled else [])
+    gesture_hint = (
+        "Named clips: " + describe_for_prompt() + ". The long ones are for use only while you are speaking. "
+        if settings.clips_enabled else ""
+    )
+
     tools = [
         Tool(
             name="say",
@@ -351,8 +411,8 @@ def build_tools(
                     },
                     "gesture": {
                         "type": "string",
-                        "enum": _GESTURE_NAMES,
-                        "description": "Optional — a gesture to perform at the same time as speaking.",
+                        "enum": gesture_names,
+                        "description": gesture_hint + "Optional — a gesture or named clip to perform at the same time as speaking.",
                     },
                 },
                 "required": ["text"],
@@ -374,8 +434,8 @@ def build_tools(
                 "properties": {
                     "name": {
                         "type": "string",
-                        "enum": _GESTURE_NAMES,
-                        "description": "Which gesture to perform.",
+                        "enum": gesture_names,
+                        "description": gesture_hint + "Which gesture or named clip to perform.",
                     }
                 },
                 "required": ["name"],
@@ -506,6 +566,9 @@ def build_tools(
             handler=lambda _args: handle_who_is_this(),
         ),
     ]
+    if not settings.clips_enabled:
+        # No real clips at all: the model must not be offered the clip tools.
+        tools = [t for t in tools if t.name not in ("play_animation", "list_animations")]
     if memory is not None:
         tools.extend(build_memory_tools(memory))
     if assistant is not None:

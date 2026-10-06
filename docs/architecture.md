@@ -71,7 +71,7 @@ why this ended up folded into `--mode vad` instead of a standalone mode.
 |---|---|
 | `say(text, mood, gesture)` | Speaks via Groq TTS (routed per `AUDIO_OUTPUT`), striking a matching facial expression + backpack light color first. The optional `gesture` plays a choreography concurrently with the speech (guaranteed overlap — see below), rather than before or after it. A mood that raises the lift (`happy`/`excited`/`proud`/`smug`) is lowered again automatically once the reply finishes. |
 | `gesture(name)` | Plays a curated multi-step choreography (face + lights + head/arm + wheels) **on its own, with no speech** — pairs with `say` only sequentially, never simultaneously (use `say`'s own `gesture` argument for that). |
-| `play_animation(name)` | Plays a **real** Anki animation clip or group by exact name. |
+| `play_animation(name)` | Plays a **real** Anki animation clip or group by exact name, with its wheel commands removed, and waits for it to finish. Also accepts a curated clip name or a gesture name (it does the gesture). |
 | `list_animations()` | Lists the real animation/group names actually loaded on this robot. |
 | `drive(distance_mm, speed_mmps)` | Drives straight, clamped to safe limits. |
 | `turn(angle_degrees)` | Turns in place (calibrated via `TURN_SECONDS_PER_DEGREE`). |
@@ -103,8 +103,42 @@ permanently on real hardware.
 `alert`.
 
 **Real animation clips** (`play_animation`/`list_animations`) use PyCozmo's
-actual `play_anim`/`play_anim_group` API against Anki's original animation
-assets — this only works once you've run `pycozmo_resources.py download`
-(step 1 above). If those assets aren't present, `list_animations()` just
-returns empty and the model is expected to fall back to `gesture`/`say`
-moods instead — nothing crashes.
+actual clip API against Anki's original animation assets — this only works
+once you've run `pycozmo_resources.py download` (step 1 above). If those
+assets aren't present, `list_animations()` just returns empty and the model is
+expected to fall back to `gesture`/`say` moods instead — nothing crashes.
+
+How clips are played ([clips.py](../cozmo_brain/robot/clips.py),
+[real.py](../cozmo_brain/robot/real.py)), all found on the real robot:
+
+- **Wheels are always removed.** A clip's own drive/turn commands are stripped
+  before it plays, so it never drives him off a table or the charger. Face,
+  head, lift and lights play as authored.
+- **Clips are silent.** PyCozmo skips a clip's audio keyframes (Wwise event
+  IDs, a TODO in its source), so a clip only ever moves and lights up. The
+  original sounds live in the app's sound banks, which `pycozmo_resources.py`
+  does extract - `standalone/dump_clip_sounds.py` names what each clip would
+  play; nothing plays them yet.
+- **A clip plays longer than its timeline.** PyCozmo adds one 33 ms frame per
+  keyframe, so a clip with a keyframe on every frame runs about twice as long as
+  its last keyframe time (`clips.playback_seconds`); tap suppression and
+  `duration_s` in the dumps use that real length.
+- **Newer Pillow breaks most clips** (PyCozmo draws an eyelid with an inverted
+  box); `clips.patch_pillow_chord()` fixes it at connect.
+- **Speech and a clip share one audio queue** (starting a clip clears it;
+  speech queued after a clip waits behind it), so they can't just be started
+  together. A curated clip used with `say` has the speech's audio packets put
+  into the clip's own frames (`clips.play_with_audio`), so both start together.
+  That needs the speech file first, so the *clip* (not the speech) starts after
+  synthesis; the mood shows immediately as before.
+
+**Curated clips** ([curated.py](../cozmo_brain/robot/curated.py)): ~25 hand-picked
+clips by friendly name (`happy`, `chicken`, `fist_bump`, `dunno`, ...) offered to
+the model next to the gestures, so it doesn't have to call `list_animations`.
+Long ones (`dance_mambo`, `sing`, `tiger`, `duck`, `bored_event`; 12 s+) are built
+but not offered yet (`curated.MODEL_TIERS`); when they are, they're only accepted
+inside a `say`, since the speech is what fills the time. They're chosen
+with `standalone/dump_animations.py` and `standalone/audition_animations.py`.
+`CLIPS_ENABLED=false` turns all clips off (gestures only);
+`CLIP_SPEECH_OVERLAP=false` plays a clip right after the speech instead of during
+it; `WAKE_SLEEP_CLIPS` covers just the start/end animations.

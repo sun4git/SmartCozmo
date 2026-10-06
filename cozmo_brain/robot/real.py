@@ -42,7 +42,7 @@ from typing import Callable
 import pycozmo
 
 from cozmo_brain.config import Settings
-from cozmo_brain.robot import clips, wifi
+from cozmo_brain.robot import clips, curated, wifi
 from cozmo_brain.robot.base import MoveResult, Pose2D, RobotBackend
 
 logger = logging.getLogger(__name__)
@@ -221,6 +221,10 @@ class PyCozmoRobot(RobotBackend):
         self._charger_pose: Pose2D | None = None
         self._charger_origin_id: int | None = None
 
+        # Serialises preparing a clip (a prewarm thread and a conversation turn
+        # can ask for the same one).
+        self._clip_prep_lock = threading.Lock()
+
     def connect(self) -> None:
         wifi.ensure_connected(self._settings.cozmo_wifi_ssid, self._settings.cozmo_wifi_password)
 
@@ -274,6 +278,8 @@ class PyCozmoRobot(RobotBackend):
             logger.warning("Could not play the wake-up animation: %s", e)
         finally:
             cli.enable_procedural_face(True)
+        if self.clips_available():
+            self.prewarm_clips([c.clip for c in curated.CURATED.values()])
 
     def disconnect(self) -> None:
         # Also covers reconnect(), which calls this first. A new pycozmo
@@ -1167,19 +1173,18 @@ class PyCozmoRobot(RobotBackend):
         names += sorted(f"group:{g}" for g in self._client.animation_groups)
         return names
 
-    def play_animation(self, name: str, *, max_wait_s: float | None = None) -> None:
-        """Plays a real clip (or a random member of a `group:` one) and
-        blocks until the robot reports it finished - or, with `max_wait_s`,
-        stops waiting after that long and leaves it playing. Wheel commands are always
-        stripped (see clips.py): face, head, lift and lights play, but he
-        never drives, so a clip can't take him off a table or the charger.
-        Lowers the lift afterwards if the clip raised it (it would cover the
-        face screen)."""
+    def clips_available(self) -> bool:
+        return self._animations_loaded and self._settings.clips_enabled
+
+    def _resolve_clip(self, name: str) -> str:
+        """A real clip name, or a random member of a `group:<name>` one."""
         if not self._animations_loaded:
             raise RuntimeError(
                 "No animation resources loaded. Run 'pycozmo_resources.py download' on this "
                 "machine, then reconnect."
             )
+        if not self._settings.clips_enabled:
+            raise RuntimeError("Animation clips are turned off (CLIPS_ENABLED=false).")
         cli = self._client
         if name.startswith("group:"):
             group_name = name.split(":", 1)[1]
@@ -1187,38 +1192,104 @@ class PyCozmoRobot(RobotBackend):
                 raise ValueError(f"Unknown animation group '{group_name}'. Call list_animations() first.")
             clip = cli.animation_groups[group_name].choose_member().name
             logger.info("Animation group '%s' -> clip '%s'.", group_name, clip)
-        else:
-            if name not in cli.get_anim_names():
-                raise ValueError(f"Unknown animation '{name}'. Call list_animations() first.")
-            clip = name
+            return clip
+        if name not in cli.get_anim_names():
+            raise ValueError(f"Unknown animation '{name}'. Call list_animations() first.")
+        return name
 
-        # Same preparation as Client.play_anim(), minus the wheel commands
-        # (it has no hook for that). Uses PyCozmo's private clip caches.
-        if clip not in cli._ppclips:
-            if clip not in cli._clips:
-                cli._load_clips(cli._clip_metadata[clip].fspec)
-            cli._ppclips[clip] = pycozmo.anim.PreprocessedClip.from_anim_clip(cli._clips[clip])
-        ppclip = cli._ppclips[clip]
-        clips.strip_wheels(ppclip)
+    def _prepared_clip(self, clip: str):
+        """PyCozmo's preprocessed clip with the wheel commands removed.
+        Built once, then cached by PyCozmo (rendering the face frames is the
+        slow part, so prewarm_clips() does it ahead of time). Same
+        preparation as Client.play_anim(), which has no hook for stripping
+        wheels, so this uses PyCozmo's private clip caches."""
+        cli = self._client
+        with self._clip_prep_lock:
+            if clip not in cli._ppclips:
+                if clip not in cli._clips:
+                    cli._load_clips(cli._clip_metadata[clip].fspec)
+                cli._ppclips[clip] = pycozmo.anim.PreprocessedClip.from_anim_clip(cli._clips[clip])
+            ppclip = cli._ppclips[clip]
+            clips.strip_wheels(ppclip)
+        return ppclip
+
+    def prewarm_clips(self, names) -> None:
+        """Prepare these clips on a background thread so the first time one is
+        used it starts at once. Best effort: anything that fails here simply
+        gets prepared on first use instead."""
+        def work() -> None:
+            for name in names:
+                try:
+                    self._prepared_clip(self._resolve_clip(name))
+                except Exception as e:  # noqa: BLE001 - a prewarm failure is not worth more than a log line
+                    logger.debug("Could not prewarm clip '%s': %s", name, e)
+                time.sleep(0.05)  # don't hog the CPU while he may be talking
+
+        threading.Thread(target=work, name="clip-prewarm", daemon=True).start()
+
+    def _play_ppclip(self, clip: str, ppclip, *, speech=None, max_wait_s: float | None = None) -> None:
+        """Play a prepared clip and wait for it (and the speech, if given:
+        OutputAudio packets merged into its frames) to finish. With
+        `max_wait_s`, stop waiting after that long and leave it playing.
+        Lowers the lift afterwards if the clip raised it (it would cover the
+        face screen)."""
+        cli = self._client
         duration = clips.ppclip_duration_s(ppclip)
+        speech_s = len(speech) / pycozmo.robot.FRAME_RATE if speech else 0.0
 
         # Head/lift motion reads as a tap to the accelerometer, same as a
         # gesture's own head and lift steps.
         self._suppress_taps(duration)
-        done = threading.Event()
-        cli.add_handler(pycozmo.event.EvtAnimationCompleted, lambda *_: done.set(), one_shot=True)
-        cli.play_anim_ppclip(ppclip)
-        timeout = duration + _CLIP_COMPLETION_SLACK_S
+        clip_done = threading.Event()
+        cli.add_handler(pycozmo.event.EvtAnimationCompleted, lambda *_: clip_done.set(), one_shot=True)
+        speech_done = threading.Event()
+        if speech:
+            cli.add_handler(pycozmo.event.EvtAudioCompleted, lambda *_: speech_done.set(), one_shot=True)
+            clips.play_with_audio(cli, ppclip, speech)
+        else:
+            cli.play_anim_ppclip(ppclip)
+
+        timeout = max(duration, speech_s) + _CLIP_COMPLETION_SLACK_S
         if max_wait_s is not None and max_wait_s < timeout:
-            done.wait(max_wait_s)  # deliberately cut short - not a missing event
+            clip_done.wait(max_wait_s)  # deliberately cut short - not a missing event
             return
-        if not done.wait(timeout):
+        deadline = time.monotonic() + timeout
+        if not clip_done.wait(timeout):
             logger.warning("No completion event for animation '%s' after %.1fs.", clip, timeout)
+        if speech and not speech_done.wait(max(0.0, deadline - time.monotonic())):
+            logger.warning("No audio-completed event after speaking over clip '%s'.", clip)
         if cli._clip_metadata[clip].has_lift_height_track:
             self.lower_lift_fully()
 
+    def play_animation(self, name: str, *, max_wait_s: float | None = None) -> None:
+        """Plays a real clip (or a random member of a `group:` one) and
+        blocks until the robot reports it finished - or, with `max_wait_s`,
+        stops waiting after that long and leaves it playing. Wheel commands are always
+        stripped (see clips.py): face, head, lift and lights play, but he
+        never drives, so a clip can't take him off a table or the charger."""
+        clip = self._resolve_clip(name)
+        self._play_ppclip(clip, self._prepared_clip(clip), max_wait_s=max_wait_s)
+
+    def say_wav_with_clip(self, wav_path: str, clip: str) -> None:
+        """Speak while a real clip plays (CLIP_SPEECH_OVERLAP) - or the clip
+        right after the speech when that's off. If the clip can't be played
+        for any reason, the speech still is: it is never lost to a clip."""
+        try:
+            clip_id = self._resolve_clip(clip)
+            ppclip = self._prepared_clip(clip_id)
+            speech = pycozmo.audio.load_wav(wav_path) if self._settings.clip_speech_overlap else None
+        except Exception as e:  # noqa: BLE001 - speak anyway
+            logger.warning("Could not prepare clip '%s' (%s) - speaking without it.", clip, e)
+            self.say_wav(wav_path)
+            return
+        if speech is None:
+            self.say_wav(wav_path)
+            self._play_ppclip(clip_id, ppclip)
+        else:
+            self._play_ppclip(clip_id, ppclip, speech=speech)
+
     def wake_up(self) -> None:
-        if self._animations_loaded and self._settings.wake_sleep_clips:
+        if self.clips_available() and self._settings.wake_sleep_clips:
             try:
                 self.play_animation(clips.WAKE_CLIP)
                 return
@@ -1227,7 +1298,7 @@ class PyCozmoRobot(RobotBackend):
         super().wake_up()
 
     def go_to_sleep(self) -> None:
-        if self._animations_loaded and self._settings.wake_sleep_clips:
+        if self.clips_available() and self._settings.wake_sleep_clips:
             try:
                 *first, last = clips.SLEEP_CLIPS
                 for clip in first:
