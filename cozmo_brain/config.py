@@ -528,7 +528,7 @@ class Settings:
     # speech (start/end animations, a standalone clip) "effects" and "full"
     # both play everything. Nothing plays if the folder or manifest is missing.
     clip_sounds: str = field(default_factory=lambda: _env_str("CLIP_SOUNDS", "full"))
-    clip_sound_volume: float = field(default_factory=lambda: _env_float("CLIP_SOUND_VOLUME", 0.6))
+    clip_sound_volume: float = field(default_factory=lambda: _env_float("CLIP_SOUND_VOLUME", 0.5))
     # ...and how loud they are while Cozmo is speaking, so the speech stays the
     # main thing (the speech itself is never turned down).
     clip_sound_speech_volume: float = field(default_factory=lambda: _env_float("CLIP_SOUND_SPEECH_VOLUME", 0.15))
