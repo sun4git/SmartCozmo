@@ -13,6 +13,12 @@ project folder, inside `cozmo-env`.
 | `battery_report.py` | How this robot's battery behaves on and off the charger (`data/battery.jsonl`) | Nothing |
 | `orchestrator.py` | The original single-file proof of concept: mic → STT → LLM → Cozmo → TTS | Robot, mic, `GROQ_API_KEY`, Ollama |
 | `pose_drift_test.py` | How far Cozmo's own position tracking drifts from reality | Robot, tape, a ruler |
+| `dump_animations.py` | List every real clip and group, with their tracks and real play length | The downloaded animations (no robot) |
+| `audition_animations.py` | Play a shortlist of clips on the robot and rate each one | Robot (main app stopped) |
+| `dump_clip_sounds.py` | Which sound events each clip fires, and a check of the sound folder | The downloaded sounds (no robot) |
+| `extract_clip_sounds.py` | Turn the clips' sounds into WAVs the robot can play | A PC with the sound folder and `vgmstream-cli` |
+
+The last four are covered step by step in [Real animation clips and Cozmo's own sounds](clip-sounds.md).
 
 ## `sync_env.py` - check `.env` after a pull
 

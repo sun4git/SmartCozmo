@@ -133,13 +133,14 @@ Everything that used to be in this one file now lives in [docs/](docs/), grouped
 | [Audio output and voice](docs/audio-output.md) | Routing speech to a real speaker, making the voice less generic, `TTS_GAIN` |
 | [Speech and chat providers](docs/providers.md) | Groq, OpenAI, local, Wit.ai, Edge; chat and vision provider switching |
 | [Connection and battery](docs/connection-and-battery.md) | Dropped-connection recovery, the battery monitor, the battery line and charger break, `battery.jsonl` |
+| [Real animation clips and Cozmo's own sounds](docs/clip-sounds.md) | The curated clips, getting Cozmo's original sounds working (extraction, copying, settings), keeping a backup |
 | [Return to the charger](docs/return-to-charger.md) | The low-battery policy, navigation, docking, and what was learned on hardware |
 
 **Development**
 
 | Page | What's in it |
 |---|---|
-| [Standalone scripts](docs/standalone-scripts.md) | `sync_env.py`, `show_history.py`, `battery_report.py`, `orchestrator.py`, `pose_drift_test.py` |
+| [Standalone scripts](docs/standalone-scripts.md) | `sync_env.py`, `show_history.py`, `battery_report.py`, `orchestrator.py`, `pose_drift_test.py`, and the clip/sound tools |
 | [Running the tests](docs/testing.md) | The offline test suite and the opt-in live tests |
 | [Real bugs this uncovered](docs/hardware-findings.md) | Problems that only showed up on real hardware, and how they were fixed |
 | [Roadmap / open work](docs/roadmap.md) | What's done and what's still open |

@@ -135,7 +135,7 @@ How clips are played ([clips.py](../cozmo_brain/robot/clips.py),
   That needs the speech file first, so the *clip* (not the speech) starts after
   synthesis; the mood shows immediately as before.
 
-**Cozmo's own sounds** ([clip_sounds.py](../cozmo_brain/robot/clip_sounds.py),
+**Cozmo's own sounds** (setup steps: [clip-sounds.md](clip-sounds.md); [clip_sounds.py](../cozmo_brain/robot/clip_sounds.py),
 [wwise_banks.py](../cozmo_brain/wwise_banks.py)). Anki's sounds are Wwise audio:
 `standalone/dump_clip_sounds.py` (on the Pi) lists which sound events each clip
 fires and when; `standalone/extract_clip_sounds.py` (on a PC with the sound
