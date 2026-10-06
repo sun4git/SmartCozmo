@@ -42,7 +42,7 @@ from typing import Callable
 import pycozmo
 
 from cozmo_brain.config import Settings
-from cozmo_brain.robot import wifi
+from cozmo_brain.robot import clips, wifi
 from cozmo_brain.robot.base import MoveResult, Pose2D, RobotBackend
 
 logger = logging.getLogger(__name__)
@@ -82,6 +82,10 @@ _TAP_BASELINE_ALPHA = 0.02
 # through a commanded move. Frequent enough that an edge stops a drive
 # promptly, cheap enough (just an int compare) to not matter performance-wise.
 _CLIFF_POLL_S = 0.05
+
+# play_animation() waits for the robot's "animation completed" event; this is
+# how long past the clip's own length to keep waiting before giving up.
+_CLIP_COMPLETION_SLACK_S = 5.0
 
 # Extra grace period (on top of a commanded move's own duration) that tap
 # detection stays suppressed for after any self-commanded movement (lift,
@@ -240,6 +244,7 @@ class PyCozmoRobot(RobotBackend):
         cli.add_handler(pycozmo.protocol_encoder.RobotState, self._on_robot_state)
         self._last_seen = time.monotonic()
 
+        clips.patch_pillow_chord()
         try:
             cli.load_anims()
             self._animations_loaded = True
@@ -254,9 +259,9 @@ class PyCozmoRobot(RobotBackend):
         # face-down from sitting on the charger) — this is the only signal a
         # human gets that the connection actually succeeded, so make it obvious.
         try:
-            self.run_gesture("wake_up")
-        except Exception as e:  # noqa: BLE001 - a cosmetic startup gesture shouldn't block connect()
-            logger.warning("Could not play wake-up gesture: %s", e)
+            self.wake_up()
+        except Exception as e:  # noqa: BLE001 - a cosmetic startup animation shouldn't block connect()
+            logger.warning("Could not play the wake-up animation: %s", e)
 
     def disconnect(self) -> None:
         # Also covers reconnect(), which calls this first. A new pycozmo
@@ -1151,6 +1156,12 @@ class PyCozmoRobot(RobotBackend):
         return names
 
     def play_animation(self, name: str) -> None:
+        """Plays a real clip (or a random member of a `group:` one) and
+        blocks until the robot reports it finished. Wheel commands are always
+        stripped (see clips.py): face, head, lift and lights play, but he
+        never drives, so a clip can't take him off a table or the charger.
+        Lowers the lift afterwards if the clip raised it (it would cover the
+        face screen)."""
         if not self._animations_loaded:
             raise RuntimeError(
                 "No animation resources loaded. Run 'pycozmo_resources.py download' on this "
@@ -1161,8 +1172,49 @@ class PyCozmoRobot(RobotBackend):
             group_name = name.split(":", 1)[1]
             if group_name not in cli.animation_groups:
                 raise ValueError(f"Unknown animation group '{group_name}'. Call list_animations() first.")
-            cli.play_anim_group(group_name)
+            clip = cli.animation_groups[group_name].choose_member().name
+            logger.info("Animation group '%s' -> clip '%s'.", group_name, clip)
         else:
             if name not in cli.get_anim_names():
                 raise ValueError(f"Unknown animation '{name}'. Call list_animations() first.")
-            cli.play_anim(name)
+            clip = name
+
+        # Same preparation as Client.play_anim(), minus the wheel commands
+        # (it has no hook for that). Uses PyCozmo's private clip caches.
+        if clip not in cli._ppclips:
+            if clip not in cli._clips:
+                cli._load_clips(cli._clip_metadata[clip].fspec)
+            cli._ppclips[clip] = pycozmo.anim.PreprocessedClip.from_anim_clip(cli._clips[clip])
+        ppclip = cli._ppclips[clip]
+        clips.strip_wheels(ppclip)
+        duration = clips.ppclip_duration_s(ppclip)
+
+        # Head/lift motion reads as a tap to the accelerometer, same as a
+        # gesture's own head and lift steps.
+        self._suppress_taps(duration)
+        done = threading.Event()
+        cli.add_handler(pycozmo.event.EvtAnimationCompleted, lambda *_: done.set(), one_shot=True)
+        cli.play_anim_ppclip(ppclip)
+        if not done.wait(duration + _CLIP_COMPLETION_SLACK_S):
+            logger.warning("No completion event for animation '%s' after %.1fs.", clip, duration + _CLIP_COMPLETION_SLACK_S)
+        if cli._clip_metadata[clip].has_lift_height_track:
+            self.lower_lift_fully()
+
+    def wake_up(self) -> None:
+        if self._animations_loaded and self._settings.wake_sleep_clips:
+            try:
+                self.play_animation(clips.WAKE_CLIP)
+                return
+            except Exception as e:  # noqa: BLE001 - fall back to the built-in gesture
+                logger.warning("Wake-up clip failed (%s) - using the wake_up gesture.", e)
+        super().wake_up()
+
+    def go_to_sleep(self) -> None:
+        if self._animations_loaded and self._settings.wake_sleep_clips:
+            try:
+                for clip in clips.SLEEP_CLIPS:
+                    self.play_animation(clip)
+                return
+            except Exception as e:  # noqa: BLE001 - fall back to the built-in gesture
+                logger.warning("Go-to-sleep clip failed (%s) - using the sleep gesture.", e)
+        super().go_to_sleep()

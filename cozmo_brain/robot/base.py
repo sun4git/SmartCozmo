@@ -212,6 +212,17 @@ class RobotBackend(abc.ABC):
     def play_animation(self, name: str) -> None:
         """Play a real animation clip or group by exact name."""
 
+    def wake_up(self) -> None:
+        """Played once when the program connects. The default is the built-in
+        `wake_up` gesture; RealRobot uses a real Anki clip when it can."""
+        self.run_gesture("wake_up")
+
+    def go_to_sleep(self) -> None:
+        """Played once when the program ends, before disconnecting. The
+        default is the built-in `sleep` gesture; RealRobot uses real Anki
+        clips when it can."""
+        self.run_gesture("sleep")
+
     @abc.abstractmethod
     def display_custom_image(self, image, duration: float | None = None) -> None:
         """Display an arbitrary 128x32 PIL image (e.g. the battery icon),

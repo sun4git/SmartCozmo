@@ -505,6 +505,11 @@ class Settings:
     idle_fidget_enabled: bool = field(default_factory=lambda: _env_bool("IDLE_FIDGET_ENABLED", True))
     idle_fidget_after_s: int = field(default_factory=lambda: _env_int("IDLE_FIDGET_AFTER_S", 30))
 
+    # Real Anki wake-up / go-to-sleep clips when the program starts and ends
+    # (see robot/clips.py). Off = the built-in `wake_up` / `sleep` gestures.
+    # Clips need `pycozmo_resources.py download`; without it the gestures play.
+    wake_sleep_clips: bool = field(default_factory=lambda: _env_bool("WAKE_SLEEP_CLIPS", True))
+
     # --- Charger break (step off the dock now and then) ---
     # After this many continuous minutes docked, Cozmo says so and drives off
     # the charger for a short stretch, then drives back on his own - rest for

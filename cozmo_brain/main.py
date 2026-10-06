@@ -251,6 +251,14 @@ def main(argv: list[str] | None = None) -> int:
             charger_break.stop()
             battery_log.close()
             connection_monitor.stop()
+            # Bedtime before the slow part below (the memory check can take a
+            # while), so Ctrl+C gets an immediate visible reaction and he's
+            # already asleep while that runs. The reactors are stopped, so
+            # nothing else is moving him.
+            try:
+                robot.go_to_sleep()
+            except Exception as e:  # noqa: BLE001 - a goodnight animation must never block shutdown
+                logging.getLogger(__name__).warning("Could not play the go-to-sleep animation: %s", e)
             if extractor is not None:
                 # Whatever wasn't checked yet (all of it, outside --mode vad).
                 print("Checking this conversation for anything worth remembering...")
