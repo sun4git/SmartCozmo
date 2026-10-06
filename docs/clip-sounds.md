@@ -28,6 +28,42 @@ backup, and redoing it when the clip list changes. How it works inside is in
   one placeholder sound (`External_Cozmo_Processing`) that has no audio in the
   banks.
 
+## Where the files come from
+
+Neither this repo nor PyCozmo contains any of Cozmo's animations or sounds.
+They come from the **Cozmo Android app**, which PyCozmo's
+`pycozmo_resources.py download` fetches and unpacks. Read from PyCozmo
+0.8.0's own script (`pycozmo_resources.py`, installed next to the `pycozmo`
+package):
+
+- **Source:** one file,
+  `https://media.githubusercontent.com/media/cristobalraya/cozmo-archive/master/applications/com.anki.cozmo_3.4.0-1204_plus_OBB.zip`.
+  That is the Cozmo app, version **3.4.0 (build 1204)**, with its OBB expansion
+  file, the Android download that holds the app's assets. It is hosted in
+  `cristobalraya/cozmo-archive`, a community archive on GitHub (served from
+  GitHub's large-file host). It is not run by Anki, Digital Dream Labs, or
+  PyCozmo's author, and PyCozmo's README says it is not affiliated with Anki
+  or DDL.
+- **Where it goes:** `~/.pycozmo/assets/` on the Pi (Linux/macOS), or
+  `~/pycozmo/assets/` on Windows. Set the `PYCOZMO_DIR` environment variable to
+  use another folder. `assets/resources.txt` is how PyCozmo tells the download
+  has been done.
+- **What it does, in order:**
+  1. stops if `assets/resources.txt` already exists ("already available");
+  2. downloads the zip to `assets/obb.zip`;
+  3. unzips it to `assets/obb/`, then deletes `obb.zip`;
+  4. unzips the app's OBB, `assets/obb/Android/obb/com.anki.cozmo/main.1204.com.anki.cozmo.obb` (itself a zip), into the PyCozmo folder. That is what creates `assets/cozmo_resources/`, with `cozmo_resources/assets/animations/` (the clips) and `cozmo_resources/sound/`. Then it deletes `assets/obb/`;
+  5. unzips `assets/cozmo_resources/sound/AudioAssets.zip` into that `sound/` folder. This is where the `.wem` and `.bnk` files come from. The zip itself is left behind.
+- **Other commands:** `pycozmo_resources.py status` says whether the download
+  is there; `pycozmo_resources.py remove` deletes the whole `assets/` folder.
+- **No integrity check.** The script turns off HTTPS certificate verification
+  for its download (`ssl._create_unverified_context`), and it doesn't check
+  a checksum. Nothing confirms the file is the one you expect. That's one more
+  reason to keep a backup with your own checksum (below) once you have a
+  download that works. Since it deletes the downloaded zip, the only copy you
+  keep is the unpacked `assets/` folder, unless you download the URL above
+  yourself and save it.
+
 ## Getting the sounds working
 
 You need: the Pi with `pycozmo_resources.py download` done, and a PC (the
@@ -170,7 +206,7 @@ repo or anything shared publicly.
 
 | What | Where | Size (here) | Why keep it |
 |---|---|---|---|
-| The original download | Pi: `~/.pycozmo/assets/` | the whole folder; check with `du -sh` | Everything comes from this: animations and sounds. The hardest to get again. |
+| The original download | Pi: `~/.pycozmo/assets/` | the whole folder; check with `du -sh` | Everything comes from this: animations and sounds. The hardest to get again, since it depends on a third-party archive (see "Where the files come from"). |
 | The sound folder | PC: `data\sound\` | ~140 MB | A copy of the Pi's sound folder, minus the zip |
 | The converted sounds | PC: `data\clip_sounds\` | ~30 MB with `listen\` | What the robot plays; saves redoing steps 1-4 |
 | Your picks and dumps | PC/Pi: `data\animations_*.tsv`, `data\clip_sounds.tsv` | small | `animations_picks.tsv` is your own audition work |

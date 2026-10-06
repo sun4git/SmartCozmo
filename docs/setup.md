@@ -15,6 +15,9 @@ pip install -r requirements.txt
 pycozmo_resources.py download   # downloads Cozmo's animation/audio resource files — needed for play_animation()
 ```
 
+What that downloads, from where, and how to back it up:
+[Real animation clips and Cozmo's own sounds](clip-sounds.md#where-the-files-come-from).
+
 **Only if you plan to use `--mode vad`** (hands-free), two more installs, both
 with real gotchas:
 
