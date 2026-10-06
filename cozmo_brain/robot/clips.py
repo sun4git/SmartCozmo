@@ -34,6 +34,15 @@ WHEEL_PACKETS = (
     pycozmo.protocol_encoder.TurnToRecordedHeading,
 )
 
+# A clip's own backpack-light commands. Removed too: seen on the robot, after a
+# clip with a lights track was played with audio merged in, the backpack light
+# ignored every command from the app (the listening blink, mood colours) for the
+# rest of the run - even though the robot no longer reported itself animating,
+# and even after the wake word. Clips without a lights track never did this.
+# With these gone the app is the only thing that sets the light, so mood colours
+# and the blink always show; the clip's own light flashes are the cost.
+LIGHT_PACKETS = (pycozmo.protocol_encoder.AnimBackpackLights,)
+
 _chord_patched = False
 
 
@@ -64,18 +73,28 @@ def patch_pillow_chord() -> None:
     _chord_patched = True
 
 
-def strip_wheels(ppclip) -> int:
-    """Remove every wheel command from a preprocessed clip, in place.
+def strip_packets(ppclip, types: tuple) -> int:
+    """Remove every packet of these types from a preprocessed clip, in place.
 
     Returns how many were removed. Idempotent, so it's safe on a clip PyCozmo
     has cached and plays again. Frame timing is untouched (empty frames stay).
     """
     removed = 0
     for t, actions in ppclip.keyframes.items():
-        kept = [a for a in actions if not isinstance(a, WHEEL_PACKETS)]
+        kept = [a for a in actions if not isinstance(a, types)]
         removed += len(actions) - len(kept)
         ppclip.keyframes[t] = kept
     return removed
+
+
+def strip_wheels(ppclip) -> int:
+    """Remove every wheel command from a preprocessed clip, in place (see strip_packets)."""
+    return strip_packets(ppclip, WHEEL_PACKETS)
+
+
+def strip_lights(ppclip) -> int:
+    """Remove the clip's own backpack-light commands, in place (see LIGHT_PACKETS)."""
+    return strip_packets(ppclip, LIGHT_PACKETS)
 
 
 _FRAME_MS = 33  # the step PyCozmo's play_anim_ppclip() advances its own clock by

@@ -184,6 +184,10 @@ check("...and is well over the last keyframe time (1.8s)", clips.ppclip_duration
 c = fake_ppclip()
 first, second = clips.strip_wheels(c), clips.strip_wheels(c)
 check("strip_wheels removes 3 wheel commands, then nothing", (first, second) == (3, 0))
+lc = fake_ppclip()
+lc.keyframes[50] = [pe.AnimBackpackLights(colors=(0, 0, 0, 0, 0)), pe.AnimHead(duration_ms=10, variability_deg=0, angle_deg=5)]
+check("strip_lights removes the clip's backpack-light commands, keeps the rest",
+      clips.strip_lights(lc) == 1 and [type(a).__name__ for a in lc.keyframes[50]] == ["AnimHead"] and clips.strip_lights(lc) == 0)
 
 # 8. The Pillow workaround: negative eyelid bend used to raise.
 from pycozmo.procedural_face import ProceduralFace

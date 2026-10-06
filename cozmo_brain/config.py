@@ -529,6 +529,9 @@ class Settings:
     # both play everything. Nothing plays if the folder or manifest is missing.
     clip_sounds: str = field(default_factory=lambda: _env_str("CLIP_SOUNDS", "full"))
     clip_sound_volume: float = field(default_factory=lambda: _env_float("CLIP_SOUND_VOLUME", 0.6))
+    # ...and how loud they are while Cozmo is speaking, so the speech stays the
+    # main thing (the speech itself is never turned down).
+    clip_sound_speech_volume: float = field(default_factory=lambda: _env_float("CLIP_SOUND_SPEECH_VOLUME", 0.15))
     clip_sounds_dir: str = field(default_factory=lambda: _project_path(_env_str("CLIP_SOUNDS_DIR", "data/clip_sounds")))
 
     # --- Charger break (step off the dock now and then) ---

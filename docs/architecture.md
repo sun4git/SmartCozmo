@@ -111,9 +111,13 @@ expected to fall back to `gesture`/`say` moods instead — nothing crashes.
 How clips are played ([clips.py](../cozmo_brain/robot/clips.py),
 [real.py](../cozmo_brain/robot/real.py)), all found on the real robot:
 
-- **Wheels are always removed.** A clip's own drive/turn commands are stripped
-  before it plays, so it never drives him off a table or the charger. Face,
-  head, lift and lights play as authored.
+- **Wheels and backpack lights are always removed.** A clip's own drive/turn
+  commands are stripped before it plays, so it never drives him off a table or
+  the charger. Its backpack-light commands are stripped too: on the robot, after
+  a clip with a lights track played with audio merged in, the light ignored the
+  app for the rest of the run (the listening blink never came back, not even at
+  the wake word). The app's mood colour shows instead. Face, head and lift play
+  as authored.
 - **Clips are silent by themselves.** PyCozmo skips a clip's audio keyframes
   (Wwise event IDs, a TODO in its source). The original sounds live in the app's
   sound banks, which `pycozmo_resources.py` does extract. They can be recovered

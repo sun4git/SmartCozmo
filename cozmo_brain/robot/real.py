@@ -275,7 +275,8 @@ class PyCozmoRobot(RobotBackend):
             logger.info("Loaded %d real animation clips.", len(cli.get_anim_names()))
             if self._settings.clips_enabled:
                 self._clip_sounds = ClipSounds.load(
-                    self._settings.clip_sounds_dir, self._settings.clip_sounds, self._settings.clip_sound_volume
+                    self._settings.clip_sounds_dir, self._settings.clip_sounds,
+                    self._settings.clip_sound_volume, self._settings.clip_sound_speech_volume,
                 )
         except pycozmo.exception.ResourcesNotFound:
             logger.warning(
@@ -1217,7 +1218,8 @@ class PyCozmoRobot(RobotBackend):
         return name
 
     def _prepared_clip(self, clip: str):
-        """PyCozmo's preprocessed clip with the wheel commands removed.
+        """PyCozmo's preprocessed clip with the wheel and backpack-light commands
+        removed (clips.py says why).
         Built once, then cached by PyCozmo (rendering the face frames is the
         slow part, so prewarm_clips() does it ahead of time). Same
         preparation as Client.play_anim(), which has no hook for stripping
@@ -1230,6 +1232,7 @@ class PyCozmoRobot(RobotBackend):
                 cli._ppclips[clip] = pycozmo.anim.PreprocessedClip.from_anim_clip(cli._clips[clip])
             ppclip = cli._ppclips[clip]
             clips.strip_wheels(ppclip)
+            clips.strip_lights(ppclip)
         return ppclip
 
     def prewarm_clips(self, names) -> None:

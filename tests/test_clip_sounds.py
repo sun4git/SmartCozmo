@@ -119,7 +119,14 @@ active = np.flatnonzero(np.abs(mix) > 3000)
 first_voice = active[active > int(2.0 * rate)][0] if (active > int(2.0 * rate)).any() else None
 check("...and in the mix the sound starts there", first_voice is not None and abs(first_voice / rate - t_voice) < 0.005)
 check("the first sound (timeline 0) starts at the beginning", abs(np.flatnonzero(np.abs(mix) > 3000)[0]) < 0.05 * rate)
-check("volume: 0.6 of the source peak (0.5) = 0.3", abs(np.abs(mix[:int(0.3 * rate)]).max() / 32767 - 0.3) < 0.01)
+check("volume (no speech): 0.6 of the source peak (0.5) = 0.3", abs(np.abs(mix[:int(0.3 * rate)]).max() / 32767 - 0.3) < 0.01)
+quiet_under = ClipSounds.load(tmp, "full", 0.6, 0.2)
+sp = (np.zeros(int(4.0 * rate), dtype=np.float32), rate)  # silent "speech": only the sounds show
+under, _ = quiet_under.mix(CLIP, pp, sp)
+alone, _ = quiet_under.mix(CLIP, pp)
+check("volume under speech uses CLIP_SOUND_SPEECH_VOLUME (0.2 -> 0.1), alone still CLIP_SOUND_VOLUME (0.6 -> 0.3)",
+      abs(np.abs(under[:int(0.3 * rate)]).max() / 32767 - 0.1) < 0.01 and abs(np.abs(alone[:int(0.3 * rate)]).max() / 32767 - 0.3) < 0.01)
+check("with no separate speech volume given, it follows the main one", ClipSounds.load(tmp, "full", 0.5).speech_volume == 0.5)
 
 sparse = sparse_ppclip()
 mix_s, _ = full.mix(CLIP, sparse)

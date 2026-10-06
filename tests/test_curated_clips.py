@@ -58,7 +58,8 @@ else:
 # --- 2. the real robot's clip-plus-speech player -------------------------------
 def fake_ppclip():
     kf = defaultdict(list)
-    kf[0] = [pe.AnimHead(duration_ms=100, variability_deg=0, angle_deg=10), pe.DriveWheels(lwheel_speed_mmps=50, rwheel_speed_mmps=50)]
+    kf[0] = [pe.AnimHead(duration_ms=100, variability_deg=0, angle_deg=10), pe.DriveWheels(lwheel_speed_mmps=50, rwheel_speed_mmps=50),
+             pe.AnimBackpackLights(colors=(1, 1, 1, 1, 1))]
     kf[100] = [pe.AnimLift(duration_ms=100, variability_mm=0, height_mm=40)]
     kf[400] = [pe.DisplayImage(image=b"\x3f\x3f")]
     return pycozmo.anim.PreprocessedClip(keyframes=kf)
@@ -129,6 +130,7 @@ check("overlap: speech longer than the clip -> the rest is queued after it",
       any(e[0] == "audio" and e[1] > 0 for e in cli.log))
 flat = [type(p).__name__ for e in frames for p in (e[3] or ())]
 check("overlap: wheel commands are stripped from the clip", "DriveWheels" not in flat)
+check("overlap: the clip's own backpack-light commands are stripped (the app owns the light)", "AnimBackpackLights" not in flat)
 check("overlap: lift lowered afterwards (the clip raised it)", ("lift", 0.0) in cli.calls)
 check("overlap: self-caused taps suppressed for the clip", r._tap_suppress_until > time.monotonic())
 

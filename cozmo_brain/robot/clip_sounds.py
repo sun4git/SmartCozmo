@@ -102,7 +102,7 @@ class ClipSounds:
     """The recovered sounds: which a clip plays and when, and the mixing."""
 
     def __init__(self, directory: Path, manifest: dict, mode: str, volume: float,
-                 rng: random.Random | None = None):
+                 speech_volume: float | None = None, rng: random.Random | None = None):
         self._dir = directory
         self._events = manifest["events"]
         self._clips = {
@@ -110,12 +110,14 @@ class ClipSounds:
             for clip, evs in manifest["clips"].items()
         }
         self.mode = mode
-        self.volume = volume
+        self.volume = volume  # alone
+        self.speech_volume = volume if speech_volume is None else speech_volume  # under speech
         self._rng = rng or random.Random()
         self._cache: dict[tuple[str, int], np.ndarray] = {}
 
     @classmethod
-    def load(cls, directory: str | Path, mode: str, volume: float) -> "ClipSounds | None":
+    def load(cls, directory: str | Path, mode: str, volume: float,
+             speech_volume: float | None = None) -> "ClipSounds | None":
         """None (clips stay silent) when switched off or the sounds aren't there."""
         mode = (mode or "off").strip().lower()
         if mode not in MODES:
@@ -130,11 +132,13 @@ class ClipSounds:
             return None
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            sounds = cls(directory, manifest, mode, max(0.0, min(volume, 2.0)))
+            clamp = lambda v: max(0.0, min(v, 2.0))  # noqa: E731
+            sounds = cls(directory, manifest, mode, clamp(volume), None if speech_volume is None else clamp(speech_volume))
         except Exception as e:  # noqa: BLE001 - a broken manifest must never stop the robot starting
             logger.warning("Clip sounds: could not read %s (%s) - clips stay silent.", manifest_path, e)
             return None
-        logger.info("Clip sounds: %d clips with sounds, mode '%s', volume %.2f.", len(sounds._clips), mode, sounds.volume)
+        logger.info("Clip sounds: %d clips with sounds, mode '%s', volume %.2f alone / %.2f under speech.",
+                    len(sounds._clips), mode, sounds.volume, sounds.speech_volume)
         return sounds
 
     # ---- what plays ----------------------------------------------------------------
@@ -193,7 +197,7 @@ class ClipSounds:
             end = start + len(x)
             if end > len(mix):
                 mix = np.concatenate([mix, np.zeros(end - len(mix), dtype=np.float32)])
-            mix[start:end] += x * (self.volume * e.volume)
+            mix[start:end] += x * ((self.speech_volume if speech is not None else self.volume) * e.volume)
             added += 1
         if not added:
             return None
