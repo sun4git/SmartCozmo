@@ -82,7 +82,10 @@ def step1_listing(sound_dir: Path) -> None:
     print(f"   top level ({len(top)} entries): {', '.join(top[:25])}{' ...' if len(top) > 25 else ''}")
     zips = [str(p.relative_to(sound_dir)) for p in sound_dir.rglob("*.zip")]
     if zips:
-        print(f"   NOT EXTRACTED? zip files still present: {', '.join(zips)}")
+        extracted = count.get(".wem", 0) > 0
+        print(f"   zip still present: {', '.join(zips)}" + (
+            " (already extracted - the .wem/.bnk files above came from it; the zip is the downloader's leftover)"
+            if extracted else " - and no .wem files: it may NOT have been extracted"))
     print()
 
 
@@ -130,11 +133,18 @@ def resolve_event(info: dict, loaded: dict, sound_dir: Path, event_id: int) -> s
     if not isinstance(bank_info, sbi.SoundBankInfo):
         return "bank unknown"
     if bank_info.id not in loaded:
-        path = sound_dir / bank_info.path
+        # The XML was written on Windows: its paths may use backslashes, which
+        # Path() on Linux would treat as part of the file name.
+        rel = bank_info.path.replace("\\", "/")
+        path = sound_dir / rel
         if not path.exists():
-            hits = list(sound_dir.rglob(Path(bank_info.path).name))
+            hits = list(sound_dir.rglob(rel.rsplit("/", 1)[-1]))
             if not hits:
-                loaded[bank_info.id] = f"no file named {Path(bank_info.path).name} under {sound_dir} (looked for {path})"
+                loaded[bank_info.id] = (
+                    f"no file named {rel.rsplit('/', 1)[-1]} under {sound_dir} "
+                    f"(XML path {bank_info.path!r}; .bnk files present: "
+                    f"{', '.join(sorted(p.name for p in sound_dir.rglob('*.bnk'))) or 'none'})"
+                )
                 return f"bank {bank_info.name} not readable ({loaded[bank_info.id]})"
             path = hits[0]
         try:
@@ -199,6 +209,12 @@ def main() -> int:
         print(f"   no audio keyframes: {', '.join(silent)}")
     print(f"\n== 4. Of the events used by these clips: {direct} lead straight to a sound file, "
           f"{other} do not (container, missing, or unreadable).")
+    reasons = Counter(
+        line.rstrip("\n").split("\t")[-1] for line in OUT.open(encoding="utf-8").readlines()[1:]
+        if "SFX file" not in line
+    )
+    for reason, n in reasons.most_common(4):
+        print(f"   {n:4d} x {reason}")
     print(f"\nWrote {OUT}")
     return 0
 

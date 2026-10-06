@@ -158,15 +158,22 @@ def build_tools(
         # movement never actually happened together despite gesture()
         # itself being non-blocking. This guarantees the order instead.
         def start_gesture() -> str:
-            if settings.gesture_async_enabled:
-                description = robot.run_gesture_async(gesture)
-                return f" while performing '{gesture}' ({description})"
-            # Same fallback GESTURE_ASYNC_ENABLED=false gives the
-            # standalone `gesture` tool: fully sequential, gesture
-            # finishes before speech starts either way, regardless of
-            # GESTURE_SPEECH_SYNC_ENABLED below.
-            description = robot.run_gesture(gesture)
-            return f" after performing '{gesture}' ({description})"
+            try:
+                if settings.gesture_async_enabled:
+                    description = robot.run_gesture_async(gesture)
+                    return f" while performing '{gesture}' ({description})"
+                # Same fallback GESTURE_ASYNC_ENABLED=false gives the
+                # standalone `gesture` tool: fully sequential, gesture
+                # finishes before speech starts either way, regardless of
+                # GESTURE_SPEECH_SYNC_ENABLED below.
+                description = robot.run_gesture(gesture)
+                return f" after performing '{gesture}' ({description})"
+            except ValueError as e:
+                # Seen on the robot: gesture='embarrassed' (a mood-like word,
+                # not in the enum) failed the whole `say` before a word was
+                # spoken, costing a retry round trip. The speech matters more
+                # than the flourish: skip the gesture and say so.
+                return f" (no gesture: {e})"
 
         gesture_note = ""
         # Default: start the gesture immediately, before synthesis - Cozmo

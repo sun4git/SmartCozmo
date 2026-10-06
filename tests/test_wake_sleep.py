@@ -47,8 +47,8 @@ def make(animations=True, fire_completion=True, **overrides):
     r, cli = make_robot(**overrides)
     r._animations_loaded = animations
     names = (clips.WAKE_CLIP,) + clips.SLEEP_CLIPS
-    cli._clip_metadata = {n: NS(has_lift_height_track=True, fspec="x") for n in names}
-    cli._clip_metadata["anim_no_lift"] = NS(has_lift_height_track=False, fspec="x")
+    cli._clip_metadata = {n: NS(has_lift_height_track=True, has_backpack_lights_track=True, fspec="x") for n in names}
+    cli._clip_metadata["anim_no_lift"] = NS(has_lift_height_track=False, has_backpack_lights_track=False, fspec="x")
     cli._clips = {}
     cli._ppclips = {n: fake_ppclip() for n in cli._clip_metadata}
     cli.get_anim_names = lambda: set(cli._clip_metadata)
@@ -217,7 +217,7 @@ class FakeClient(FakeCli):
         self.face = kw.get("enable_procedural_face", True)
         events.append(("init", dict(kw)))
         names = (clips.WAKE_CLIP,) + clips.SLEEP_CLIPS
-        self._clip_metadata = {n: NS(has_lift_height_track=False, fspec="x") for n in names}
+        self._clip_metadata = {n: NS(has_lift_height_track=False, has_backpack_lights_track=False, fspec="x") for n in names}
         self._clips, self._ppclips = {}, {n: fake_ppclip() for n in names}
         self.animation_groups = {}
         self.handlers = []

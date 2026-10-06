@@ -87,6 +87,10 @@ _CLIFF_POLL_S = 0.05
 # how long past the clip's own length to keep waiting before giving up.
 _CLIP_COMPLETION_SLACK_S = 5.0
 
+# With speech merged into a clip, how long past its computed length to still wait
+# for the robot's completion events before going by the clock.
+_CLIP_END_GRACE_S = 1.0
+
 # go_to_sleep(): the second clip (the long "sleeping" loop) is only watched for
 # this long, then left running while shutdown carries on (the end-of-run memory
 # check etc.), so a quick Ctrl+C isn't held up for the whole loop.
@@ -1240,24 +1244,50 @@ class PyCozmoRobot(RobotBackend):
         # Head/lift motion reads as a tap to the accelerometer, same as a
         # gesture's own head and lift steps.
         self._suppress_taps(duration)
+        t0 = time.monotonic()
+        stamps: dict[str, float] = {}
+
+        def mark(name: str, event: threading.Event):
+            return lambda *_: (stamps.setdefault(name, time.monotonic() - t0), event.set())
+
         clip_done = threading.Event()
-        cli.add_handler(pycozmo.event.EvtAnimationCompleted, lambda *_: clip_done.set(), one_shot=True)
+        cli.add_handler(pycozmo.event.EvtAnimationCompleted, mark("clip", clip_done), one_shot=True)
         speech_done = threading.Event()
         if speech:
-            cli.add_handler(pycozmo.event.EvtAudioCompleted, lambda *_: speech_done.set(), one_shot=True)
+            cli.add_handler(pycozmo.event.EvtAudioCompleted, mark("audio", speech_done), one_shot=True)
             clips.play_with_audio(cli, ppclip, speech)
         else:
             cli.play_anim_ppclip(ppclip)
 
-        timeout = max(duration, speech_s) + _CLIP_COMPLETION_SLACK_S
+        expected = max(duration, speech_s)
+        timeout = expected + _CLIP_COMPLETION_SLACK_S
         if max_wait_s is not None and max_wait_s < timeout:
             clip_done.wait(max_wait_s)  # deliberately cut short - not a missing event
             return
-        deadline = time.monotonic() + timeout
-        if not clip_done.wait(timeout):
+        if speech:
+            # With speech merged in, the robot's "animation completed" event
+            # was seen NOT to arrive (a 4.3 s clip waited the full 9.3 s timeout
+            # before every reply), so here the events only end the wait early:
+            # we know how long this takes (frames queued / 30 fps), so don't
+            # wait past that plus a short grace.
+            deadline = t0 + expected + _CLIP_END_GRACE_S
+            clip_done.wait(max(0.0, deadline - time.monotonic()))
+            speech_done.wait(max(0.0, deadline - time.monotonic()))
+            logger.info(
+                "Clip '%s' + speech ended: expected %.1fs, animation-completed event %s, audio-completed event %s.",
+                clip, expected,
+                f"after {stamps['clip']:.1f}s" if "clip" in stamps else "never seen",
+                f"after {stamps['audio']:.1f}s" if "audio" in stamps else "never seen",
+            )
+        elif not clip_done.wait(timeout):
             logger.warning("No completion event for animation '%s' after %.1fs.", clip, timeout)
-        if speech and not speech_done.wait(max(0.0, deadline - time.monotonic())):
-            logger.warning("No audio-completed event after speaking over clip '%s'.", clip)
+        if cli._clip_metadata[clip].has_backpack_lights_track:
+            # A clip with a lights track writes its own colours and switches
+            # them off at the end. Confirmed on the robot: the listening blink
+            # was gone after such a clip while he was still listening - the
+            # app set it once and (rightly, by its own state) never re-sends it.
+            with self._light_lock:
+                self._send_backpack_light()
         if cli._clip_metadata[clip].has_lift_height_track:
             self.lower_lift_fully()
 
@@ -1274,6 +1304,7 @@ class PyCozmoRobot(RobotBackend):
         """Speak while a real clip plays (CLIP_SPEECH_OVERLAP) - or the clip
         right after the speech when that's off. If the clip can't be played
         for any reason, the speech still is: it is never lost to a clip."""
+        started = time.monotonic()
         try:
             clip_id = self._resolve_clip(clip)
             ppclip = self._prepared_clip(clip_id)
@@ -1282,11 +1313,19 @@ class PyCozmoRobot(RobotBackend):
             logger.warning("Could not prepare clip '%s' (%s) - speaking without it.", clip, e)
             self.say_wav(wav_path)
             return
+        prepared = time.monotonic() - started
         if speech is None:
             self.say_wav(wav_path)
             self._play_ppclip(clip_id, ppclip)
         else:
             self._play_ppclip(clip_id, ppclip, speech=speech)
+        # Where the time went, for judging whether a clip makes a reply feel slow.
+        logger.info(
+            "Clip '%s' with speech: prepared in %.2fs (clip %.1fs, speech %.1fs, %s) - total %.1fs.",
+            clip_id, prepared, clips.ppclip_duration_s(ppclip),
+            len(speech) / pycozmo.robot.FRAME_RATE if speech else 0.0,
+            "overlapped" if speech else "speech then clip", time.monotonic() - started,
+        )
 
     def wake_up(self) -> None:
         if self.clips_available() and self._settings.wake_sleep_clips:

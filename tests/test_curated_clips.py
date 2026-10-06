@@ -67,7 +67,7 @@ def fake_ppclip():
 def make(**overrides):
     r, cli = make_robot(**overrides)
     r._animations_loaded = True
-    cli._clip_metadata = {c.clip: NS(has_lift_height_track=True, fspec="x") for c in CURATED.values()}
+    cli._clip_metadata = {c.clip: NS(has_lift_height_track=True, has_backpack_lights_track=True, fspec="x") for c in CURATED.values()}
     cli._clips = {}
     cli._ppclips = {c.clip: fake_ppclip() for c in CURATED.values()}
     cli.get_anim_names = lambda: set(cli._clip_metadata)
@@ -140,6 +140,36 @@ n_audio = sum(1 for e in frames if e[1] is not None)
 check(f"speech shorter than the clip -> audio only in the first {n_audio} frames, silence after, nothing queued extra",
       0 < n_audio < len(frames) and not any(e[0] == "audio" for e in cli.log))
 
+# Seen on the robot: with speech merged in, the robot's "animation completed" event did not
+# always arrive, and every reply then waited out clip length + the full slack (9+ s).
+# Merged playback must go by the clock (expected length + a short grace) instead.
+real._CLIP_COMPLETION_SLACK_S = 5.0
+real._CLIP_END_GRACE_S = 0.2
+r, cli = make()          # no events are ever fired
+t0 = time.monotonic()
+r.say_wav_with_clip(wav_short, chicken)
+took = time.monotonic() - t0
+check(f"merged clip, completion events never arrive: returns after ~expected length, not the 5s slack ({took:.1f}s)", took < 2.5)
+check("...and still lowers the lift afterwards", ("lift", 0.0) in cli.calls)
+real._CLIP_COMPLETION_SLACK_S = 0.3
+real._CLIP_END_GRACE_S = 1.0
+
+# A clip's own lights track overwrites the backpack light and switches it off at its end. Seen on the
+# robot: the blinking "listening" light never came back after such a clip. It must be re-sent.
+r, cli = make()
+fire_when_frames_queued(cli)
+r._listening_light = True
+r._light_color = "off"
+cli.calls.clear()
+r.say_wav_with_clip(wav_short, chicken)
+lights = [c for c in cli.calls if c[0] == "lights"]
+check("clip with a lights track: the listening blink is re-sent afterwards",
+      lights and lights[-1][3] == real._BLINK_ON_FRAMES and lights[-1][4] == real._BLINK_OFF_FRAMES)
+cli._clip_metadata[chicken].has_backpack_lights_track = False
+cli.calls.clear(); cli.log.clear()
+r.say_wav_with_clip(wav_short, chicken)
+check("clip without a lights track: lights are left alone", not [c for c in cli.calls if c[0] == "lights"])
+
 # overlap off: the speech is spoken normally, THEN the clip
 r, cli = make(clip_speech_overlap=False)
 r.say_wav_with_clip(wav_short, chicken)
@@ -180,8 +210,14 @@ class Sim(SimulatedRobot):
     def say_wav(self, path): self.events.append(("say_wav", path))
     def say_wav_with_clip(self, path, clip): self.events.append(("say_with_clip", clip))
     def play_animation(self, name, **kw): self.events.append(("play", name))
-    def run_gesture(self, name, **kw): self.events.append(("gesture", name)); return "desc"
-    def run_gesture_async(self, name): self.events.append(("gesture_async", name)); return "desc"
+    def run_gesture(self, name, **kw):
+        if name not in GESTURES:
+            raise ValueError(f"Unknown gesture '{name}'. Known gestures: {', '.join(sorted(GESTURES))}")
+        self.events.append(("gesture", name)); return "desc"
+    def run_gesture_async(self, name):
+        if name not in GESTURES:
+            raise ValueError(f"Unknown gesture '{name}'. Known gestures: {', '.join(sorted(GESTURES))}")
+        self.events.append(("gesture_async", name)); return "desc"
 
 
 class Speech:
@@ -244,6 +280,13 @@ check("clips unavailable: say still speaks, tells the model the clip was skipped
       res.ok and ("say_wav", "/tmp/x.wav") in sim.events and "unavailable" in res.message)
 res = tools["gesture"].handler({"name": "yes"})
 check("clips unavailable: standalone clip reports it didn't play", not res.ok)
+
+# A made-up gesture name must not cost the whole reply (seen: gesture='embarrassed').
+sim.available = True
+sim.events.clear()
+res = tools["say"].handler({"text": "Oops!", "mood": "embarrassed", "gesture": "embarrassed"})
+check("say with an unknown gesture still speaks, and says the gesture was skipped",
+      res.ok and ("say_wav", "/tmp/x.wav") in sim.events and "no gesture" in res.message)
 
 # CLIPS_ENABLED=false: none of it is offered
 sim2 = Sim()
