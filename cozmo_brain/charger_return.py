@@ -96,60 +96,76 @@ class ChargerReturner:
         elif self._low_streak >= _CONFIRM_READINGS and not self._low_handled and not self._critical_handled:
             self._handle_low(voltage)
 
+    # Both handlers mark the level handled first, then go through
+    # engine.run_unprompted(): inside a --mode vad listening window the
+    # speech/drive is queued to run between recordings instead of into one
+    # (spoken straight into an open recording, the offer would come back
+    # from STT as the human's own words). Only a turn
+    # that didn't finish within _TURN_WAIT_S un-marks it, to retry at the
+    # next check.
+
     def _handle_low(self, voltage: float) -> None:
-        if not self._engine.turn_lock.acquire(timeout=_TURN_WAIT_S):
+        self._low_handled = True
+        if not self._engine.run_unprompted(lambda: self._low(voltage), _TURN_WAIT_S):
+            self._low_handled = False
             logger.info("Conversation turn still running - will retry the low-battery offer next check.")
+
+    def _low(self, voltage: float) -> None:
+        """Caller holds turn_lock."""
+        if self._robot.is_on_charger():  # put back while this waited for a window's gap
+            logger.info("Back on the charger before the low-battery offer - not making it.")
             return
-        try:
-            self._low_handled = True
-            if not self._robot.has_charger_pose():
-                self._ask_for_help(voltage)
-                return
-            logger.info("Battery low (%.2fV) - offering to return to the charger.", voltage)
-            with self._robot.keep_backpack_light():  # usually idle (off) - don't leave it lit
-                self._engine.speak(_OFFER_TEXT, mood="sleepy")
-            self._engine.add_note(
-                f"[Battery low ({voltage:.2f}V). I said this out loud on my own, not in reply to "
-                f"anything: \"{_OFFER_TEXT}\" If they agree, call the dock tool.]"
-            )
-            # A yes/no question: listen for the answer without the wake word.
-            self._engine.request_listen()
-        finally:
-            self._engine.turn_lock.release()
+        if not self._robot.has_charger_pose():
+            self._ask_for_help(voltage)
+            return
+        logger.info("Battery low (%.2fV) - offering to return to the charger.", voltage)
+        with self._robot.keep_backpack_light():  # usually idle (off) - don't leave it lit
+            self._engine.speak(_OFFER_TEXT, mood="sleepy")
+        self._engine.add_note(
+            f"[Battery low ({voltage:.2f}V). I said this out loud on my own, not in reply to "
+            f"anything: \"{_OFFER_TEXT}\" If they agree, call the dock tool.]"
+        )
+        # A yes/no question: listen for the answer without the wake word.
+        self._engine.request_listen()
 
     def _handle_critical(self, voltage: float) -> None:
-        if not self._engine.turn_lock.acquire(timeout=_TURN_WAIT_S):
+        was_low_handled = self._low_handled
+        self._critical_handled = True
+        self._low_handled = True
+        if not self._engine.run_unprompted(lambda: self._critical(voltage), _TURN_WAIT_S):
+            self._critical_handled = False
+            self._low_handled = was_low_handled
             logger.info("Conversation turn still running - will retry the critical-battery return next check.")
-            return
-        try:
-            self._critical_handled = True
-            self._low_handled = True
-            if not self._robot.has_charger_pose():
-                self._ask_for_help(voltage)
-                return
 
-            logger.warning("Battery critical (%.2fV) - returning to the charger on my own.", voltage)
-            with self._robot.keep_backpack_light():
-                self._engine.speak(_GOING_TEXT, mood="sleepy")
-            if self._battery_log is not None:
-                self._battery_log.note_return("critical")
-            try:
-                result = self._robot.return_to_charger()
-                outcome = charger_return_message(result)
-                succeeded = result.completed
-            except Exception as e:  # noqa: BLE001 - a failed return must still end in asking for help
-                logger.warning("Autonomous return to charger failed: %s", e)
-                outcome = f"Didn't make it onto the charger - {e}."
-                succeeded = False
-            logger.info("Autonomous return to charger: %s", outcome)
-            self._engine.add_note(
-                f"[Battery critical ({voltage:.2f}V). I said \"{_GOING_TEXT}\" and drove back to my "
-                f"charger on my own. Result: {outcome}]"
-            )
-            if not succeeded:
-                self._ask_for_help(voltage)
-        finally:
-            self._engine.turn_lock.release()
+    def _critical(self, voltage: float) -> None:
+        """Caller holds turn_lock."""
+        if self._robot.is_on_charger():  # put back while this waited for a window's gap
+            logger.info("Back on the charger before the critical-battery return - nothing to do.")
+            return
+        if not self._robot.has_charger_pose():
+            self._ask_for_help(voltage)
+            return
+
+        logger.warning("Battery critical (%.2fV) - returning to the charger on my own.", voltage)
+        with self._robot.keep_backpack_light():
+            self._engine.speak(_GOING_TEXT, mood="sleepy")
+        if self._battery_log is not None:
+            self._battery_log.note_return("critical")
+        try:
+            result = self._robot.return_to_charger()
+            outcome = charger_return_message(result)
+            succeeded = result.completed
+        except Exception as e:  # noqa: BLE001 - a failed return must still end in asking for help
+            logger.warning("Autonomous return to charger failed: %s", e)
+            outcome = f"Didn't make it onto the charger - {e}."
+            succeeded = False
+        logger.info("Autonomous return to charger: %s", outcome)
+        self._engine.add_note(
+            f"[Battery critical ({voltage:.2f}V). I said \"{_GOING_TEXT}\" and drove back to my "
+            f"charger on my own. Result: {outcome}]"
+        )
+        if not succeeded:
+            self._ask_for_help(voltage)
 
     def _ask_for_help(self, voltage: float) -> None:
         """Caller holds turn_lock."""

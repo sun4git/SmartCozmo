@@ -158,6 +158,10 @@ def run(engine: CozmoEngine, robot: RobotBackend, speech: SpeechClient, settings
         finally:
             engine.set_listening_window(False)
             engine.session_event("session_end")
+        # Anything queued for "between recordings" just as the window closed
+        # (a Sunny answer, the battery offer) runs now, before the wake word
+        # listens again - otherwise it would wait for the next window.
+        engine.deliver_announcements()
 
 
 def _run_listening_window(

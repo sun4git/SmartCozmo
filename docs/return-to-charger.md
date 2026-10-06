@@ -182,7 +182,16 @@
        that fails partway, he asks once per episode to be put on the
        charger. Speech and driving take a new `CozmoEngine.turn_lock`
        (held for all of `handle_turn()`), so this never talks over a reply
-       in progress or edits the conversation mid-turn.
+       in progress or edits the conversation mid-turn. And never into an
+       open `--mode vad` recording either (`CozmoEngine.run_unprompted()`):
+       inside a listening window the offer/return waits for the gap between
+       recordings - a recording nobody has started talking in is stopped
+       for it, one capturing someone talking is not - the same way the
+       assistant's background answers are delivered. Before that, the
+       offer could be spoken straight into the mic and come back from
+       speech-to-text as the human's own words; more likely since
+       `BATTERY_CHECK_INTERVAL_S` went to 15s. A queued offer is dropped if
+       he's back on the charger by the time it would run.
        `AUTO_RETURN_TO_CHARGER_ENABLED=false` turns all of this off.
      - **`dock` tool** now navigates first whenever a valid charger
        location is known, and otherwise falls back to the plain blind

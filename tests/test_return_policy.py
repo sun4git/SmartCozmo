@@ -63,6 +63,17 @@ class FakeEngine:
     def request_listen(self):
         self.listen_requests += 1
 
+    def run_unprompted(self, action, wait_s):
+        # The real engine's behavior outside a listening window (inside one
+        # it queues - see test_speak_up_listen.py).
+        if not self.turn_lock.acquire(timeout=wait_s):
+            return False
+        try:
+            action()
+        finally:
+            self.turn_lock.release()
+        return True
+
     def speak(self, text, mood="neutral"):
         self.said.append(text)
         return True

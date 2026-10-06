@@ -134,13 +134,16 @@ class CozmoEngine:
         # is the reply itself.
         self.log_steps_live = False
         self._followup_thread: threading.Thread | None = None
-        # Things Cozmo should speak up about on his own, each delivered as a
-        # short turn (deliver_announcements()) - today the answers to
-        # background ask_assistant requests (assistant_relay.py).
-        # announce_event is set while any are waiting: --mode vad stops a
-        # recording for it only if no speech has started yet.
+        # Things Cozmo does on his own that are waiting to run, so they
+        # never land in an open --mode vad recording: answers to background
+        # ask_assistant requests (queue_announcement(), one turn each) and,
+        # inside a listening window, the battery offer/return
+        # (run_unprompted()). Run by deliver_announcements(). announce_event
+        # is set while any are waiting: --mode vad stops a recording for it
+        # only if no speech has started yet. _announce_lock also guards
+        # listening_window_open, so "window open? then queue" is atomic.
         self.announce_event = threading.Event()
-        self._announcements: list[tuple[str, str | None]] = []
+        self._announcements: list[Callable[[], None]] = []
         self._announce_lock = threading.Lock()
         # Set by request_listen() when Cozmo has just spoken up on his own
         # with something that wants an answer, outside a listening window:
@@ -163,7 +166,8 @@ class CozmoEngine:
         also counts as activity for idle_fidget.py, so a fidget waits a full
         IDLE_FIDGET_AFTER_S after the window, rather than firing the instant
         a long wordless window (e.g. a false activation) ends."""
-        self.listening_window_open = is_open
+        with self._announce_lock:
+            self.listening_window_open = is_open
         if not is_open:
             self.last_interaction_monotonic = time.monotonic()
 
@@ -180,34 +184,62 @@ class CozmoEngine:
         that turn can't get a `say` out, even after a retry. Safe from any
         thread."""
         with self._announce_lock:
-            self._announcements.append((note, fallback))
+            self._announcements.append(lambda: self._deliver_note(note, fallback))
             self.announce_event.set()
 
-    def deliver_announcements(self) -> bool:
-        """Run one turn per queued note (the note stands in for the user's
-        words). Takes turn_lock through handle_turn(), so it waits for any
-        turn in progress. Returns whether there was anything to deliver."""
+    def run_unprompted(self, action: Callable[[], None], wait_s: float) -> bool:
+        """Run `action` - speech/driving Cozmo starts on his own - holding
+        turn_lock, but never into an open --mode vad recording: inside a
+        listening window it's queued for the vad loop, which runs it between
+        recordings (one nobody has started talking in is stopped for it),
+        and this returns True at once. Otherwise it runs now, after waiting
+        up to `wait_s` for a turn in progress; False if that timed out."""
+        def locked() -> None:
+            with self.turn_lock:
+                action()
         with self._announce_lock:
-            notes, self._announcements = self._announcements, []
+            if self.listening_window_open:
+                self._announcements.append(locked)
+                self.announce_event.set()
+                return True
+        if not self.turn_lock.acquire(timeout=wait_s):
+            return False
+        try:
+            action()
+        finally:
+            self.turn_lock.release()
+        return True
+
+    def deliver_announcements(self) -> bool:
+        """Run everything queued (queue_announcement(), run_unprompted()),
+        in order. Returns whether there was anything."""
+        with self._announce_lock:
+            items, self._announcements = self._announcements, []
             self.announce_event.clear()
-        for note, fallback in notes:
-            logger.info("Speaking up on my own: %s", note)
-            if self._announce_turn(note):
-                continue
+        for item in items:
+            try:
+                item()
+            except Exception:  # noqa: BLE001 - one failure mustn't drop the rest or end the vad loop
+                logger.exception("Something Cozmo was going to do on his own failed.")
+        return bool(items)
+
+    def _deliver_note(self, note: str, fallback: str | None) -> None:
+        """One turn for a queued note (it stands in for the user's words),
+        retried once, then `fallback` said word for word. Takes turn_lock
+        through handle_turn(), so it waits for any turn in progress."""
+        logger.info("Speaking up on my own: %s", note)
+        if not self._announce_turn(note):
             logger.warning("Nothing was said for that - trying again in %.0fs.", _ANNOUNCE_RETRY_S)
             time.sleep(_ANNOUNCE_RETRY_S)
-            if self._announce_turn(note):
-                continue
-            if fallback:
+            if not self._announce_turn(note) and fallback:
                 logger.warning("Still nothing said - saying it directly instead: %s", fallback)
                 with self.turn_lock:
                     if self.speak(fallback):
                         self.add_note(f"[I said this out loud:] {fallback}")
-        if notes:
-            # Delivered outside a window (by assistant_relay.py's thread):
-            # let them reply without the wake word.
-            self.request_listen()
-        return bool(notes)
+        # Delivered outside a window (assistant_relay.py's thread, or the
+        # vad loop just after one closed): let them reply without the wake
+        # word. No-op inside one.
+        self.request_listen()
 
     def _announce_turn(self, note: str) -> bool:
         """One turn for a queued note; whether a `say` succeeded in it."""

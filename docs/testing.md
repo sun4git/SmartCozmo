@@ -39,7 +39,9 @@ session `user` field, failures, waiting for the answer, and background
 answers delivered on their own (with the retry and word-for-word fallback
 when the chat model fails), including only stopping a vad recording
 nobody is talking in (`test_assistant`), and the short no-wake-word
-window after Cozmo speaks up on his own (`test_speak_up_listen`),
+window after Cozmo speaks up on his own, plus the battery offer/return
+waiting for the gap between recordings instead of speaking into one
+(`test_speak_up_listen`),
 `dock()` stopping on contact, holding the charger heading, stopping when a
 tread catches and retrying a miss (`test_dock_contact`,
 `test_dock_heading_hold`), the background connection check

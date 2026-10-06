@@ -63,6 +63,19 @@ class E:
     def add_note(self, text):
         self.notes.append(text)
 
+    def request_listen(self):
+        pass
+
+    def run_unprompted(self, action, wait_s):
+        # The real engine outside a listening window (charger_return.py).
+        if not self.turn_lock.acquire(timeout=wait_s):
+            return False
+        try:
+            action()
+        finally:
+            self.turn_lock.release()
+        return True
+
 
 def make(robot=None, **over):
     s = dataclasses.replace(
