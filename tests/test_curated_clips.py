@@ -156,21 +156,17 @@ check("...and still lowers the lift afterwards", ("lift", 0.0) in cli.calls)
 real._CLIP_COMPLETION_SLACK_S = 0.3
 real._CLIP_END_GRACE_S = 1.0
 
-# A clip's own lights track overwrites the backpack light and switches it off at its end. Seen on the
-# robot: the blinking "listening" light never came back after such a clip. It must be re-sent.
+# Seen on the robot: after a clip with its own lights track played with audio merged in, the backpack
+# light ignored the app for the rest of the run. Clips' light commands are stripped, so a clip -
+# even one with a lights track - neither sends its own nor needs the app's light re-sent.
 r, cli = make()
 fire_when_frames_queued(cli)
 r._listening_light = True
-r._light_color = "off"
 cli.calls.clear()
 r.say_wav_with_clip(wav_short, chicken)
-lights = [c for c in cli.calls if c[0] == "lights"]
-check("clip with a lights track: the listening blink is re-sent afterwards",
-      lights and lights[-1][3] == real._BLINK_ON_FRAMES and lights[-1][4] == real._BLINK_OFF_FRAMES)
-cli._clip_metadata[chicken].has_backpack_lights_track = False
-cli.calls.clear(); cli.log.clear()
-r.say_wav_with_clip(wav_short, chicken)
-check("clip without a lights track: lights are left alone", not [c for c in cli.calls if c[0] == "lights"])
+sent = [type(p).__name__ for e in cli.log if e[0] == "frame" for p in (e[3] or ())]
+check("a clip with a lights track sends no light commands of its own, and the app's light is left alone",
+      "AnimBackpackLights" not in sent and not [c for c in cli.calls if c[0] == "lights"])
 
 # Seen after that: with speech merged in, only the AUDIO-completed event arrives (right at the end of
 # the speech); the animation-completed one never does. The reply must not sit out the grace for it.

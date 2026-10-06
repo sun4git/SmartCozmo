@@ -1211,7 +1211,7 @@ class PyCozmoRobot(RobotBackend):
             if group_name not in cli.animation_groups:
                 raise ValueError(f"Unknown animation group '{group_name}'. Call list_animations() first.")
             clip = cli.animation_groups[group_name].choose_member().name
-            logger.info("Animation group '%s' -> clip '%s'.", group_name, clip)
+            logger.debug("Animation group '%s' -> clip '%s'.", group_name, clip)
             return clip
         if name not in cli.get_anim_names():
             raise ValueError(f"Unknown animation '{name}'. Call list_animations() first.")
@@ -1269,21 +1269,9 @@ class PyCozmoRobot(RobotBackend):
             return lambda *_: (stamps.setdefault(name, time.monotonic() - t0), event.set())
 
         if self._robot_is_animating():
-            logger.info("The robot still reports it is animating before clip '%s' starts.", clip)
+            logger.debug("The robot still reports it is animating before clip '%s' starts.", clip)
         clip_done = threading.Event()
         cli.add_handler(pycozmo.event.EvtAnimationCompleted, mark("clip", clip_done), one_shot=True)
-        if speech:
-            # What the robot itself sends back, to see why the animation-completed
-            # event never comes with audio merged in (see the wait below).
-            for packet, label in ((pycozmo.protocol_encoder.AnimationStarted, "started"),
-                                  (pycozmo.protocol_encoder.AnimationEnded, "ended")):
-                cli.add_handler(
-                    packet,
-                    lambda _cli, pkt, label=label: logger.info(
-                        "Robot sent AnimationEnded/Started packet: animation %s (id %s) %.2fs into clip '%s'.",
-                        label, getattr(pkt, "anim_id", "?"), time.monotonic() - t0, clip),
-                    one_shot=True,
-                )
         speech_done = threading.Event()
         if speech:
             cli.add_handler(pycozmo.event.EvtAudioCompleted, mark("audio", speech_done), one_shot=True)
@@ -1297,20 +1285,15 @@ class PyCozmoRobot(RobotBackend):
             clip_done.wait(max_wait_s)  # deliberately cut short - not a missing event
             return
         if speech:
-            # With speech merged in, the robot's "animation completed" event
-            # was seen NOT to arrive (a 4.3 s clip waited the full 9.3 s timeout
-            # before every reply), so here the events only end the wait early:
-            # we know how long this takes (frames queued / 30 fps), so don't
-            # wait past that plus a short grace.
-            # Seen on the robot since: the animation-completed event is never
-            # seen with speech merged in (even when the speech outlasts the
-            # clip), while the audio-completed one arrives right at the end of
-            # the speech. So: wait for that (the grace only covers it going
-            # missing too), then for the clip's own end by the clock - the
-            # animation event, if it ever does come, just ends that wait early.
+            # Seen on the robot: with audio merged in, the "animation completed"
+            # event never arrives (waiting for it stalled every reply by the full
+            # timeout), while "audio completed" arrives right at the end of the
+            # audio. So wait for that (the grace only covers it going missing too),
+            # then for the clip's own end by the clock (frames queued / 30 fps);
+            # the animation event, if it ever comes, just ends that wait early.
             speech_done.wait(max(0.0, t0 + expected + _CLIP_END_GRACE_S - time.monotonic()))
             clip_done.wait(max(0.0, t0 + duration + _CLIP_TAIL_S - time.monotonic()))
-            logger.info(
+            logger.debug(
                 "Clip '%s' + speech ended: expected %.1fs, animation-completed event %s, audio-completed event %s.",
                 clip, expected,
                 f"after {stamps['clip']:.1f}s" if "clip" in stamps else "never seen",
@@ -1320,17 +1303,8 @@ class PyCozmoRobot(RobotBackend):
             logger.warning("No completion event for animation '%s' after %.1fs.", clip, timeout)
         if speech and "clip" not in stamps:
             self._settle_animation(clip)
-        if cli._clip_metadata[clip].has_backpack_lights_track:
-            # A clip with a lights track writes its own colours and switches
-            # them off at the end. Confirmed on the robot: the listening blink
-            # was gone after such a clip while he was still listening - the
-            # app set it once and (rightly, by its own state) never re-sends it.
-            with self._light_lock:
-                self._send_backpack_light()
-                logger.info(
-                    "Re-sent the backpack light after clip '%s' (colour %s, listening %s).",
-                    clip, self._light_color, self._listening_light,
-                )
+        # (No backpack-light restore needed: a clip's own light commands are
+        # stripped in _prepared_clip, so it never touches the light.)
         if cli._clip_metadata[clip].has_lift_height_track:
             self.lower_lift_fully()
 
@@ -1350,12 +1324,12 @@ class PyCozmoRobot(RobotBackend):
         before = self._robot_is_animating()
         self._end_animation(clip)
         if not before:
-            logger.info("Clip '%s': the robot did not report itself animating afterwards.", clip)
+            logger.debug("Clip '%s': the robot did not report itself animating afterwards.", clip)
             return
         time.sleep(0.15)  # let a fresh status packet arrive
         after_end = self._robot_is_animating()
         if not after_end:
-            logger.info("Clip '%s': the robot reported animating after the clip, and stopped after EndAnimation.", clip)
+            logger.debug("Clip '%s': the robot reported animating after the clip, and stopped after EndAnimation.", clip)
             return
         cli = self._client
         ended = threading.Event()
@@ -1383,13 +1357,13 @@ class PyCozmoRobot(RobotBackend):
         # confirmation, if it comes, logs itself. No "confirmed" line = it didn't.
         cli.add_handler(
             pycozmo.event.EvtAnimationCompleted,
-            lambda *_: logger.info(
+            lambda *_: logger.debug(
                 "The robot confirmed animation '%s' ended, %.2fs after we sent EndAnimation.", clip, time.monotonic() - sent
             ),
             one_shot=True,
         )
         cli.cancel_anim()
-        logger.info("Sent EndAnimation for '%s' (the robot had not reported it ended).", clip)
+        logger.debug("Sent EndAnimation for '%s' (the robot had not reported it ended).", clip)
 
     def play_animation(self, name: str, *, max_wait_s: float | None = None) -> None:
         """Plays a real clip (or a random member of a `group:` one) and
@@ -1439,7 +1413,7 @@ class PyCozmoRobot(RobotBackend):
         else:
             self._play_ppclip(clip_id, ppclip, speech=speech)
         # Where the time went, for judging whether a clip makes a reply feel slow.
-        logger.info(
+        logger.debug(
             "Clip '%s' with speech: prepared in %.2fs (clip %.1fs, speech %.1fs, %s) - total %.1fs.",
             clip_id, prepared, clips.ppclip_duration_s(ppclip),
             len(speech) / pycozmo.robot.FRAME_RATE if speech else 0.0,
