@@ -132,6 +132,22 @@ def build_tools(
     `presence` (people.py) is told who remember_person/who_is_this
     identify, so the system prompt can use their name."""
     def handle_say(text: str, mood: str = "neutral", gesture: str | None = None) -> ToolResult:
+        # Seen on the robot: mood='thinking' (a clip name, not a mood) failed
+        # the whole `say` before a word was spoken, costing a retry round
+        # trip - the schema enum and the prompt's mood list don't stop it.
+        # Like a bad gesture below, the speech matters more than the face:
+        # a gesture/clip name in the mood slot moves to the empty gesture
+        # slot, and anything else unknown falls back to neutral, with a
+        # note so the model still learns.
+        mood_note = ""
+        if mood and mood.lower() not in MOODS:
+            bad_mood = mood
+            mood = "neutral"
+            if not gesture and (bad_mood in GESTURES or bad_mood in model_clips()):
+                gesture = bad_mood
+                mood_note = f" ('{bad_mood}' is a gesture/clip, not a mood - used it as one, mood neutral)"
+            else:
+                mood_note = f" (unknown mood '{bad_mood}' - used neutral; valid moods: {', '.join(_MOOD_NAMES)})"
         gesture_arg = gesture
         # "neutral" now resets pose (see moods.py) rather than being a
         # no-op, so it must actually run, not be skipped like other moods
@@ -246,7 +262,7 @@ def build_tools(
         if applied_mood is not None and applied_mood.lift_mm is not None:
             robot.lower_lift_fully()
 
-        return ToolResult(True, f"Said (mood={mood}){gesture_note}{clip_note}: {text}")
+        return ToolResult(True, f"Said (mood={mood}){mood_note}{gesture_note}{clip_note}: {text}")
 
     def handle_gesture(name: str) -> ToolResult:
         if name not in GESTURES and name in model_clips():

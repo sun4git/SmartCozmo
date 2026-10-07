@@ -367,6 +367,22 @@ res = tools["say"].handler({"text": "Oops!", "mood": "embarrassed", "gesture": "
 check("say with an unknown gesture still speaks, and says the gesture was skipped",
       res.ok and ("say_wav", "/tmp/x.wav") in sim.events and "no gesture" in res.message)
 
+# Same for a bad mood (seen: mood='thinking', a clip name) - no retry round trip.
+sim.events.clear()
+res = tools["say"].handler({"text": "Hmm.", "mood": "thinking"})
+check("say(mood=clip name, no gesture) speaks with that clip, mood neutral, and says so",
+      res.ok and ("say_with_clip", CURATED["thinking"].clip) in sim.events
+      and "mood=neutral" in res.message and "not a mood" in res.message)
+sim.events.clear()
+res = tools["say"].handler({"text": "Hmm.", "mood": "thinking", "gesture": "chicken"})
+check("say(mood=clip name, gesture given) keeps the given gesture, mood neutral",
+      res.ok and ("say_with_clip", chicken) in sim.events and "mood=neutral" in res.message)
+sim.events.clear()
+res = tools["say"].handler({"text": "Grr.", "mood": "offended"})
+check("say(unknown mood) still speaks with neutral, and lists the valid moods",
+      res.ok and ("say_wav", "/tmp/x.wav") in sim.events and "unknown mood 'offended'" in res.message
+      and "sleepy" in res.message)
+
 # CLIPS_ENABLED=false: none of it is offered
 sim2 = Sim()
 tools2, S2 = tools_for(sim2, clips_enabled=False)

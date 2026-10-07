@@ -199,6 +199,15 @@ fully prevents a recurrence** — it removes the specific prompt wording
 that caused this one and adds a stronger hint, but nothing stops the model
 from inventing a different plausible-sounding word next time; if it
 happens again, that's the next thing to strengthen.
+**It did happen again** (`Unknown mood 'thinking'` — a curated clip name in
+the mood slot, ~1.2s lost to the retry round trip). So `say` no longer
+fails on a bad mood at all, matching how it already treats a bad gesture:
+a gesture/clip name in the mood slot is used as the gesture when none was
+given, anything else unknown falls back to `neutral`, and either way the
+result message tells the model what happened (`tools/registry.py`'s
+`handle_say`). The cost is only cosmetic — a neutral face instead of
+whatever the retry would have picked. Offline-tested only
+(`test_curated_clips.py`, `test_final_say.py`).
 
 **Found on real hardware, froze the whole process, had to be restarted:**
 `aplay` (system-speaker output, `audio/player.py`'s `play_wav()`) hung

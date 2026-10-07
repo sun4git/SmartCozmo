@@ -62,8 +62,14 @@ check(f"drive refused (charger): goes back to model (got {n})", n == 2)
 n, _ = llm_calls([NS(content="", tool_calls=[say("Let me look"), call("look")]), NS(content="", tool_calls=[say("I see a cat")])])
 check(f"say + look, then say: 2 calls - multi-step still works (got {n})", n == 2)
 
+class SpeakerDown(R):
+    def say_wav(self, wav_path): raise RuntimeError("speaker down")
+n, _ = llm_calls([NS(content="", tool_calls=[say()])], robot=SpeakerDown())
+check(f"failed say: goes back to model (got {n})", n >= 2)
+
+# A bad mood no longer fails say (it falls back to neutral), so no retry round trip.
 n, _ = llm_calls([NS(content="", tool_calls=[call("say", text="x", mood="not_a_mood")])])
-check(f"failed say (bad mood): goes back to model (got {n})", n >= 2)
+check(f"say with a bad mood: still 1 call (got {n})", n == 1)
 
 n, _ = llm_calls([NS(content="", tool_calls=[say(), call("gesture", name="peek")])])
 check(f"last call not say: goes back to model (got {n})", n == 2)
