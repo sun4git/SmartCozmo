@@ -41,6 +41,7 @@ annotated list (it's the source of truth). The essentials:
 | `CONNECTION_CHECK_INTERVAL_S` | How often (default 120s) a background check looks for a dropped connection and reconnects, so a drop is caught while Cozmo is idle too, not only before the next tool call. While disconnected it retries every 30s at most. `0` = off. See [Connection and battery](connection-and-battery.md). |
 | `BATTERY_LOW_VOLTAGE` / `BATTERY_CRITICAL_VOLTAGE` | Voltage thresholds for the face battery-warning icon; `BATTERY_LOW_VOLTAGE` also gates whether `drive`/`turn` refuse to move while charging (real backend only). |
 | `BATTERY_CHECK_INTERVAL_S` | How often the battery monitor polls voltage. |
+| `BATTERY_LOG_RETENTION_DAYS` | Days of `data/battery.jsonl` to keep; older records are dropped once at startup (default `90`, `0` = keep everything). Separate from `HISTORY_RETENTION_DAYS`. |
 | `COZMO_WIFI_SSID` / `COZMO_WIFI_PASSWORD` | Optional Wi-Fi auto-connect (Linux/nmcli only). Password only needed for the first connect. |
 | `TURN_SPEED_MMPS` / `TURN_SECONDS_PER_DEGREE` | `turn()` calibration — tune with `--mode calibrate`. |
 | `MAX_DRIVE_SPEED_MMPS` / `MAX_DRIVE_DISTANCE_MM` | Safety clamps on the `drive` tool. |

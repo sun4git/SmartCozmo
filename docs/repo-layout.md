@@ -21,7 +21,7 @@
 ├── data/                    # everything Cozmo saves at runtime (gitignored) - see "Conversation history and memory"
 │   ├── history/<date>/<time>.jsonl   # one transcript per run, photos next to it
 │   ├── memory.md            # facts about people, sent to the model every turn - edit freely
-│   ├── battery.jsonl        # battery events: charge curve + every time off the dock (battery_log.py)
+│   ├── battery.jsonl        # battery events + every reading off the dock (battery_log.py)
 │   ├── known_people/        # remember_person reference photos
 │   └── look.png             # last camera snapshot
 ├── run.sh                   # activates cozmo-env + runs cozmo_brain in one step (./run.sh --help)

@@ -330,18 +330,19 @@ Still open, roughly in priority order:
    day at 9") are more work - start with one-off ones. To brainstorm
    before building: what happens to a missed reminder, whether he repeats
    one until it's acknowledged, and whether quiet hours are needed.
-8. **"Can I come out, and for how long?" from real battery data - planned,
-   data collection only so far.** Today leaving the charger (asked, idle
-   peek, or the charger break) is allowed by one fixed rule: not docked at
-   or below `BATTERY_LOW_VOLTAGE`. A guessed "high enough" voltage was
-   deliberately not added, since the dock reads high and this robot's curve
-   is unknown. Instead `data/battery.jsonl` (`battery_log.py`, see
-   [Coming off the charger](connection-and-battery.md#coming-off-the-charger-battery-line-and-charger-break))
-   records every charge session and every stretch off the dock. To build,
-   once a few stretches have actually reached low:
-   - check the numbers with `python3 standalone/battery_report.py`, then
-     decide the rule (e.g. the minutes-to-low fit vs voltage on leaving);
-   - use it when asked to come out ("sure, I've got about 10 minutes") and
-     for the charger break, falling back to today's rule with too little data;
-   - add a separate retention setting for `battery.jsonl` (it is kept
-     forever until then - deliberately not tied to `HISTORY_RETENTION_DAYS`).
+8. **"Can I come out, and for how long?" from real battery data - dropped
+   (2026-10-07) after reviewing the data.** Leaving the charger (asked, idle
+   peek, or the charger break) stays allowed by one fixed rule: not docked
+   at or below `BATTERY_LOW_VOLTAGE`. `data/battery.jsonl` (`battery_log.py`,
+   see [Coming off the charger](connection-and-battery.md#coming-off-the-charger-battery-line-and-charger-break))
+   had 39 stretches off the dock that reached low: low came after 2.1-3.6
+   min (critical 2.8-4.3), the voltage on leaving was always about 4.0V, and
+   the time spent charging (even 30+ min) made no difference, so a
+   prediction would always say "about 2 1/2 minutes". One stretch's
+   per-check log fell 3.68 -> 3.28V in about 80s while idle: a worn battery
+   running empty, not just voltage dips while the motors run. So the
+   thresholds and logic stay as they are (they still suit a new battery),
+   and the old battery is handled with settings only (e.g. a short
+   `CHARGER_BREAK_STRETCH_*`). What came out of it: every reading off the
+   dock is now logged, and `BATTERY_LOG_RETENTION_DAYS` (default 90) limits
+   the file - deliberately not tied to `HISTORY_RETENTION_DAYS`.

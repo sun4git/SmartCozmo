@@ -284,6 +284,9 @@ class Settings:
     battery_low_voltage: float = field(default_factory=lambda: _env_float("BATTERY_LOW_VOLTAGE", 3.7))
     battery_critical_voltage: float = field(default_factory=lambda: _env_float("BATTERY_CRITICAL_VOLTAGE", 3.5))
     battery_check_interval_s: float = field(default_factory=lambda: _env_float("BATTERY_CHECK_INTERVAL_S", 15.0))
+    # Days of data/battery.jsonl to keep, pruned once at start-up (0 = keep
+    # everything). Its own setting, not HISTORY_RETENTION_DAYS.
+    battery_log_retention_days: int = field(default_factory=lambda: _env_int("BATTERY_LOG_RETENTION_DAYS", 90))
 
     # Low-battery return-to-charger (cozmo_brain/charger_return.py). At
     # BATTERY_LOW_VOLTAGE Cozmo *offers* out loud to head back; at

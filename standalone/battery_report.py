@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
 Summarise data/battery.jsonl (written by cozmo_brain/battery_log.py): how this
-robot's battery actually behaves on and off the charger. It's the evidence for
-deciding later how a smart "can I come out, and for how long?" call should
-work - nothing in the app uses these numbers yet.
+robot's battery actually behaves on and off the charger. It's evidence for
+tuning the battery settings by hand - nothing in the app uses these numbers.
 
 Shows:
   - charge sessions: voltage on docking, minutes until IS_CHARGING went off
@@ -13,6 +12,8 @@ Shows:
     low/critical reading, how it ended
   - a straight-line fit of "minutes until low" vs voltage on leaving, once at
     least 3 stretches actually reached low (otherwise it says so)
+  - the voltage at every check during the last few stretches (minutes off
+    the dock : volts), once there are any with per-reading data
 
 Usage (from the repo root):
   python3 standalone/battery_report.py              # data/battery.jsonl
@@ -35,6 +36,7 @@ from cozmo_brain.battery_log import (  # noqa: E402
     charge_sessions,
     minutes_to_low_fit,
     read_battery_log,
+    stretch_readings,
     stretches,
 )
 from cozmo_brain.config import settings  # noqa: E402
@@ -48,7 +50,7 @@ def _time(ts: str | None) -> str:
     return (ts or "?").replace("T", " ")[:16]
 
 
-def report(records: list[dict]) -> str:
+def report(records: list[dict], last_curves: int = 3) -> str:
     out: list[str] = []
     if not records:
         return "No battery records yet - run the app with Cozmo for a while (on and off the charger)."
@@ -106,6 +108,21 @@ def report(records: list[dict]) -> str:
                    f"   (R^2 {_fmt(fit['r2'], '.2f')}; only meaningful inside that voltage range)")
         for v in (lo, (lo + hi) / 2, hi):
             out.append(f"  leaving at {v:.2f}V -> about {fit['slope_min_per_v'] * v + fit['intercept_min']:.0f} min before low")
+
+    curves = [c for c in stretch_readings(records) if c["readings"]][-last_curves:]
+    if curves:
+        out.append("")
+        out.append(f"Readings off the dock, last {len(curves)} stretch(es) (minutes off : volts):")
+        for c in curves:
+            s = c["stretch"]
+            out.append(f"  left {_time(s.get('left_ts'))} ({s.get('cause', '?')}, ended {s.get('end_reason', '?')}, "
+                       f"{_fmt(s.get('minutes'), '.1f')} min)")
+            cells = [f"{_fmt(r.get('min'), '4.1f')}:{_fmt(r.get('v'), '.2f')}" + ("*" if r.get("picked_up") else "")
+                     for r in c["readings"]]
+            for i in range(0, len(cells), 8):
+                out.append("    " + "  ".join(cells[i:i + 8]))
+        if any(r.get("picked_up") for c in curves for r in c["readings"]):
+            out.append("  * = picked up at that reading")
     return "\n".join(out)
 
 
@@ -125,6 +142,8 @@ def _demo_records() -> list[dict]:
          "v_docked_last": 4.05, "v_off_first": 3.95, "v_min": 3.78, "v_end": 3.78, "first_low_min": None,
          "first_critical_min": None, "picked_up": False, "minutes": 7.0, "end_reason": "break_over"},
         {"ts": "2026-10-03T11:03:00", "event": "undocked", "v": 3.90, "cause": "asked", "docked_min": 30.0},
+        *({"ts": f"2026-10-03T11:{3 + m:02d}:00", "event": "reading", "v": v, "min": float(m), "picked_up": False}
+          for m, v in enumerate((3.90, 3.86, 3.83, 3.80, 3.77, 3.74, 3.71, 3.65, 3.57, 3.50))),
         {"ts": "2026-10-03T11:12:00", "event": "docked", "v": 3.55},
         {"ts": "2026-10-03T11:12:00", "event": "stretch", "left_ts": "2026-10-03T11:03:00", "cause": "asked",
          "v_docked_last": 4.0, "v_off_first": 3.90, "v_min": 3.5, "v_end": 3.55, "first_low_min": 7.5,
@@ -141,19 +160,21 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("path", nargs="?", help="battery.jsonl (default: DATA_DIR/battery.jsonl)")
     parser.add_argument("--demo", action="store_true", help="show the format on made-up data")
+    parser.add_argument("--curves", type=int, default=3, metavar="N",
+                        help="list the readings of the last N stretches (default 3)")
     args = parser.parse_args(argv)
 
     if args.demo:
         with tempfile.NamedTemporaryFile("w", suffix=".jsonl", delete=False, encoding="utf-8") as f:
             f.write("".join(json.dumps(r) + "\n" for r in _demo_records()))
         print("=== DEMO - made-up numbers, not from your robot ===\n")
-        print(report(read_battery_log(Path(f.name))))
+        print(report(read_battery_log(Path(f.name)), args.curves))
         Path(f.name).unlink(missing_ok=True)
         return 0
 
     path = Path(args.path) if args.path else Path(settings.data_dir) / "battery.jsonl"
     print(f"{path}\n")
-    print(report(read_battery_log(path)))
+    print(report(read_battery_log(path), args.curves))
     return 0
 
 

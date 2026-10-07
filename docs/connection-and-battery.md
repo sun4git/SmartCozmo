@@ -99,8 +99,8 @@ temperature sensor, so this is a time limit, not an overheat detector),
    movement: docked at or below `BATTERY_LOW_VOLTAGE` stays put), he says
    he's going to stretch his wheels and drives off with `leave_charger`.
    There's deliberately no separate "high enough" voltage: the dock reads
-   high and nobody knows this robot's curve yet, so a number would only be a
-   guess — `data/battery.jsonl` (below) collects the real data first.
+   high, and `data/battery.jsonl` (below) showed that neither the voltage on
+   leaving nor the time spent charging predicts how long he lasts off it.
 2. After a random `CHARGER_BREAK_STRETCH_MIN`–`MAX` (5–10) minutes he says
    the stretch is over and drives back with `return_to_charger()`. If he
    can't (picked up, charger location lost) he just stays out and the
@@ -115,11 +115,11 @@ same `drive()` as every other movement, the false-cliff handling, charger
 position recording and low-battery block all still apply. Mind the table edge
 when first enabling it.
 
-**Battery history (`data/battery.jsonl`).** So a later "can I come out, and
-for how long?" decision can be based on *this* robot's battery instead of a
-guessed threshold, `battery_log.py` records events from the battery
-monitor's readings (every `BATTERY_CHECK_INTERVAL_S`, so times are to about
-15s) — events only, a few dozen lines a day, nothing personal:
+**Battery history (`data/battery.jsonl`).** So the battery settings can be
+tuned from *this* robot's battery instead of guessed thresholds,
+`battery_log.py` records the battery monitor's readings (every
+`BATTERY_CHECK_INTERVAL_S`, so times are to about 15s) — on the dock events
+only, off it every reading too; nothing personal:
 
 - `run_start`, `docked` / `undocked`, `charging_started` / `charging_stopped`
   (with minutes docked so far) — the on-charger charge curve.
@@ -129,9 +129,13 @@ monitor's readings (every `BATTERY_CHECK_INTERVAL_S`, so times are to about
   reading off it, minutes off, lowest voltage, minutes until the first
   low/critical reading, and how it ended (`break_over`, `dock_tool`,
   `critical`, `run_end`, `other` = e.g. put back by hand).
+- `reading` — one per check while off the dock: the voltage, minutes off the
+  dock so far and whether he was picked up — the whole discharge curve, not
+  just the stretch summary. About 15–20 lines per time off the dock.
 
-The same events go to the normal log at info level (`Battery: ...`). It's
-kept until you delete it — a retention setting of its own comes with roadmap
-item 8, the feature that will use it. Nothing in the app uses these numbers
-yet — `standalone/battery_report.py` summarises them, see
+The events (not the readings) also go to the normal log at info level
+(`Battery: ...`). Records older than `BATTERY_LOG_RETENTION_DAYS` (default
+90; `0` = keep everything) are dropped once when Cozmo starts — its own
+setting, deliberately not `HISTORY_RETENTION_DAYS`. Nothing in the app uses
+these numbers — `standalone/battery_report.py` summarises them, see
 [Standalone scripts](standalone-scripts.md#standalone-scripts).

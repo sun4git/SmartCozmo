@@ -813,13 +813,13 @@ function chart(points, low, crit) {
   for (let v = Math.ceil(lo * 10) / 10; v <= hi; v += .2) g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--line)"/><text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v.toFixed(1)}</text>`;
   const line = (v, color, label) => v ? `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="${color}" stroke-dasharray="5 4"/><text x="${W - R - 2}" y="${y(v) - 4}" text-anchor="end" style="fill:${color}">${label} ${v}</text>` : "";
   const path = points.map((p, i) => `${i ? "L" : "M"}${x(+new Date(p.ts)).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
-  const dots = points.filter((p) => p.event && p.event !== "run_start" && p.event !== "now").map((p) => `<circle cx="${x(+new Date(p.ts))}" cy="${y(p.v)}" r="3.5" fill="${p.event === "docked" ? "#19b36b" : "#f0a30f"}"><title>${p.event} · ${p.v} V · ${clock(p.ts)}</title></circle>`).join("");
+  const dots = points.filter((p) => p.event && p.event !== "run_start" && p.event !== "now" && p.event !== "reading").map((p) => `<circle cx="${x(+new Date(p.ts))}" cy="${y(p.v)}" r="3.5" fill="${p.event === "docked" ? "#19b36b" : "#f0a30f"}"><title>${p.event} · ${p.v} V · ${clock(p.ts)}</title></circle>`).join("");
   const d0 = new Date(t0), d1 = new Date(t1);
   const fmt = (d) => `${d.getMonth() + 1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
   svg.innerHTML = `${g}${line(low, "#f0a30f", "low")}${line(crit, "#e5484d", "critical")}
     <path d="${path}" fill="none" stroke="#0f9bf0" stroke-width="2.5" stroke-linejoin="round"/>${dots}
     <text x="${L}" y="${Hh - 6}">${fmt(d0)}</text><text x="${W - R}" y="${Hh - 6}" text-anchor="end">${fmt(d1)}</text>`;
-  return h("div", {}, svg, h("div", { class: "row muted", style: { fontSize: "12px" } }, h("span", { text: "● green = docked" }), h("span", { text: "● amber = left the dock" }), h("span", { text: "Readings are logged at events, not continuously." })));
+  return h("div", {}, svg, h("div", { class: "row muted", style: { fontSize: "12px" } }, h("span", { text: "● green = docked" }), h("span", { text: "● amber = left the dock" }), h("span", { text: "On the dock only events are logged; off it, every reading." })));
 }
 
 // ---------------------------------------------------------------- router

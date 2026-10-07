@@ -15,8 +15,8 @@ Deliberately narrow, so everything else behaves as before:
     while the battery is too low to leave the dock - the same rule every
     movement uses (real.py's _must_stay_on_charger(): docked at or below
     BATTERY_LOW_VOLTAGE); it just waits and tries again. No separate "high
-    enough" voltage: the dock reads high and nobody knows this robot's curve
-    yet - battery_log.py collects the data for a smarter call later.
+    enough" voltage: the dock reads high, and battery_log.py's data showed
+    neither the voltage on leaving nor time charged predicts the time off.
 
 DockTimer.minutes() (continuous time docked) also feeds the per-turn battery
 line (engine.dock_minutes_fn). It always runs; the break itself only acts when

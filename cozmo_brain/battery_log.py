@@ -1,6 +1,7 @@
 """Battery history: data/battery.jsonl, one JSON object per line, written from
-BatteryMonitor's readings (every BATTERY_CHECK_INTERVAL_S). Events only -
-not every reading - so it stays small:
+BatteryMonitor's readings (every BATTERY_CHECK_INTERVAL_S). Events, plus
+every reading while he's off the dock - on the dock only events are kept, so
+it stays small:
 
   run_start         first reading of a run: v, docked, charging
   docked/undocked   the charger contacts changed (undocked also has `cause`)
@@ -11,6 +12,9 @@ not every reading - so it stays small:
                     the dock just before / first reading off it, minutes off,
                     lowest voltage, minutes until the first low / critical
                     reading, and how it ended (end_reason)
+  reading           one per check while off the dock: v, minutes off the
+                    dock so far (min), picked_up - the off-dock discharge
+                    curve (the stretch record only keeps its summary)
 
 Causes: "break" (charger_break.py), "asked" (leave_charger tool), "picked_up",
 "moved" (anything else - an idle peek, a gesture or drive in conversation).
@@ -22,11 +26,11 @@ Separately, every reading (not just events) overwrites data/battery_now.json
 with the latest voltage and dock state - a tiny file for a live display (the
 dashboard's battery card); it is not history.
 
-This is the raw data for a later "can I come out, and for how long?" call
-based on this robot's own battery; standalone/battery_report.py summarises it.
-Nothing personal is stored. Readings only arrive every 30s, so every time is
-to that resolution. Kept until deleted for now - a retention setting of its
-own comes with the "can I come out?" feature (docs/roadmap.md item 8).
+standalone/battery_report.py summarises it. Nothing personal is stored.
+Readings only arrive every BATTERY_CHECK_INTERVAL_S, so every time is to that
+resolution. prune_battery_log() drops records older than
+BATTERY_LOG_RETENTION_DAYS once at start-up (its own setting, deliberately
+not HISTORY_RETENTION_DAYS).
 """
 
 from __future__ import annotations
@@ -36,7 +40,7 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable
 
@@ -163,6 +167,7 @@ class BatteryLog:
         st["v_min"] = min(st["v_min"], voltage)
         st["picked_up"] = st["picked_up"] or picked_up
         minutes = round((now - st["_left"]) / 60.0, 1)
+        self._write("reading", now, v=voltage, min=minutes, picked_up=picked_up)
         if st["first_low_min"] is None and voltage <= self._settings.battery_low_voltage:
             st["first_low_min"] = minutes
         if st["first_critical_min"] is None and voltage <= self._settings.battery_critical_voltage:
@@ -235,12 +240,65 @@ def read_battery_log(path: Path) -> list[dict]:
     return records
 
 
-# --- analysis (standalone/battery_report.py now; the "can I come out?" call later) ---
+def prune_battery_log(path: Path, retention_days: int, now: datetime | None = None) -> int:
+    """Drop records older than `retention_days` (0 or less = keep everything).
+    Rewrites through a temp file + rename, so a crash can't leave half a file.
+    Unreadable lines are kept as they are. Returns how many records went."""
+    path = Path(path)
+    if retention_days <= 0 or not path.is_file():
+        return 0
+    cutoff = ((now or datetime.now()) - timedelta(days=retention_days)).isoformat(timespec="seconds")
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as e:
+        logger.warning("Could not read %s to prune it: %s", path, e)
+        return 0
+    kept = []
+    for line in lines:
+        try:
+            ts = json.loads(line).get("ts")
+        except (json.JSONDecodeError, AttributeError):
+            ts = None
+        if not isinstance(ts, str) or ts >= cutoff:  # same-format ISO strings sort by time
+            kept.append(line)
+    dropped = len(lines) - len(kept)
+    if dropped:
+        tmp = path.with_name(path.name + ".tmp")
+        try:
+            tmp.write_text("".join(line + "\n" for line in kept), encoding="utf-8")
+            os.replace(tmp, path)
+        except OSError as e:
+            logger.warning("Could not prune %s: %s", path, e)
+            return 0
+        logger.info("Battery log: dropped %d record(s) older than %d day(s).", dropped, retention_days)
+    return dropped
+
+
+# --- analysis (standalone/battery_report.py) ---
 
 
 def stretches(records: list[dict]) -> list[dict]:
     """Every finished time off the dock, oldest first."""
     return [r for r in records if r.get("event") == "stretch"]
+
+
+def stretch_readings(records: list[dict]) -> list[dict]:
+    """Each finished stretch, oldest first, with the off-dock "reading"
+    records logged during it: {"stretch": <stretch record>, "readings": [...]}.
+    Stretches from before per-reading logging existed get an empty list."""
+    out: list[dict] = []
+    pending: list[dict] = []
+    for r in records:
+        event = r.get("event")
+        if event == "reading":
+            pending.append(r)
+        elif event == "stretch":
+            left = r.get("left_ts") or ""
+            out.append({"stretch": r, "readings": [x for x in pending if (x.get("ts") or "") >= left]})
+            pending = []
+        elif event == "run_start":
+            pending = []  # a reading can only belong to a stretch of the same run
+    return out
 
 
 def charge_sessions(records: list[dict]) -> list[dict]:

@@ -1,4 +1,5 @@
-"""Test: battery.jsonl events, stretch records, causes/end reasons, analysis."""
+"""Test: battery.jsonl events, off-dock readings, stretch records, causes/end
+reasons, retention pruning, analysis."""
 import json
 import logging
 import os
@@ -11,7 +12,9 @@ from cozmo_brain.battery_log import (
     BatteryLog,
     charge_sessions,
     minutes_to_low_fit,
+    prune_battery_log,
     read_battery_log,
+    stretch_readings,
     stretches,
 )
 from cozmo_brain.config import Settings
@@ -42,6 +45,10 @@ class Clock:
     def __call__(self): return self.t
 
     def advance(self, minutes): self.t += minutes * 60
+
+
+def last_event(path, event):
+    return [x for x in read_battery_log(path) if x["event"] == event][-1]
 
 
 def fresh(name):
@@ -76,7 +83,7 @@ check("default check interval is 15s", Settings().battery_check_interval_s == 15
 log.note_exit("break")
 r.docked = False
 log.on_reading(4.02)
-undock = read_battery_log(path)[-1]
+undock = last_event(path, "undocked")
 check("undocked with the noted cause", undock["event"] == "undocked" and undock["cause"] == "break")
 clock.advance(4); log.on_reading(3.80)
 clock.advance(4); log.on_reading(3.70)   # first low at 8 min
@@ -85,6 +92,10 @@ log.note_return("break_over")
 clock.advance(1); r.docked = True; log.on_reading(3.68)
 st = stretches(read_battery_log(path))
 check("one stretch written on re-docking", len(st) == 1)
+readings = [x for x in read_battery_log(path) if x["event"] == "reading"]
+check("one reading record per off-dock check, none while docked",
+      [(x["v"], x["min"]) for x in readings] == [(4.02, 0.0), (3.80, 4.0), (3.70, 8.0), (3.65, 10.0)])
+check("reading carries picked_up", all(x["picked_up"] is False for x in readings))
 s0 = st[0]
 check("stretch fields", s0["cause"] == "break" and s0["v_docked_last"] == 4.11 and s0["v_off_first"] == 4.02
       and s0["v_min"] == 3.65 and s0["first_low_min"] == 8.0 and s0["first_critical_min"] is None
@@ -99,7 +110,7 @@ check("unannounced exit = moved, unannounced return = other", st[-1]["cause"] ==
 # a stale exit note doesn't stick to a much later undock
 log.note_exit("asked")
 clock.advance(30); r.docked = False; log.on_reading(3.97)
-check("stale exit note ignored", read_battery_log(path)[-1]["cause"] == "moved")
+check("stale exit note ignored", last_event(path, "undocked")["cause"] == "moved")
 
 # picked up off the dock: cause picked_up; critical reading tracked; critical return reason
 clock.advance(1); r.docked = True; log.on_reading(3.9)  # back
@@ -132,6 +143,41 @@ recs = read_battery_log(path)
 sessions = charge_sessions(recs)
 check("charge sessions: first one partial, full after 40 min", sessions[0]["partial"] and sessions[0]["full_after_min"] == 40.0)
 check("no fit with fewer than 3 low-reaching stretches", minutes_to_low_fit(recs) is None)
+curves = stretch_readings(recs)
+check("stretch_readings: one entry per stretch", len(curves) == len(stretches(recs)))
+check("stretch_readings: readings matched to their stretch",
+      [x["v"] for x in curves[0]["readings"]] == [4.02, 3.80, 3.70, 3.65]
+      and [x["v"] for x in curves[1]["readings"]] == [3.98])
+old_format = [{"event": "run_start", "ts": "2026-10-01T09:00:00"},
+              {"event": "stretch", "ts": "2026-10-01T09:05:00", "left_ts": "2026-10-01T09:01:00"}]
+check("stretch_readings: older stretch without readings gets an empty list",
+      stretch_readings(old_format)[0]["readings"] == [])
+orphan = [{"event": "reading", "ts": "2026-10-01T09:02:00", "v": 3.9},  # run crashed, no stretch written
+          {"event": "run_start", "ts": "2026-10-01T10:00:00"},
+          {"event": "reading", "ts": "2026-10-01T10:01:00", "v": 3.8},
+          {"event": "stretch", "ts": "2026-10-01T10:02:00", "left_ts": "2026-10-01T10:01:00"}]
+check("stretch_readings: a crashed run's readings don't leak into the next stretch",
+      [x["v"] for x in stretch_readings(orphan)[0]["readings"]] == [3.8])
+
+# --- retention ---
+check("default retention is 90 days", Settings().battery_log_retention_days == 90)
+pp = fresh("battery_prune.jsonl")
+pp.write_text("".join(json.dumps(x) + "\n" for x in [
+    {"ts": "2026-06-01T09:00:00", "event": "run_start", "v": 4.0},
+    {"ts": "2026-07-09T08:59:59", "event": "docked", "v": 4.0},
+    {"ts": "2026-07-09T09:00:00", "event": "undocked", "v": 4.0},
+    {"ts": "2026-10-07T09:00:00", "event": "reading", "v": 3.9},
+]) + "not json\n", encoding="utf-8")
+before = pp.read_text(encoding="utf-8")
+check("retention 0 keeps everything", prune_battery_log(pp, 0) == 0 and pp.read_text(encoding="utf-8") == before)
+dropped = prune_battery_log(pp, 90, now=datetime(2026, 10, 7, 9, 0))
+kept = pp.read_text(encoding="utf-8").splitlines()
+check("records older than 90 days dropped, cutoff itself kept", dropped == 2 and len(kept) == 3
+      and json.loads(kept[0])["ts"] == "2026-07-09T09:00:00")
+check("unreadable lines kept", kept[-1] == "not json")
+check("no temp file left after prune", not pp.with_name(pp.name + ".tmp").exists())
+check("prune again drops nothing", prune_battery_log(pp, 90, now=datetime(2026, 10, 7, 9, 0)) == 0)
+check("missing file: nothing to prune", prune_battery_log(fresh("battery_prune_missing.jsonl"), 90) == 0)
 
 synthetic = [
     {"event": "stretch", "v_off_first": 3.90, "first_low_min": 7.0, "picked_up": False},

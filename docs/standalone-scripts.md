@@ -46,13 +46,15 @@ and prints charge sessions (voltage on docking, minutes until `IS_CHARGING`
 went off, total time docked), every stretch off the dock (how he left,
 voltages, minutes off, minutes until low/critical, how it ended), and —
 once at least 3 stretches actually reached low — a straight-line fit of
-"minutes until low" against the voltage on leaving. That's the evidence for
-deciding how a smarter "can I come out, and for how long?" should work; with
-less data it says so instead of guessing.
+"minutes until low" against the voltage on leaving; with less data it says
+so instead of guessing. Last, the voltage at every check (minutes off :
+volts) for the last few stretches that have per-reading data. It's evidence
+for tuning the battery settings by hand; the app doesn't use these numbers.
 
 ```bash
-python3 standalone/battery_report.py          # data/battery.jsonl
-python3 standalone/battery_report.py --demo   # made-up numbers, just to see the format
+python3 standalone/battery_report.py              # data/battery.jsonl
+python3 standalone/battery_report.py --curves 10  # list the readings of the last 10 stretches (default 3)
+python3 standalone/battery_report.py --demo       # made-up numbers, just to see the format
 ```
 
 ## `show_history.py` - read past conversations

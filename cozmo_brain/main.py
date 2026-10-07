@@ -15,7 +15,7 @@ from cozmo_brain.config import PROJECT_ROOT, settings
 from cozmo_brain.conversation import Conversation
 from cozmo_brain.engine import CozmoEngine
 from cozmo_brain.history_archive import HistoryArchive, prune_history
-from cozmo_brain.battery_log import BatteryLog
+from cozmo_brain.battery_log import BatteryLog, prune_battery_log
 from cozmo_brain.charger_break import ChargerBreak
 from cozmo_brain.connection_monitor import ConnectionMonitor
 from cozmo_brain.assistant_relay import AssistantRelay
@@ -156,6 +156,7 @@ def main(argv: list[str] | None = None) -> int:
         memory = Memory(data_dir / "memory.md", history_dir, max_facts=settings.memory_max_facts)
         memory.ensure_file()
         presence = Presence()
+        prune_battery_log(data_dir / "battery.jsonl", settings.battery_log_retention_days)
         battery_log = BatteryLog(data_dir / "battery.jsonl", robot, settings)
         assistant = None
         assistant_relay = None
