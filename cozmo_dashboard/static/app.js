@@ -392,9 +392,12 @@ async function stopApp(force) {
   if (r) { S.userStop = true; S.status = r; applyStatus(); }
 }
 async function restartApp() {
-  const prev = { mode: S.status.mode, simulate: S.status.simulate, fresh: S.status.fresh, log_level: S.status.log_level };
+  // Same way as last time: the runner remembers it (across dashboard restarts
+  // too); the mode last picked in this browser only if it has nothing.
+  const st = S.status || {};
+  const prev = { mode: st.mode || S.prefs.mode, simulate: st.mode ? st.simulate : S.prefs.simulate, log_level: st.mode ? st.log_level : S.prefs.log_level };
   S.userStop = true;
-  await act(() => api("/api/stop", { body: {} }));
+  if (st.state !== "stopped") await act(() => api("/api/stop", { body: {} }));
   const t0 = Date.now();
   while (Date.now() - t0 < 45000) {
     await new Promise((r) => setTimeout(r, 700));

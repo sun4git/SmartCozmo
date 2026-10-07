@@ -213,6 +213,14 @@ check("runner: log file written", any(p.read_text(encoding="utf-8").count("got h
 r.start("text")
 r.stop()
 check("runner: stop ends a running app", wait_for(lambda: r.status()["state"] == "stopped"))
+r.start("vad", simulate=True, log_level="DEBUG")
+r.stop()
+wait_for(lambda: r.status()["state"] == "stopped")
+st = Runner(tmp, tmp / "logs").status()  # the dashboard restarted
+check("runner: last start remembered across a dashboard restart (Restart Cozmo keeps the mode)",
+      st["state"] == "stopped" and st["mode"] == "vad" and st["simulate"] is True and st["log_level"] == "DEBUG")
+(tmp / "logs" / "last_start.json").write_text('{"mode": "rm -rf"}', encoding="utf-8")
+check("runner: a bad last_start.json is ignored", Runner(tmp, tmp / "logs").status()["mode"] is None)
 runner_mod.build_command = real_build
 
 cmd = build_command(Path(tmp), "vad", True, True, "debug")

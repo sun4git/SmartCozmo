@@ -10,6 +10,7 @@ only kills it if it doesn't exit in time.
 from __future__ import annotations
 
 import collections
+import json
 import logging
 import os
 import re
@@ -30,6 +31,10 @@ _LEVEL_IN_LINE = re.compile(r"^\S+ \S+ (DEBUG|INFO|WARNING|ERROR|CRITICAL) ")
 # How long a clean shutdown may take (the end-of-run memory check calls the
 # chat model) before Stop gives up and kills the process.
 STOP_GRACE_S = 30.0
+# How the app was last started, kept across dashboard restarts so "Restart
+# Cozmo" brings him back the same way (it used to fall back to voice mode).
+LAST_START_FILE = "last_start.json"
+_START_KEYS = ("mode", "simulate", "fresh", "log_level")
 
 
 def python_for(root: Path) -> str:
@@ -86,9 +91,26 @@ class Runner:
         self._seq = 0
         self._proc: subprocess.Popen | None = None
         self._state = "stopped"  # stopped | running | stopping
-        self._info: dict[str, Any] = {}
+        self._info: dict[str, Any] = self._load_last_start()
         self._log_file = None
         self._log_path: Path | None = None
+
+    def _load_last_start(self) -> dict[str, Any]:
+        try:
+            last = json.loads((self.log_dir / LAST_START_FILE).read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return {}
+        if not isinstance(last, dict) or last.get("mode") not in MODES:
+            return {}
+        return {k: last.get(k) for k in _START_KEYS}
+
+    def _save_last_start(self) -> None:
+        try:
+            self.log_dir.mkdir(parents=True, exist_ok=True)
+            (self.log_dir / LAST_START_FILE).write_text(
+                json.dumps({k: self._info.get(k) for k in _START_KEYS}), encoding="utf-8")
+        except OSError as e:
+            logger.warning("Can't remember how Cozmo was started (%s) - a restart may use voice mode.", e)
 
     # --- status ----------------------------------------------------------
 
@@ -154,6 +176,7 @@ class Runner:
                 "command": " ".join(["python", "-m", "cozmo_brain"] + cmd[3:]),
             }
             self._add("sys", f"--- started: {self._info['command']} (pid {proc.pid}) ---")
+            self._save_last_start()
         threading.Thread(target=self._pump, args=(proc,), daemon=True, name="cozmo-log-pump").start()
         return self.status()
 
