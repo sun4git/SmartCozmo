@@ -102,6 +102,31 @@ try:
 except (ValueError, FileNotFoundError):
     check("load_run: path traversal refused", True)
 
+# downloads (History page): plain text and one self-contained HTML page
+body, name, ctype = data.export_run(hist, "2026-10-05/10-00-00", "txt")
+txt = body.decode("utf-8")
+check("export txt: filename and type", name == "cozmo-2026-10-05_10-00-00.txt" and ctype.startswith("text/plain"))
+check("export txt: you, Cozmo (mood, gesture), tool, error, note in order",
+      [l.split("  ", 1)[-1].strip() for l in txt.splitlines()[4:10]] ==
+      ["You: hello cozmo", "Cozmo: Hi there!  (happy, cheer)", "[tool] look()",
+       "[error] look failed: camera busy", "[Cozmo was picked up]", "You: what is this  [photo: 10-00-00-photo-01.png]"])
+check("export txt: status notes left out (as on the page)", "[Status:" not in txt)
+body, name, ctype = data.export_run(hist, "2026-10-05/10-00-00", "html")
+page = body.decode("utf-8")
+check("export html: self-contained page, photo embedded", page.startswith("<!doctype html>") and ctype.startswith("text/html")
+      and "data:image/png;base64," in page and "/api/" not in page)
+records_evil = day / "11-00-00.jsonl"
+records_evil.write_text(json.dumps({"ts": "x", "type": "message", "message": {"role": "user", "content": "<script>alert(1)</script>"}}) + "\n", encoding="utf-8")
+page = data.export_run(hist, "2026-10-05/11-00-00", "html")[0].decode("utf-8")
+check("export html: text escaped", "<script>" not in page and "&lt;script&gt;" in page)
+records_evil.unlink()
+for bad_id, bad_fmt in (("2026-10-05/10-00-00", "pdf"), ("../../.env", "txt"), ("2026-10-05/nope", "txt")):
+    try:
+        data.export_run(hist, bad_id, bad_fmt)
+        check(f"export refused: {bad_id} {bad_fmt}", False)
+    except (ValueError, FileNotFoundError):
+        check(f"export refused: {bad_id} {bad_fmt}", True)
+
 tail = data.ConversationTail(hist)
 reset, rid, events = tail.poll()
 check("tail: first poll sends the whole latest run", reset and rid == "2026-10-05/10-00-00" and len(events) == 9)
@@ -255,6 +280,13 @@ try:
     check("http: non-JSON write refused", False)
 except urllib.error.HTTPError as e:
     check("http: non-JSON write refused", e.code == 400)
+
+code, page = call("/api/history/export?id=2026-10-05/10-00-00&format=html", raw=True)
+check("http: export html", code == 200 and page.startswith(b"<!doctype html>"))
+code, txt = call("/api/history/export?id=2026-10-05/10-00-00&format=txt", raw=True)
+check("http: export txt", code == 200 and b"You: hello cozmo" in txt)
+code, _ = call("/api/history/export?id=../../.env&format=txt")
+check("http: export path traversal blocked", code in (400, 404))
 
 # live conversation stream: first event is the latest run
 with urllib.request.urlopen(base + "/api/conversation/stream", timeout=5) as resp:

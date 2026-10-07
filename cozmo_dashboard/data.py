@@ -138,6 +138,138 @@ def load_run(history_dir: Path, run_id: str) -> dict[str, Any]:
     return {"id": run_id, "events": events}
 
 
+# --- export (History page's download buttons) ----------------------------------
+
+MAX_EMBED_BYTES = 5_000_000  # a photo bigger than this is named, not embedded
+
+
+def _clock(ts: str) -> str:
+    """HH:MM:SS in the server's local time - what the page shows too."""
+    try:
+        return datetime.fromisoformat(ts).astimezone().strftime("%H:%M:%S")
+    except (TypeError, ValueError):
+        return ""
+
+
+def _photo_name(url: str) -> str:
+    return url.rsplit("/", 1)[-1]
+
+
+def _event_text(ev: dict[str, Any]) -> str:
+    """One event as plain text, without its time - the reading of each kind
+    matches the History page (static/app.js renderEvent)."""
+    kind, text = ev["kind"], ev.get("text", "")
+    if kind == "you":
+        line = f"You: {text}"
+    elif kind == "cozmo":
+        extras = ", ".join(x for x in (ev.get("mood"), ev.get("gesture")) if x)
+        line = f"Cozmo: {text}" + (f"  ({extras})" if extras else "")
+    elif kind == "tool":
+        args = ", ".join(f"{k}={v if isinstance(v, str) else json.dumps(v)}" for k, v in (ev.get("args") or {}).items())
+        line = f"[tool] {ev.get('name', '?')}({args})"
+    elif kind == "error":
+        line = f"[error] {ev.get('name', '?')} failed: {text}"
+    elif kind == "thought":
+        line = f"(not spoken) {text}"
+    elif kind == "run":
+        info = " · ".join(f"{k}: {v}" for k, v in (ev.get("info") or {}).items())
+        line = f"--- {text}{' - ' + info if info else ''} ---"
+    elif kind == "session":
+        line = f"--- {text} ---"
+    elif kind == "photo":
+        line = "[photo]"
+    else:  # note
+        line = text
+    photos = [_photo_name(u) for u in ev.get("images") or []]
+    if photos and kind != "photo":
+        line += f"  [photo: {', '.join(photos)}]"
+    elif photos:
+        line += f" {', '.join(photos)}"
+    return line
+
+
+def export_text(run: dict[str, Any]) -> str:
+    date, _, time_ = run["id"].partition("/")
+    lines = [f"Cozmo conversation - {date} {time_.replace('-', ':')[:8]}", ""]
+    for ev in run["events"]:
+        lines.append(f"{_clock(ev.get('ts', '')):8}  {_event_text(ev)}")
+    return "\n".join(lines) + "\n"
+
+
+_EXPORT_CSS = """
+:root{--bg:#f5f8fc;--card:#fff;--fg:#14202e;--muted:#6a7a8c;--you:#12a7f5;--you-fg:#fff;--cozmo:#e9f1fa;--line:#dde6f0;--err:#c0392b}
+@media (prefers-color-scheme:dark){:root{--bg:#0b1220;--card:#101a2e;--fg:#e8f4ff;--muted:#8fa3bd;--you:#1384c2;--you-fg:#fff;--cozmo:#18253d;--line:#22324f;--err:#ff7b7b}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:760px;margin:0 auto;padding:24px 16px 48px}h1{font-size:20px;margin:0 0 4px}.sub{color:var(--muted);font-size:13px;margin:0 0 20px}
+.msg{display:flex;margin:10px 0}.msg.you{justify-content:flex-end}.bubble{max-width:78%;padding:9px 13px;border-radius:16px;overflow-wrap:anywhere}
+.you .bubble{background:var(--you);color:var(--you-fg);border-bottom-right-radius:4px}.cozmo .bubble{background:var(--cozmo);border-bottom-left-radius:4px}
+.t{font-size:11px;opacity:.7;margin-top:3px}.chips{font-size:12px;color:var(--muted);margin-top:3px}
+.line{font-size:13px;color:var(--muted);margin:6px 0;overflow-wrap:anywhere}.sys{text-align:center;border-top:1px solid var(--line);padding-top:6px;margin-top:16px}
+.err{color:var(--err)}.thought{font-style:italic}img{max-width:100%;border-radius:10px;margin-top:6px;display:block}
+"""
+
+
+def export_html(run: dict[str, Any], history_dir: Path) -> str:
+    """A single self-contained page: inline CSS (light and dark), photos
+    embedded, so it opens anywhere without the dashboard."""
+    import base64
+    from html import escape
+
+    def photos(ev: dict[str, Any]) -> str:
+        out = []
+        for url in ev.get("images") or []:
+            rel = url.split("path=history/", 1)[-1]
+            try:
+                path = safe_path(history_dir, rel)
+                if path.is_file() and path.stat().st_size <= MAX_EMBED_BYTES:
+                    mime = mimetypes.guess_type(path.name)[0] or "image/png"
+                    b64 = base64.b64encode(path.read_bytes()).decode()
+                    out.append(f'<img src="data:{mime};base64,{b64}" alt="photo">')
+                    continue
+            except (OSError, ValueError):
+                pass
+            out.append(f'<div class="t">[photo: {escape(_photo_name(url))}]</div>')
+        return "".join(out)
+
+    date, _, time_ = run["id"].partition("/")
+    title = f"Cozmo conversation - {date} {time_.replace('-', ':')[:8]}"
+    body = []
+    for ev in run["events"]:
+        kind, t = ev["kind"], escape(_clock(ev.get("ts", "")))
+        text = escape(ev.get("text", ""))
+        if kind == "you":
+            body.append(f'<div class="msg you"><div class="bubble">{text}{photos(ev)}<div class="t">{t}</div></div></div>')
+        elif kind in ("cozmo", "photo"):
+            extras = escape(", ".join(x for x in (ev.get("mood"), ev.get("gesture")) if x))
+            chips = f'<div class="chips">{extras}</div>' if extras else ""
+            body.append(f'<div class="msg cozmo"><div class="bubble">{text}{photos(ev)}{chips}<div class="t">{t}</div></div></div>')
+        else:
+            cls = {"run": "line sys", "session": "line sys", "error": "line err", "thought": "line thought"}.get(kind, "line")
+            body.append(f'<div class="{cls}">{t} {escape(_event_text(ev))}{photos(ev)}</div>')
+    if not run["events"]:
+        body.append('<div class="line">This run has no conversation in it.</div>')
+    return (
+        f'<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        f'<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f"<title>{escape(title)}</title><style>{_EXPORT_CSS}</style></head><body><main>"
+        f'<h1>{escape(title)}</h1><p class="sub">Saved from the Cozmo Control Room</p>'
+        + "\n".join(body) + "</main></body></html>\n"
+    )
+
+
+def export_run(history_dir: Path, run_id: str, fmt: str) -> tuple[bytes, str, str]:
+    """(body, filename, content type) for a run downloaded as 'html' or 'txt'."""
+    if fmt not in ("html", "txt"):
+        raise ValueError("format must be html or txt")
+    if not safe_path(history_dir, run_id + ".jsonl").is_file():
+        raise FileNotFoundError(run_id)
+    run = load_run(history_dir, run_id)
+    name = "cozmo-" + run_id.replace("/", "_") + "." + fmt
+    if fmt == "txt":
+        return export_text(run).encode("utf-8"), name, "text/plain; charset=utf-8"
+    return export_html(run, history_dir).encode("utf-8"), name, "text/html; charset=utf-8"
+
+
 class _SummaryCache:
     """Run summaries, recomputed only when a file's size or mtime changes."""
 

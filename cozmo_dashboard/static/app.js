@@ -602,6 +602,8 @@ async function buildHistory() {
     const [d, t] = id.split("/");
     view.replaceChildren(
       h("div", { class: "row", style: { marginBottom: "12px" } }, h("h2", { text: `${d}  ${t.slice(0, 8).replace(/-/g, ":")}`, style: { margin: 0 } }), h("span", { class: "spacer" }),
+        h("a", { class: "btn small", href: `/api/history/export?id=${encodeURIComponent(id)}&format=html`, text: "Download HTML" }),
+        h("a", { class: "btn small", href: `/api/history/export?id=${encodeURIComponent(id)}&format=txt`, text: "Download text" }),
         h("a", { class: "btn small", href: `/api/file?path=history/${id}.jsonl&download=1`, text: "Download .jsonl" }),
         h("button", { class: "btn small", text: "Show in Files", onclick: () => { files.path = "history/" + d; location.hash = "files"; } })),
       r.events.length ? chat : h("div", { class: "empty", text: "This run has no conversation in it." }));

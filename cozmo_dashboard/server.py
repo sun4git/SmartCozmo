@@ -237,6 +237,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"runs": data.list_runs(d.history_dir)})
         if path == "/api/history/run":
             return self._json(data.load_run(d.history_dir, q.get("id", "")))
+        if path == "/api/history/export":
+            body, name, ctype = data.export_run(d.history_dir, q.get("id", ""), q.get("format", ""))
+            return self._send(200, body, ctype, {"Content-Disposition": f'attachment; filename="{name}"'})
         if path == "/api/history/search":
             return self._json({"hits": data.search_runs(d.history_dir, q.get("q", ""))})
         if path == "/api/files":
