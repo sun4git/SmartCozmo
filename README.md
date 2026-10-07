@@ -130,7 +130,7 @@ Everything that used to be in this one file now lives in [docs/](docs/), grouped
 | [Recognizing people](docs/people-recognition.md) | `remember_person`, `who_is_this` and the optional presence check |
 | [Wake word](docs/wake-word.md) | openWakeWord setup, the backpack-light cues, training a custom wake word, model files |
 | [Speech-to-text hallucinations](docs/stt-hallucination.md) | The layered defenses, and live measurements per provider |
-| [Audio output and voice](docs/audio-output.md) | Routing speech to a real speaker, making the voice less generic, `TTS_GAIN` |
+| [Audio output and voice](docs/audio-output.md) | Routing speech to a real speaker (and where clip sounds go then), making the voice less generic, `TTS_GAIN` |
 | [Speech and chat providers](docs/providers.md) | Groq, OpenAI, local, Wit.ai, Edge; chat and vision provider switching |
 | [Connection and battery](docs/connection-and-battery.md) | Dropped-connection recovery, the battery monitor, the battery line and charger break, `battery.jsonl` |
 | [Real animation clips and Cozmo's own sounds](docs/clip-sounds.md) | The curated clips, getting Cozmo's original sounds working (extraction, copying, settings), keeping a backup |

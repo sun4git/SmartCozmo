@@ -170,6 +170,11 @@ pulling):
 | `CLIP_SOUND_SPEECH_VOLUME` | `0.15` | Sound level under speech, so the speech stays the main thing |
 | `CLIP_SOUNDS_DIR` | `data/clip_sounds` | Where step 5 put them |
 
+Clip sounds always play on Cozmo's speaker, whatever `AUDIO_OUTPUT` is. With
+`AUDIO_OUTPUT=system` the speech goes to the other speaker, so clips play at
+`CLIP_SOUND_VOLUME` even while he talks: see
+[Where the clip sounds go](audio-output.md#where-the-clip-sounds-go).
+
 Start the app. Near the start, the log should say:
 
 ```

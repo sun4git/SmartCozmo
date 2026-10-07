@@ -23,6 +23,24 @@ isn't a robot capability, so it doesn't belong behind that abstraction.
 `PLAYBACK_DEVICE` (default `pipewire`) is the ALSA/PipeWire device name for
 the `system`/`both` cases; run `aplay -L` to list options.
 
+### Where the clip sounds go
+
+`AUDIO_OUTPUT` routes speech only. The real animation clips, and their own
+sounds ([clip-sounds.md](clip-sounds.md)), always play on Cozmo: his face,
+head, lift and his speaker.
+
+| `AUDIO_OUTPUT` | Speech | Clip sounds | Clip sound level while he speaks |
+|---|---|---|---|
+| `cozmo` | Cozmo's speaker | Cozmo's speaker, mixed under the speech | `CLIP_SOUND_SPEECH_VOLUME` (0.15) |
+| `system` | This machine's speaker only | Cozmo's speaker, beside the speech | `CLIP_SOUND_VOLUME` (0.5) |
+| `both` | Both at once | Cozmo's speaker, mixed under his copy of the speech | `CLIP_SOUND_SPEECH_VOLUME` (0.15) |
+
+With `system`, the clip plays without the speech, so it uses the louder
+`CLIP_SOUND_VOLUME`. Next to the speech it can sound louder than you're used
+to with `cozmo`. Lower `CLIP_SOUND_VOLUME` if it does. That also makes the
+wake-up, sleep and standalone clips quieter. Clips that play with no speech
+(wake-up, sleep, a clip on its own) use `CLIP_SOUND_VOLUME` in every mode.
+
 ## Making the voice sound less generic
 
 Orpheus's voices are generic human voices, not Cozmo's real (small, squeaky,
