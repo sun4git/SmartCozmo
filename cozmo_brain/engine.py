@@ -242,8 +242,13 @@ class CozmoEngine:
         self.request_listen()
 
     def _announce_turn(self, note: str) -> bool:
-        """One turn for a queued note; whether a `say` succeeded in it."""
-        summary = self.handle_turn(note)
+        """One turn for a queued note; whether a `say` succeeded in it.
+        Ends at the first clean `say` whatever FINAL_LLM_CALL is: this turn
+        runs sync (no allow_async_followup), and the extra LLM step it used
+        to get often said the same thing again in other words - the note
+        ("tell them now with `say`") is still the last thing it sees
+        (confirmed on real hardware: a Sunny answer spoken twice)."""
+        summary = self.handle_turn(note, end_after_say=True)
         if not self.log_steps_live:  # already logged live otherwise
             logger.info("%s", summary)
         return any(line.startswith("[say] OK") for line in summary.splitlines())
@@ -361,7 +366,8 @@ class CozmoEngine:
             return ToolResult(False, str(e))
 
     def handle_turn(
-        self, user_text: str, images: list[str] | None = None, *, allow_async_followup: bool = False
+        self, user_text: str, images: list[str] | None = None, *, allow_async_followup: bool = False,
+        end_after_say: bool = False,
     ) -> str:
         """Runs one full user turn through the tool-calling loop. Returns a
         transcript-ish summary of what Cozmo said/did, for logging/display.
@@ -372,11 +378,15 @@ class CozmoEngine:
         call finishes on a background thread, which keeps holding turn_lock
         until it's done - so the next turn, a charger return, or a fidget
         still can't start until it finishes. Other modes don't reopen a mic
-        on their own, so they always wait for it (plain sync)."""
+        on their own, so they always wait for it (plain sync).
+
+        `end_after_say` ends the turn at the first clean `say` (as
+        FINAL_LLM_CALL=skip does), with no follow-up at all - for Cozmo's
+        own announcements (_announce_turn())."""
         self.turn_lock.acquire()
         handed_off = False
         try:
-            summary, handed_off = self._handle_turn(user_text, images, allow_async_followup)
+            summary, handed_off = self._handle_turn(user_text, images, allow_async_followup, end_after_say)
             return summary
         finally:
             if not handed_off:
@@ -396,7 +406,7 @@ class CozmoEngine:
         return True
 
     def _handle_turn(
-        self, user_text: str, images: list[str] | None, allow_async_followup: bool
+        self, user_text: str, images: list[str] | None, allow_async_followup: bool, end_after_say: bool = False
     ) -> tuple[str, bool]:
         self.last_interaction_monotonic = time.monotonic()
         if self._system_prompt_fn is not None:
@@ -418,8 +428,10 @@ class CozmoEngine:
         turn = _TurnState()
 
         mode = self._settings.final_llm_call
-        run_async = mode == "async" and allow_async_followup
-        ended_early, next_step = self._run_steps(schema, turn, 0, can_end_early=mode == "skip" or run_async)
+        run_async = mode == "async" and allow_async_followup and not end_after_say
+        ended_early, next_step = self._run_steps(
+            schema, turn, 0, can_end_early=mode == "skip" or run_async or end_after_say
+        )
 
         if ended_early and run_async and next_step < self._settings.max_tool_iterations:
             self.followup_interrupt.clear()

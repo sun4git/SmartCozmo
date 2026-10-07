@@ -112,7 +112,7 @@ class PresenceChecker:
     def _ask_who(self, known_names: list[str]) -> None:
         line = random.choice(_STRANGER_LINES)
         with self._robot.keep_backpack_light():
-            self._engine.speak(line, mood="curious")
+            spoke = self._engine.speak(line, mood="curious")
         others = (
             f" Known faces: {', '.join(known_names)}. If they aren't one of those and the new person has "
             f"told you their name, you can casually ask where {known_names[0]} is - once, as small talk."
@@ -124,3 +124,8 @@ class PresenceChecker:
             f"their name, call remember_person with it (they need to be facing me) and greet them by name. "
             f"If they brush it off, drop it - never push.{others}]"
         )
+        # It's a question: let them answer without the wake word, like the
+        # other things Cozmo says on his own that want a reply (it used to
+        # ask "who are you?" and go straight back to waiting for one).
+        if spoke:
+            self._engine.request_listen()

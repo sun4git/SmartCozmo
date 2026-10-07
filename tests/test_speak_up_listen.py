@@ -46,6 +46,21 @@ engine.queue_announcement("[Sunny just answered: hi.]")
 engine.deliver_announcements()
 check("delivered inside a window: no request (window continues)", not engine.listen_request.is_set())
 
+# --- an announcement is said once, even when the model would say it again ------------------
+# Real hardware: a Sunny answer turn ran sync, got a second LLM step, and said
+# the answer again in other words. Now it ends at the first clean `say`.
+for mode in ("sync", "async", "skip"):
+    engine, robot, chat = fe.make(mode, [fe.SAY("Sunny says it's 26 degrees!"), fe.SAY("It's 26 degrees!")])
+    engine.queue_announcement("[Sunny just answered: 26 degrees.]")
+    engine.deliver_announcements()
+    spoken = [e for e in robot.events if e[0] == "speak"]
+    check(f"{mode}: announcement said once, no second LLM step ({len(spoken)} said, {chat.n} calls)",
+          len(spoken) == 1 and chat.n == 1)
+# Only the announcement path: an ordinary sync turn still gets its follow-up step.
+engine, robot, chat = fe.make("sync", [fe.SAY("Hi!")])
+engine.handle_turn("hello")
+check(f"ordinary sync turn: follow-up step still runs ({chat.n} calls)", chat.n == 2)
+
 # --- _wait_for_wake_word_or_tap() returns "spoke up" -----------------------------------
 stopped = []
 def fake_wake_word(device, model, threshold, stop_event):

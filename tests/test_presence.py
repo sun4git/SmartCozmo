@@ -45,7 +45,7 @@ class E:
 
     def __init__(self):
         self.turn_lock = threading.Lock()
-        self.spoken, self.notes = [], []
+        self.spoken, self.notes, self.listens = [], [], 0
 
     def speak(self, text, mood="neutral"):
         self.spoken.append(text)
@@ -53,6 +53,9 @@ class E:
 
     def add_note(self, text):
         self.notes.append(text)
+
+    def request_listen(self):
+        self.listens += 1
 
 
 class Chat:
@@ -92,6 +95,7 @@ r, e, p, c, s = make(True, "anna")
 check("due before first look", c.due())
 c.run()
 check("known: no speech", e.spoken == [] and e.notes == [])
+check("known: no listen window", e.listens == 0)
 check("known: name in prompt section", "anna" in p.prompt_section())
 check("head tilted to PRESENCE_HEAD_ANGLE_DEG then back to 0", r.heads == [35.0, 0.0])
 check("photo existed during look, deleted after", r.photo_existed and not os.path.exists(r.last_path))
@@ -110,6 +114,13 @@ check("stranger: one line spoken", len(e.spoken) == 1)
 check("stranger: note tells the model to use remember_person", "remember_person" in e.notes[0] and "anna" in e.notes[0])
 check("stranger: prompt says not the primary user", "don't recognise" in p.prompt_section())
 check("stranger: no second ask within cooldown", not c.due())
+check("stranger: asks who they are -> listens for the answer (no wake word)", e.listens == 1)
+
+# stranger, but the line couldn't be spoken: no window for an answer to nothing
+r, e, p, c, s = make(True, None)
+e.speak = lambda text, mood="neutral": False
+c.run()
+check("stranger, speech failed: no listen window", e.listens == 0)
 
 # nobody enrolled yet: still asks, without 'where is' small talk
 r, e, p, c, s = make(True, None, people=())
