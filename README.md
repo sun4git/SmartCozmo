@@ -84,13 +84,17 @@ See [Roadmap](docs/roadmap.md#roadmap--open-work) for what's still open.
   interfaces works
 - A Bluetooth mic/speaker (this project used a Bose SoundLink Flex)
 
+**Tested on:** Raspberry Pi 5, Ubuntu 24.04 LTS (aarch64), Python 3.12.
+
 **Accounts / services**
 - [Groq](https://console.groq.com) API key — used for STT (Whisper) and TTS
   (Orpheus) by default; `STT_PROVIDER`/`TTS_PROVIDER` can each independently
   switch to OpenAI instead (see [Configuration reference](docs/configuration.md#configuration-reference))
 - An [Ollama](https://ollama.com) endpoint reachable from the deployment
   machine, serving a model that supports **tool-calling** (this project uses
-  a cloud-hosted model proxied through a local Ollama instance)
+  a cloud-hosted model proxied through a local Ollama instance). Either pull
+  a local model, or sign in to Ollama (`ollama signin`) to use its cloud
+  models, such as the `-cloud` model `.env.example` starts with
 
 ---
 
@@ -99,14 +103,24 @@ See [Roadmap](docs/roadmap.md#roadmap--open-work) for what's still open.
 Full steps, with the gotchas, are in [Setup from scratch](docs/setup.md).
 
 ```bash
-git clone https://github.com/sun4git/SmartCozmo.git . && python3 -m venv cozmo-env
-source cozmo-env/bin/activate && pip install -r requirements.txt
+git clone https://github.com/sun4git/SmartCozmo.git && cd SmartCozmo
+python3 -m venv cozmo-env && source cozmo-env/bin/activate && pip install -r requirements.txt
+pycozmo_resources.py download         # Cozmo's animation/sound files, needed for his animations
 cp .env.example .env                  # then fill in GROQ_API_KEY, OLLAMA_BASE_URL, OLLAMA_MODEL
 ./run.sh --simulate --mode text       # sanity-check .env/Groq/Ollama without the robot
 ./run.sh --mode voice                 # push-to-talk on the real robot
-./run.sh --mode vad                   # hands-free (needs the wake-word setup)
+./run.sh --mode vad                   # hands-free (needs the wake-word setup, see below)
 ./dashboard.sh                        # Control Room web UI, http://localhost:30540
 ```
+
+- **Groq's voice needs a one-time click:** before TTS works, accept the
+  Orpheus model's terms once in the
+  [Groq playground](https://console.groq.com/playground?model=canopylabs%2Forpheus-v1-english).
+  Until then, speaking fails with `model_terms_required`.
+- **Hands-free mode** (`--mode vad`) needs two extra installs, `webrtcvad-wheels`
+  and openWakeWord (not a plain `pip install`). See
+  [Setup from scratch](docs/setup.md#1-python-environment-on-the-deployment-machine)
+  and [Wake word](docs/wake-word.md).
 
 After a `git pull`, run `python3 standalone/sync_env.py` to see which new
 `.env` settings you're missing.

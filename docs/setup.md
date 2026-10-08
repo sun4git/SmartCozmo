@@ -62,7 +62,10 @@ cp .env.example .env
 ```
 
 Edit `.env` and fill in at least `GROQ_API_KEY`. Adjust `OLLAMA_BASE_URL` /
-`OLLAMA_MODEL` to match your Ollama setup. See `.env.example` for what every
+`OLLAMA_MODEL` to match your Ollama setup. The model must support
+tool-calling. It can be a local model you've pulled, or one of Ollama's cloud
+models (like the `-cloud` model `.env.example` starts with), which need you
+to sign in first with `ollama signin`. See `.env.example` for what every
 variable does.
 
 **After a `git pull` that adds settings:** `.env` is gitignored (it holds
