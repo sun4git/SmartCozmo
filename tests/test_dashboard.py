@@ -141,11 +141,11 @@ check("tail: a newer run resets", reset and rid == "2026-10-06/09-00-00")
 
 # --- files --------------------------------------------------------------------
 dd = tmp / "data"
-(dd / "memory.md").write_text("## Suneel (primary user)\n- Likes cricket.\n", encoding="utf-8")
+(dd / "memory.md").write_text("## Alex (primary user)\n- Likes cricket.\n", encoding="utf-8")
 (dd / "battery.jsonl").write_text(
     json.dumps({"ts": "2026-10-05T10:00:00+00:00", "event": "run_start", "v": 3.9, "docked": True}) + "\n"
     + json.dumps({"ts": "2026-10-05T10:05:00+00:00", "event": "undocked", "v": 3.88}) + "\n", encoding="utf-8")
-check("memory view parses people and facts", data.memory_view(dd)["sections"] == [{"name": "Suneel (primary user)", "facts": ["Likes cricket."]}])
+check("memory view parses people and facts", data.memory_view(dd)["sections"] == [{"name": "Alex (primary user)", "facts": ["Likes cricket."]}])
 # live reading written by the app (battery_now.json)
 from datetime import timedelta  # noqa: E402
 stamp = lambda secs: (datetime.now().astimezone() - timedelta(seconds=secs)).isoformat(timespec="seconds")  # noqa: E731
@@ -173,7 +173,7 @@ try:
 except PermissionError:
     check("write refused for other files", True)
 data.write_memory(dd, "memory.md", "## A\n- new\n")
-check("memory write keeps a .bak", (dd / "memory.md.bak").read_text(encoding="utf-8").startswith("## Suneel"))
+check("memory write keeps a .bak", (dd / "memory.md.bak").read_text(encoding="utf-8").startswith("## Alex"))
 
 # --- runner (fake child) ------------------------------------------------------
 fake = tmp / "fake_app.py"
@@ -270,6 +270,10 @@ code, body = call("/api/file?path=../.env")
 check("http: path traversal blocked", code in (400, 403, 404))
 code, img = call("/api/file?path=history/2026-10-05/10-00-00-photo-01.png", raw=True)
 check("http: photo served from data", code == 200 and img.startswith(b"\x89PNG"))
+code, img = call("/static/img/cozmo-3.jpg", raw=True)
+check("http: bundled photo served from static/img", code == 200 and img.startswith(b"\xff\xd8"))
+check("http: the old /img/ route is gone", call("/img/2", raw=True)[0] == 404)
+check("http: static path traversal refused", call("/static/..%2F..%2F.env", raw=True)[0] == 404)
 code, body = call("/api/env", "POST", {"changes": {"FLAG": "true"}})
 check("http: env save", code == 200 and body["changed"] == ["FLAG"] and body["restart_needed"] is False)
 code, _ = call("/api/env", "POST", {"changes": {"bad name": "x"}})

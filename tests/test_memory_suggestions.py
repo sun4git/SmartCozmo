@@ -32,7 +32,7 @@ root = Path(tempfile.mkdtemp(prefix="smartcozmo_sugg_"))
 check("parse: plain JSON", parse_facts('{"facts": [{"fact": "Has a dog named Bruno.", "person": ""}]}')
       == [("Has a dog named Bruno.", "")])
 check("parse: code fences and chatter around it",
-      parse_facts('Sure!\n```json\n{"facts": [{"fact": "Likes tea.", "person": "Asha"}]}\n```') == [("Likes tea.", "Asha")])
+      parse_facts('Sure!\n```json\n{"facts": [{"fact": "Likes tea.", "person": "Maya"}]}\n```') == [("Likes tea.", "Maya")])
 check("parse: empty list -> nothing", parse_facts('{"facts": []}') == [])
 check("parse: garbage -> nothing", parse_facts("I think nothing here.") == [] and parse_facts("{oops") == [])
 check("parse: at most 3 per check", len(parse_facts(json.dumps({"facts": [{"fact": f"F{i}."} for i in range(6)]}))) == 3)
@@ -76,12 +76,12 @@ check("suggestion written under the Suggested heading with today's date",
       f"## {SUGGESTED}" in text and "- Has a dog named Bruno. [20" in text)
 check("nothing new said -> no second LLM call", ex.check() == [] and len(chat.prompts) == 1)
 
-conv.add_user("my sister Asha is visiting from Pune next month")
+conv.add_user("my sister Maya is visiting from Lisbon next month")
 chat.replies = [RuntimeError("provider down")]
 check("a failed check suggests nothing", ex.check() == [])
-chat.replies = ['{"facts": [{"fact": "Asha lives in Pune.", "person": "Asha"}]}']
-check("...and the next check retries those lines", ex.check() == ["Asha lives in Pune."] and "Asha is visiting" in chat.prompts[-1])
-check("a fact about someone else is tagged with their name", "- Asha lives in Pune. [about Asha, 20" in mem_path.read_text())
+chat.replies = ['{"facts": [{"fact": "Maya lives in Lisbon.", "person": "Maya"}]}']
+check("...and the next check retries those lines", ex.check() == ["Maya lives in Lisbon."] and "Maya is visiting" in chat.prompts[-1])
+check("a fact about someone else is tagged with their name", "- Maya lives in Lisbon. [about Maya, 20" in mem_path.read_text())
 
 # --- not known, not counted, not searched --------------------------------------
 section = memory.prompt_section()
@@ -93,7 +93,7 @@ check("forget_fact doesn't touch suggestions", not memory.forget("Bruno")[0])
 # --- what Cozmo is told ------------------------------------------------------------
 sp = memory.suggestions_prompt()
 check("waiting suggestions listed, newest first, with who they're about",
-      sp.index("Asha lives in Pune") < sp.index("Has a dog named Bruno") and "about Asha" in sp and "about the primary user" in sp)
+      sp.index("Maya lives in Lisbon") < sp.index("Has a dog named Bruno") and "about Maya" in sp and "about the primary user" in sp)
 check("told to ask only when it fits, one per conversation at most", "fits naturally" in sp and "At most one per conversation" in sp)
 full = build_system_prompt(memory.prompt_section(), suggestions_section=sp)
 check("system prompt marks them as NOT known facts", "NOT facts you know" in full and "Has a dog named Bruno" in full)
@@ -118,17 +118,17 @@ lines = mem_path.read_text()
 check("keep: moved into the primary user's section as a real fact",
       ok and "- Has a dog named Bruno." in lines and "Has a dog named Bruno. [" not in lines
       and "Has a dog named Bruno." in memory.prompt_section())
-ok, msg = memory.review("Pune", "discard")
+ok, msg = memory.review("Lisbon", "discard")
 lines = mem_path.read_text()
 check("discard: moved to Declined, out of Suggested",
-      ok and f"## {DECLINED}" in lines and lines.index(f"## {DECLINED}") < lines.index("Asha lives in Pune")
+      ok and f"## {DECLINED}" in lines and lines.index(f"## {DECLINED}") < lines.index("Maya lives in Lisbon")
       and not memory.suggestions())
 check("a declined fact is never suggested again",
-      memory.add_suggestions([("Asha lives in Pune.", "Asha"), ("asha lives in pune", "")], "2026-10-02") == [])
+      memory.add_suggestions([("Maya lives in Lisbon.", "Maya"), ("maya lives in lisbon", "")], "2026-10-02") == [])
 check("a known fact is never suggested again", memory.add_suggestions([("Has a dog named Bruno", "")], "2026-10-02") == [])
 sp = memory.suggestions_prompt()
 check("nothing waiting, but Cozmo is told how many are declined (not what) and how to clear them",
-      "1 declined suggestion" in sp and "Pune" not in sp and "clear_suggestions" in sp)
+      "1 declined suggestion" in sp and "Lisbon" not in sp and "clear_suggestions" in sp)
 
 # --- clear_suggestions ---------------------------------------------------------------
 memory.add_suggestions([("Plays the flute.", ""), ("Drinks chai daily.", "")], "2026-10-02")
@@ -141,7 +141,7 @@ check("clear declined: says how many, removes the section, keeps waiting ones an
       ok and "2 declined" in msg and f"## {DECLINED}" not in after and "Drinks chai daily." in after
       and "- Has a dog named Bruno." in after)
 check("a cleared declined fact may be suggested again",
-      memory.add_suggestions([("Asha lives in Pune.", "Asha")], "2026-10-03") == ["Asha lives in Pune."])
+      memory.add_suggestions([("Maya lives in Lisbon.", "Maya")], "2026-10-03") == ["Maya lives in Lisbon."])
 ok, msg = memory.clear_suggestions("waiting")
 check("clear waiting: both waiting ones gone, facts untouched",
       ok and "2 waiting" in msg and f"## {SUGGESTED}" not in mem_path.read_text() and "Plays chess." in mem_path.read_text())

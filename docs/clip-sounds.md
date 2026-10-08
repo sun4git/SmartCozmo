@@ -72,8 +72,9 @@ extraction runs on the PC because the decoder, `vgmstream-cli`, has a ready
 Windows build. It hasn't been tried on the Pi.
 
 Below, `<PI_HOST>` is your Pi's hostname or IP, the Pi's repo is
-`/home/suneel/sunwork/projects/cozmo/SmartCozmo`, and the PC's is
-`C:\SUNEEL\Workspaces\Cozmo\SmartCozmo`. Adjust both to your own.
+`/home/pi/SmartCozmo`, and the PC's is
+`C:\Projects\SmartCozmo`, with `pi` as the Pi's username. Adjust all three
+to your own.
 
 ### 1. On the Pi: list which sounds the clips use
 
@@ -95,13 +96,13 @@ From the PC's repo folder:
 ```powershell
 mkdir -Force data\sound
 cd data\sound
-scp -C "suneel@<PI_HOST>:/home/suneel/.pycozmo/assets/cozmo_resources/sound/*.wem" `
-       "suneel@<PI_HOST>:/home/suneel/.pycozmo/assets/cozmo_resources/sound/*.bnk" `
-       "suneel@<PI_HOST>:/home/suneel/.pycozmo/assets/cozmo_resources/sound/*.xml" `
-       "suneel@<PI_HOST>:/home/suneel/.pycozmo/assets/cozmo_resources/sound/*.txt" .
-scp -r -C "suneel@<PI_HOST>:/home/suneel/.pycozmo/assets/cozmo_resources/sound/English*" .
+scp -C "pi@<PI_HOST>:/home/pi/.pycozmo/assets/cozmo_resources/sound/*.wem" `
+       "pi@<PI_HOST>:/home/pi/.pycozmo/assets/cozmo_resources/sound/*.bnk" `
+       "pi@<PI_HOST>:/home/pi/.pycozmo/assets/cozmo_resources/sound/*.xml" `
+       "pi@<PI_HOST>:/home/pi/.pycozmo/assets/cozmo_resources/sound/*.txt" .
+scp -r -C "pi@<PI_HOST>:/home/pi/.pycozmo/assets/cozmo_resources/sound/English*" .
 cd ..\..
-scp "suneel@<PI_HOST>:/home/suneel/sunwork/projects/cozmo/SmartCozmo/data/clip_sounds.tsv" data\
+scp "pi@<PI_HOST>:/home/pi/SmartCozmo/data/clip_sounds.tsv" data\
 ```
 
 **Don't skip the second `scp`.** Most of the voice sounds and the main bank
@@ -150,8 +151,8 @@ mentioned above. Play a few files in `listen\` before going further.
 ### 5. Copy the converted sounds to the Pi
 
 ```powershell
-ssh suneel@<PI_HOST> "mkdir -p /home/suneel/sunwork/projects/cozmo/SmartCozmo/data/clip_sounds"
-scp -r data\clip_sounds\wav data\clip_sounds\manifest.json suneel@<PI_HOST>:/home/suneel/sunwork/projects/cozmo/SmartCozmo/data/clip_sounds/
+ssh pi@<PI_HOST> "mkdir -p /home/pi/SmartCozmo/data/clip_sounds"
+scp -r data\clip_sounds\wav data\clip_sounds\manifest.json pi@<PI_HOST>:/home/pi/SmartCozmo/data/clip_sounds/
 ```
 
 `listen\` isn't needed on the Pi.
@@ -224,7 +225,7 @@ tar czf ~/cozmo-assets-backup-$(date +%Y%m%d).tar.gz -C ~/.pycozmo assets
 sha256sum ~/cozmo-assets-backup-*.tar.gz > ~/cozmo-assets-backup.sha256
 ```
 
-Copy both files off the Pi (e.g. `scp suneel@<PI_HOST>:~/cozmo-assets-backup-* .`).
+Copy both files off the Pi (e.g. `scp pi@<PI_HOST>:~/cozmo-assets-backup-* .`).
 To restore: `tar xzf cozmo-assets-backup-....tar.gz -C ~/.pycozmo`.
 
 **On the PC:** one archive of the rest:

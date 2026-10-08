@@ -8,8 +8,6 @@ import hmac
 import json
 import logging
 import mimetypes
-import urllib.error
-import urllib.request
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -25,18 +23,6 @@ STATIC_DIR = Path(__file__).parent / "static"
 COOKIE = "cozmo_dash"
 MAX_BODY = 2_000_000
 _LOOPBACK = {"localhost", "127.0.0.1", "::1"}
-
-# Product photos shown in the header. Fetched once through the dashboard and
-# cached under data/dashboard/img, so the page works offline afterwards and
-# no third party sees the browser. Only these exact URLs are ever fetched.
-IMAGE_URLS = {
-    "1": "https://m.media-amazon.com/images/I/51fvoEpEUhL._AC_SX679_.jpg",
-    "2": "https://m.media-amazon.com/images/I/61Rr0XsbPNL._AC_SX679_.jpg",
-    "3": "https://m.media-amazon.com/images/I/51INNNLyxVL._AC_.jpg",
-    "4": "https://m.media-amazon.com/images/I/51XcAx9qdDL._AC_SX679_.jpg",
-    "5": "https://m.media-amazon.com/images/I/61GN+LgjdJL._AC_SX679_.jpg",
-    "6": "https://m.media-amazon.com/images/I/61Vnp5X50oL._AC_SX679_.jpg",
-}
 
 LOGIN_PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Cozmo Control Room</title>
@@ -63,26 +49,6 @@ class Dashboard:
         self.history_dir = self.data_dir / "history"
         self.env_path, self.example_path = Path(env_path), Path(example_path)
         self.runner, self.host, self.token = runner, host, token
-        self.image_dir = self.data_dir / "dashboard" / "img"
-
-    def fetch_image(self, key: str) -> Path | None:
-        url = IMAGE_URLS.get(key)
-        if url is None:
-            return None
-        cached = self.image_dir / f"{key}.jpg"
-        if cached.is_file():
-            return cached
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (cozmo-dashboard)"})
-            with urllib.request.urlopen(req, timeout=8) as resp:
-                body = resp.read(3_000_000)
-            if not body.startswith(b"\xff\xd8"):
-                return None
-            self.image_dir.mkdir(parents=True, exist_ok=True)
-            cached.write_bytes(body)
-            return cached
-        except (OSError, urllib.error.URLError):
-            return None
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -217,11 +183,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._static("index.html")
         if path.startswith("/static/"):
             return self._static(path[len("/static/"):])
-        if path.startswith("/img/"):
-            img = d.fetch_image(path[len("/img/"):])
-            if img is None:
-                return self._error(404, "Image unavailable")
-            return self._send(200, img.read_bytes(), "image/jpeg", {"Cache-Control": "max-age=604800"})
         if path == "/api/status":
             return self._json({"runner": d.runner.status(), "host": data.host_view(d.root, d.data_dir)})
         if path == "/api/config":

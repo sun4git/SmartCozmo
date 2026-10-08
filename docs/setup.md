@@ -6,7 +6,7 @@
 ## 1. Python environment (on the deployment machine)
 
 ```bash
-mkdir -p ~/sunwork/projects/cozmo && cd ~/sunwork/projects/cozmo
+mkdir -p ~/SmartCozmo && cd ~/SmartCozmo
 git clone https://github.com/sun4git/SmartCozmo.git .
 python3 -m venv cozmo-env
 source cozmo-env/bin/activate
@@ -155,7 +155,7 @@ change needed). Scoped to just the NetworkManager actions `wifi.py` actually
 uses:
 
 ```bash
-whoami   # confirm your username — replace "suneel" below if different
+whoami   # confirm your username — replace "pi" below if different
 sudo nano /etc/polkit-1/rules.d/50-nmcli-cozmo.rules
 ```
 
@@ -168,7 +168,7 @@ polkit.addRule(function(action, subject) {
         "org.freedesktop.NetworkManager.enable-disable-wifi",
         "org.freedesktop.NetworkManager.wifi.scan"
     ];
-    if (nmActions.indexOf(action.id) !== -1 && subject.user == "suneel") {
+    if (nmActions.indexOf(action.id) !== -1 && subject.user == "pi") {
         return polkit.Result.YES;
     }
 });
@@ -193,7 +193,7 @@ explicitly:
 sudo visudo -f /etc/sudoers.d/cozmo-nmcli
 ```
 ```
-suneel ALL=(root) NOPASSWD: /usr/bin/nmcli connection up *, /usr/bin/nmcli connection modify *, /usr/bin/nmcli dev wifi connect *, /usr/bin/nmcli dev wifi rescan
+pi ALL=(root) NOPASSWD: /usr/bin/nmcli connection up *, /usr/bin/nmcli connection modify *, /usr/bin/nmcli dev wifi connect *, /usr/bin/nmcli dev wifi rescan
 ```
 (`visudo -f` validates syntax and sets correct file permissions — don't edit
 that file with a plain editor.) Note: `wifi.py` calls plain `nmcli`, not

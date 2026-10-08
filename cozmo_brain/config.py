@@ -99,7 +99,7 @@ class Settings:
     openai_vision_model: str = field(default_factory=lambda: _env_str("OPENAI_VISION_MODEL", ""))
 
     # --- Ollama (tool-calling LLM) ---
-    ollama_base_url: str = field(default_factory=lambda: _env_str("OLLAMA_BASE_URL", "http://192.168.1.200:41438"))
+    ollama_base_url: str = field(default_factory=lambda: _env_str("OLLAMA_BASE_URL", "http://localhost:11434"))
     ollama_model: str = field(default_factory=lambda: _env_str("OLLAMA_MODEL", "gemma4:31b-cloud"))
     ollama_timeout_s: int = field(default_factory=lambda: _env_int("OLLAMA_TIMEOUT_S", 60))
 

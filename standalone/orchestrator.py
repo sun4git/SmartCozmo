@@ -33,7 +33,7 @@ load_dotenv()
 
 # ---- Config (all overridable via .env — see .env.example) ----
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]  # required, no default
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://192.168.1.200:41438")
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:31b-cloud")
 
 RECORD_SECONDS = int(os.environ.get("RECORD_SECONDS", "5"))

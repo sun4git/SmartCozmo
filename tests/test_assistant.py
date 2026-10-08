@@ -65,7 +65,7 @@ S = dataclasses.replace(
 client = AssistantClient(S)
 
 # --- request shape -------------------------------------------------------------
-reply = client.ask("  What's the weather in Pune?  ")
+reply = client.ask("  What's the weather in Lisbon?  ")
 path, headers, body = Fake.seen[-1]
 check("posts to <url>/v1/chat/completions (trailing slash handled)", path == "/v1/chat/completions")
 check("bearer token sent", headers.get("Authorization") == "Bearer t0ken")
@@ -73,7 +73,7 @@ check("model field = ASSISTANT_MODEL", body["model"] == "openclaw/main")
 check("user field = ASSISTANT_SESSION_USER (stable session)", body["user"] == "cozmo")
 check("only one message sent (not Cozmo's history)", len(body["messages"]) == 1 and body["messages"][0]["role"] == "user")
 content = body["messages"][0]["content"]
-check("request text sent, trimmed", content.endswith("\n\nWhat's the weather in Pune?"))
+check("request text sent, trimmed", content.endswith("\n\nWhat's the weather in Lisbon?"))
 check("context line asks for short spoken plain text", "read out loud" in content and "no markdown" in content)
 check("reply text returned", reply == "It's 24 degrees and sunny.")
 
@@ -134,7 +134,7 @@ check("no section when not given", "ask_assistant" not in build_system_prompt("x
 # --- engine: say + ask_assistant in one response goes back to the model --------------
 script = [
     fe.NS(content="", tool_calls=[fe.call("say", text="Let me ask Sunny!"),
-                                  fe.call("ask_assistant", request="What's the weather in Pune?")]),
+                                  fe.call("ask_assistant", request="What's the weather in Lisbon?")]),
     fe.NS(content="", tool_calls=[fe.call("say", text="Sunny says it's sunny!")]),
 ]
 chat = fe.Chat(script)

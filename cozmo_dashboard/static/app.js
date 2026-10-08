@@ -411,7 +411,8 @@ async function restartApp() {
 }
 
 // ---------------------------------------------------------------- page: control
-const PHOTOS = ["2", "1", "4", "5"];
+// The project author's own photos of their Cozmo, in static/img/.
+const PHOTOS = ["3", "1", "4", "2", "5"].map((n) => `/static/img/cozmo-${n}.jpg`);
 const MODE_INFO = {
   voice: ["Voice", "Push-to-talk: press Enter, then speak"],
   vad: ["Hands-free", "Wake word “hey Cozmo” or a tap on his body"],
@@ -425,8 +426,8 @@ function buildControl() {
   currentFaces.push(heroFace);
   baseFace === "asleep" ? heroFace.stopBlinking() : heroFace.startBlinking();
 
-  // photo carousel (cached through the dashboard; falls back to the face alone if offline)
-  const stage = h("div", { class: "photo-stage" }, PHOTOS.map((n, i) => h("img", { src: `/img/${n}`, alt: "Cozmo, limited edition", class: i === 0 ? "show" : "", onerror: (e) => e.target.remove() })));
+  // photo carousel
+  const stage = h("div", { class: "photo-stage" }, PHOTOS.map((src, i) => h("img", { src, alt: "Cozmo", class: i === 0 ? "show" : "", onerror: (e) => e.target.remove() })));
   let pi = 0;
   setInterval(() => {
     const imgs = [...stage.children];
@@ -576,7 +577,7 @@ async function buildHistory() {
   root.replaceChildren(h("div", { class: "hist-grid" },
     h("div", {}, h("div", { class: "row", style: { marginBottom: "10px", flexWrap: "nowrap" } }, q, h("button", { class: "btn", text: "Search", onclick: doSearch })), results, list),
     view));
-  view.append(h("div", { class: "empty" }, h("img", { src: "/img/6", alt: "", onerror: (e) => e.target.remove() }), h("div", { text: "Pick a conversation on the left." })));
+  view.append(h("div", { class: "empty" }, h("img", { src: "/static/img/cozmo-4.jpg", alt: "", onerror: (e) => e.target.remove() }), h("div", { text: "Pick a conversation on the left." })));
 
   async function doSearch() {
     const text = q.value.trim();
@@ -797,9 +798,7 @@ async function buildCozmo() {
     people.length ? h("div", { class: "people" }, people.map((p) => h("div", { class: "person" }, h("h3", { text: p.name }), h("ul", {}, p.facts.map((f) => h("li", { text: f })))))) : h("div", { class: "empty", text: mem && mem.exists ? "No facts yet." : "No memory file yet — Cozmo creates it on his first run." }),
     h("div", { class: "row", style: { marginTop: "12px" } }, h("button", { class: "btn small", text: "Edit memory.md", onclick: () => { files.path = ""; files.pendingOpen = "memory.md"; location.hash = "files"; } })));
 
-  const photos = h("div", { class: "card" }, h("h2", { text: "📸 The limited edition" }),
-    h("div", { class: "photos" }, [["3", false], ["2", false], ["4", false], ["5", false], ["6", true]].map(([n, cover]) => h("div", { class: "ph" }, h("img", { src: `/img/${n}`, alt: "Cozmo", class: cover ? "cover" : "", loading: "lazy", onerror: (e) => e.target.closest(".ph").remove() })))));
-  root.replaceChildren(h("div", { class: "grid" }, battCard, memCard, photos));
+  root.replaceChildren(h("div", { class: "grid" }, battCard, memCard));
 }
 
 function chart(points, low, crit) {

@@ -50,11 +50,11 @@ mv known_people data/ 2>/dev/null; rm -f look.png
 next turn, no restart:
 
 ```markdown
-## Suneel (primary user)
+## Alex (primary user)
 - Likes cricket.
 
-## Asha
-- Suneel's daughter. Loves the dance gesture.
+## Maya
+- Alex's daughter. Loves the dance gesture.
 ```
 
 One fact per `- ` line under a `## <name>` heading. Cozmo can't tell
@@ -83,7 +83,7 @@ Suggestions wait in `memory.md`, below your facts:
 ```markdown
 ## Suggested (not yet approved)
 - Has a dog named Bruno. [2026-10-01]
-- Lives in Pune. [about Asha, 2026-10-01]
+- Lives in Lisbon. [about Maya, 2026-10-01]
 
 ## Declined suggestions
 - Is learning the guitar. [2026-09-30]

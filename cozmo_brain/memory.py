@@ -2,11 +2,11 @@
 talks to, in data/memory.md - plain markdown, meant to be edited by hand
 too:
 
-    ## Suneel (primary user)
+    ## Alex (primary user)
     - Likes cricket.
 
-    ## Asha
-    - Suneel's daughter. Loves the dance gesture.
+    ## Maya
+    - Alex's daughter. Loves the dance gesture.
 
 One fact per "- " line, under a "## <name>" heading. The section whose
 heading says "primary user" is who Cozmo assumes he's talking to - he can't
@@ -24,7 +24,7 @@ things Cozmo knows:
 
     ## Suggested (not yet approved)
     - Has a dog named Bruno. [2026-10-01]
-    - Loves the dance gesture. [about Asha, 2026-10-01]
+    - Loves the dance gesture. [about Maya, 2026-10-01]
 
     ## Declined suggestions
     - Is tired today. [2026-09-30]
@@ -80,7 +80,7 @@ _STOPWORDS = frozenset(
 SUGGESTED = "Suggested (not yet approved)"
 DECLINED = "Declined suggestions"
 _SPECIAL_SECTIONS = {SUGGESTED.lower(), DECLINED.lower()}
-# A suggestion line: "<fact> [2026-10-01]" or "<fact> [about Asha, 2026-10-01]".
+# A suggestion line: "<fact> [2026-10-01]" or "<fact> [about Maya, 2026-10-01]".
 _SUGGESTION = re.compile(r"^(?P<fact>.*?)\s*\[(?:about (?P<person>[^,\]]+), )?(?P<date>\d{4}-\d{2}-\d{2})\]$")
 # Most waiting suggestions shown to the model at once (newest first).
 _MAX_SUGGESTIONS_SHOWN = 5
@@ -101,7 +101,7 @@ def _words(text: str) -> set[str]:
 
 
 def _person_name(heading: str) -> str:
-    """'Suneel (primary user)' -> 'suneel'."""
+    """'Alex (primary user)' -> 'alex'."""
     return re.sub(r"\(\s*primary user\s*\)", "", heading, flags=re.IGNORECASE).strip().lower()
 
 

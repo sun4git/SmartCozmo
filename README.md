@@ -5,6 +5,14 @@ it, an LLM decides what it should say/do, and [PyCozmo](https://github.com/zayfo
 executes it on the real robot. No phone/Cozmo app involved; everything runs
 headless from a Raspberry Pi.
 
+> **Unofficial hobby project.** Not affiliated with, endorsed by, or supported
+> by Digital Dream Labs or Anki. "Cozmo" is a trademark of its respective
+> owner. This repo contains no Anki/DDL animations or sounds; those are
+> downloaded or extracted locally on your own machine (see
+> [Real animation clips and Cozmo's own sounds](docs/clip-sounds.md)).
+> Developed and tested on one Raspberry Pi 5 and one Cozmo, so expect rough
+> edges on other setups.
+
 ```
 Bluetooth mic
      │  (arecord, 16kHz mono)
@@ -145,3 +153,18 @@ Everything that used to be in this one file now lives in [docs/](docs/), grouped
 | [Real bugs this uncovered](docs/hardware-findings.md) | Problems that only showed up on real hardware, and how they were fixed |
 | [Roadmap / open work](docs/roadmap.md) | What's done and what's still open |
 | [Physical sensors (roadmap item 4)](docs/roadmap-physical-sensors.md) | Tap, cliff, pickup, charger-safe wheels, idle fidgets: detail and hardware status |
+
+---
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+
+**Exception:** the wake-word model [models/hey_cozmo.onnx](models/hey_cozmo.onnx)
+is **not** Apache-licensed. Its training data has mixed licenses, so it is for
+non-commercial, personal use only (details in [NOTICE](NOTICE) and
+[Wake word](docs/wake-word.md#training-a-custom-wake-word)).
+
+## Contributions
+
+This is a personal project, and pull requests aren't being accepted for now.

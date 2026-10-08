@@ -1,0 +1,17 @@
+SmartCozmo
+Copyright 2026 Suneel (sun4git)
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE),
+except for the item listed below.
+
+Exception: models/hey_cozmo.onnx
+  This wake-word model is NOT covered by the Apache License. It was trained
+  with training/wake_word_training.ipynb (based on openWakeWord's training
+  notebook), whose training data has a mixture of licenses and usage
+  restrictions. It is provided for non-commercial, personal use only.
+  To use a wake word commercially, train your own model on data you have the
+  rights to.
+
+Unofficial project: not affiliated with, endorsed by, or supported by Digital
+Dream Labs or Anki. "Cozmo" is a trademark of its respective owner. This
+repository contains no Anki/DDL animations, sounds, or other assets.

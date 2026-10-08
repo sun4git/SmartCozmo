@@ -31,16 +31,16 @@ you> You're kind of full of yourself, you know that?
 **Registering and "recognizing" a person** (see
 [Recognizing people (experimental)](people-recognition.md#recognizing-people-experimental) above):
 ```
-you> Hi Cozmo, remember me as Suneel.
-[remember_person] OK: Got it - I'll remember this face as Suneel.
-[say] OK: Said (mood=excited): Suneel! Got it! I'll try not to forget you, human!
+you> Hi Cozmo, remember me as Alex.
+[remember_person] OK: Got it - I'll remember this face as Alex.
+[say] OK: Said (mood=excited): Alex! Got it! I'll try not to forget you, human!
 [gesture] OK: Performed gesture 'fist_pump': Raises its arm high in triumph, proud and smug.
 
 you> Do you know who I am?
 [who_is_this] OK: I took a look, but I don't recognize this person.
 [say] OK: Said (mood=curious): Hmm, let me look... just a second!
 [gesture] OK: Performed gesture 'peek': Curiously cranes its head up and tilts, like peeking at something.
-[say] OK: Said (mood=embarrassed): Uh oh! Everything is so blurry! Are you Suneel? I'm guessing yes!
+[say] OK: Said (mood=embarrassed): Uh oh! Everything is so blurry! Are you Alex? I'm guessing yes!
 [gesture] OK: Performed gesture 'shrug': A quick 'I dunno' shrug: lift up-down with a confused face.
 ```
 That "no match" on the very next turn, on the *same* stored photo, is the
@@ -108,7 +108,7 @@ above, just what they're expected to trigger:
 - *"Remind me in 10 minutes to stretch."* → `ask_assistant`; the reminder
   arrives as a message from the assistant (confirmed on WhatsApp with
   OpenClaw), even if Cozmo is off by then.
-- *"What's the weather in Pune?"* / *"Any big news today?"* → `ask_assistant`,
+- *"What's the weather in Lisbon?"* / *"Any big news today?"* → `ask_assistant`,
   "I've asked Sunny", and the answer ~30s later, spoken on its own.
 - *"Tell my friends group I'll be late."* → affects other people, so Cozmo
   should read it back and wait for a yes before asking.
