@@ -46,6 +46,8 @@ PyCozmo  (talks to Cozmo over its own Wi-Fi AP)
   files, with a `.env` editor. Standard-library only; see
   [The dashboard](docs/dashboard.md).
 
+![The Control Room dashboard: start/stop Cozmo in any mode, battery, host stats, latest conversation and log](docs/images/dashboard.jpg)
+
 See [Roadmap](docs/roadmap.md#roadmap--open-work) for what's still open.
 
 ---

@@ -7,6 +7,8 @@ the app as a subprocess, exactly as `run.sh` does, and reads the files the app
 already writes), so nothing about the app changes, and it needs nothing
 beyond Python's standard library.
 
+![The Control Room's Control page](../docs/images/dashboard.jpg)
+
 ```bash
 ./dashboard.sh                    # then open http://localhost:30540
 ./dashboard.sh --port 8080

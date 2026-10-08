@@ -7,6 +7,8 @@ A web page for running Cozmo without a terminal: start/stop him in any mode,
 live log and conversation, history, files, and a `.env` editor. Separate from
 `cozmo_brain/` and standard-library only.
 
+![The Control Room's Control page](images/dashboard.jpg)
+
 ```bash
 ./dashboard.sh                    # then open http://localhost:30540
 ```
