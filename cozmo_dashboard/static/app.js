@@ -340,7 +340,6 @@ function applyStatus() {
   const mode = running ? st.mode : S.prefs.mode;
   control.sendbox.hidden = !running;
   control.sendInput.placeholder = mode === "text" ? "Type to Cozmo and press Enter…" : mode === "voice" ? "Leave empty and press Send = press Enter to talk" : st.simulate ? "Leave empty and press Send = simulate a tap" : "Send a line to the app's terminal…";
-  control.sendBtn.textContent = mode === "text" ? "Send" : "Send ↵";
   const ext = st.external_pids.length;
   banner(ext ? `A cozmo_brain is already running outside the dashboard (pid ${ext && st.external_pids.join(", ")}). Stop it before starting one here — two copies would fight over the robot and the microphone.` : "", "bad");
   renderHost();
@@ -449,7 +448,7 @@ function buildControl() {
   control.chips = h("div", { class: "row" });
   control.caption = h("p", { text: "" });
   control.sendInput = h("input", { type: "text", maxlength: 2000, onkeydown: (e) => { if (e.key === "Enter") sendLine(); } });
-  control.sendBtn = h("button", { class: "btn primary", text: "Send", onclick: sendLine });
+  control.sendBtn = h("button", { class: "btn primary", text: "Send ↵", onclick: sendLine });
   control.sendbox = h("div", { class: "sendbox", hidden: true }, control.sendInput, control.sendBtn);
 
   const hero = h("div", { class: "card hero" },
