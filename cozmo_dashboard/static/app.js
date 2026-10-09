@@ -188,7 +188,12 @@ function renderEvent(ev) {
     }
     case "error": return h("div", { class: "err-line", text: `${ev.name} failed: ${ev.text}` });
     case "thought": return h("div", { class: "thought", text: "(not spoken) " + ev.text });
-    case "note": return h("div", { class: "note-line", text: `${time}  ${ev.text}` });
+    case "note":
+      // A note with images is the engine's "[Cozmo just looked around...]"
+      // caption for a `look` photo sent to the model: show the photo as
+      // Cozmo's, same as a vision-off "photo" record.
+      if (ev.images && ev.images.length) return renderEvent({ ...ev, kind: "photo" });
+      return h("div", { class: "note-line", text: `${time}  ${ev.text}` });
     case "session": return h("div", { class: "sys-line" }, `${time} ${ev.text}`);
     case "run": {
       const info = ev.info ? Object.entries(ev.info).map(([k, v]) => `${k}: ${v}`).join(" · ") : "";
