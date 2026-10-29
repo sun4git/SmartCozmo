@@ -346,3 +346,97 @@ Still open, roughly in priority order:
    `CHARGER_BREAK_STRETCH_*`). What came out of it: every reading off the
    dock is now logged, and `BATTERY_LOG_RETENTION_DAYS` (default 90) limits
    the file - deliberately not tied to `HISTORY_RETENTION_DAYS`.
+9. **Granular camera aiming - not started.** Today `look` takes no
+   arguments: it photographs whatever the camera already faces. Wanted: say
+   exactly which side to shoot ("look up", "look down a bit", "turn left and
+   take a picture", "look behind you") and have Cozmo aim first. Decided
+   shape: the aiming goes on `look` itself, so one call aims, takes the photo
+   and restores - not a chain of separate tool calls whose order the model
+   has to get right (the same lesson as `say` + `gesture`).
+   - `direction`: `front`, `left`, `right`, `back`, `up`, `down`; optional
+     `degrees` for "slightly" / "a lot" (defaults roughly 90 for left/right,
+     180 for back; the model turns "slightly right" into e.g. 20);
+     optional `stay` to keep the new heading instead of restoring.
+   - Reuses `set_head_angle_deg()` and `turn()`, so the cliff and
+     charger-safe-wheel guards apply; on the charger a body turn is refused
+     with a spoken reason rather than failing silently. Restores head and
+     heading afterwards by default.
+   - The head's real range is about -25 to +44.5 degrees (from the Cozmo SDK,
+     to confirm on the robot), so "straight up" is limited.
+   - Optional, later: a small head-only `set_head` tool for "look up" with no
+     photo (check first whether one already exists).
+10. **360-degree look-around to explore and process the surroundings - not
+    started, "if possible".** Idea: turn in steps (say every 45-60 degrees),
+    take a photo at each, then describe or reason over the set ("what's in
+    the room?", "where did I leave the cup?"). Depends on item 9. Open
+    questions: how reliable `turn()` is at repeated small angles (see the
+    360-degree calibration note above); one vision call per frame versus
+    stitching a contact sheet into one image (cost and rate limits on the
+    free tiers); and whether "video" means a real video stream (Cozmo's
+    camera is low resolution, so stills per heading are the realistic
+    version).
+11. **Custom OpenAI-compatible endpoint - built 2026-10-29, offline-tested
+    only; not yet tried against a real service.** Config, `custom_client.py`,
+    the factory, `.env.example` and
+    [the guide](providers.md#your-own-openai-compatible-endpoint-custom1custom3)
+    are done, and `tests/test_custom_endpoint.py` runs against a local fake
+    service. Still to do: try it with a real key, and check tool-calling and
+    vision on the model you pick. The original plan follows. Let `.env` point
+    chat at any OpenAI-compatible service (OpenRouter, NVIDIA's API,
+    Kilo Code, and similar) by setting the endpoint URL, API key and model
+    name, beside the existing `groq`/`openai`/`ollama` choices. The shared
+    `OpenAICompatibleChatClient` already takes `base_url`, key, model and
+    vision model, but the Groq and OpenAI subclasses hardcode their URLs, so
+    this is mostly new provider values plus settings. Decided shape: three
+    fixed numbered slots, `CUSTOM1_` to `CUSTOM3_`, each with `_NAME` (a
+    label for logs and for Cozmo to say), `_BASE_URL`, `_API_KEY`, `_MODEL`
+    and `_VISION_MODEL`; select with `CHAT_PROVIDER=custom1`, and
+    `VISION_PROVIDER` can point at a different slot. The limit is simply the
+    blocks in `.env.example` (a fourth is one more block and one constant).
+    Fixed slots, rather than free-form names, because the `.env` sync and the
+    dashboard Settings editor are driven by the keys in `.env.example`
+    (assumed, not yet checked, that they would not cope with dynamic key
+    names). To confirm per service before relying on it:
+    tool-calling support, vision (image) support for the chosen model, and
+    `GET /models` availability for the startup check. Must hold for ollama,
+    groq and openai alongside it, and new settings go into `.env.example`
+    and your real `.env`.
+
+## Suggested build order
+
+Ordered by dependency first, then by value against effort and risk. Each step
+is small enough to ship and try on the robot before starting the next.
+
+1. **Custom OpenAI-compatible endpoint (item 11).** Pure software, testable
+   offline, no hardware needed, and it removes the free-tier 429 pain that
+   comes up in nearly every live test. A good warm-up: a new provider value
+   on code that already exists.
+2. **Fix the PyCozmo u-law crash (item 3 note).** Small, and it is a crash
+   risk in normal speech found by code reading. Switch all speech to
+   `clip_sounds.packets_from_pcm` and test with a sample at the limit.
+3. **Granular camera aiming (item 9) and the photo cue (item 3), together.**
+   Both change the same capture path: aim, `eyes_on` cue, `squint` during the
+   2 s warm-up, capture, restore. One hardware session covers both, and it is
+   the foundation for step 4. While on the robot, also check the pending
+   hardware items: `FINAL_LLM_CALL=async` and `SPEAK_UP_LISTEN_S`.
+4. **360-degree look-around (item 10).** Needs step 3 working and `turn()`
+   trusted at repeated small angles (re-run `--mode calibrate` first). Start
+   with stills every 60 degrees and a contact sheet or a few vision calls,
+   then decide whether more is worth it.
+5. **Remaining clip hookups (item 3).** Idle clips in the fidgets, greeting
+   on a recognised face, attention clip on a background answer, then
+   per-clip "wheels allowed". Cosmetic and independent; do after the
+   functional items.
+6. **Spoken reminders (item 7).** Builds on the speak-up and announcement
+   machinery already there.
+7. **Conversation trimming and end-of-run summary (item 1).** Worth doing
+   once long sessions get common, which the 360-degree and photo features
+   will accelerate (images cost context).
+8. **Systemd service (item 2).** Last of the core items: it is only useful
+   once the app is stable enough to leave running unattended.
+9. **Long clip tier and the rest of the clip list (item 3).** Lowest value;
+   `sing` also needs the music bank.
+
+Not in the order because they depend on the user's data, not on building: VAD
+and STT tuning from real logs, the `ASSISTANT_TOKEN` rotation, and the GitHub
+settings (disable PRs, push protection).

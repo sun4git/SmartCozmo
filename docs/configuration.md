@@ -12,8 +12,9 @@ annotated list (it's the source of truth). The essentials:
 | `OPENAI_API_KEY` | Required if `STT_PROVIDER` or `TTS_PROVIDER` is `openai`. |
 | `WITAI_ACCESS_TOKEN` | Required if `STT_PROVIDER` is `witai`. Free, no billing — Wit.ai (Meta) has no TTS product, so this is STT-only. |
 | `STT_PROVIDER` / `TTS_PROVIDER` | `groq` (default), `openai`, or `local`, set independently — which provider does STT vs. TTS; they don't have to match. `STT_PROVIDER` can also be `witai`; `TTS_PROVIDER` can also be `edge`. |
-| `CHAT_PROVIDER` | Which provider does chat/tool-calling: `ollama` (default), `groq`, or `openai`. |
-| `VISION_PROVIDER` | Which provider handles image-bearing turns (`look`/`who_is_this`) — independent of `CHAT_PROVIDER`, e.g. `ollama` for chat + `groq` for vision. Empty = same as `CHAT_PROVIDER`. |
+| `CHAT_PROVIDER` | Which provider does chat/tool-calling: `ollama` (default), `groq`, `openai`, or `custom1`/`custom2`/`custom3` (your own OpenAI-compatible endpoint, see the `CUSTOMn_*` row below). |
+| `VISION_PROVIDER` | Which provider handles image-bearing turns (`look`/`who_is_this`) — independent of `CHAT_PROVIDER`, e.g. `ollama` for chat + `groq` for vision. Empty = same as `CHAT_PROVIDER`. Accepts the same values, including `custom1`–`custom3`. |
+| `CUSTOM1_*` / `CUSTOM2_*` / `CUSTOM3_*` | Three slots for any OpenAI-compatible chat service (OpenRouter, NVIDIA, Kilo Code, a local server…): `_NAME` (a label for the logs), `_BASE_URL` (the part before `/chat/completions`), `_API_KEY`, `_MODEL`, `_VISION_MODEL` (empty = use `_MODEL`). `_BASE_URL`, `_API_KEY` and `_MODEL` are required for a slot you select. See [Your own OpenAI-compatible endpoint](providers.md#your-own-openai-compatible-endpoint-custom1custom3). |
 | `CHAT_TIMEOUT_S` | Request timeout for `CHAT_PROVIDER`=`groq`/`openai` chat calls (Ollama has its own `OLLAMA_TIMEOUT_S`). |
 | `GROQ_CHAT_MODEL` / `OPENAI_CHAT_MODEL` | Model name for `CHAT_PROVIDER`=`groq`/`openai` — must support tool-calling. |
 | `OLLAMA_VISION_MODEL` / `GROQ_VISION_MODEL` / `OPENAI_VISION_MODEL` | Model used instead, per chat provider, on any turn with an image attached (`look`/`who_is_this`). Empty = fall back to that provider's regular chat model. |

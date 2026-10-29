@@ -1,7 +1,9 @@
-from cozmo_brain.config import Settings
+from cozmo_brain.config import CUSTOM_SLOTS, Settings
 from cozmo_brain.llm.chat_client import ChatClient
 from cozmo_brain.llm.ollama_client import ChatResponse, OllamaClient, ToolCall
 from cozmo_brain.llm.speech_client import SpeechClient
+
+_CUSTOM_PROVIDERS = tuple(f"custom{n}" for n in range(1, CUSTOM_SLOTS + 1))
 
 
 def _build_speech_provider(provider: str, settings: Settings) -> SpeechClient:
@@ -77,7 +79,15 @@ def _build_chat_provider(provider: str, settings: Settings) -> ChatClient:
 
         return OpenAIChatClient(settings)
 
-    raise ValueError(f"Unknown provider '{provider}'. Use 'ollama', 'groq', or 'openai'.")
+    if provider in _CUSTOM_PROVIDERS:
+        from cozmo_brain.llm.custom_client import CustomChatClient
+
+        return CustomChatClient(settings, provider)
+
+    raise ValueError(
+        f"Unknown provider '{provider}'. Use 'ollama', 'groq', 'openai', or "
+        f"'custom1' to 'custom{CUSTOM_SLOTS}'."
+    )
 
 
 class _ChatRouter:

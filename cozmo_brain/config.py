@@ -39,6 +39,34 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
+CUSTOM_SLOTS = 3
+
+
+@dataclass(frozen=True)
+class CustomEndpoint:
+    """One CUSTOMn_* slot: any OpenAI-compatible chat-completions service
+    (OpenRouter, NVIDIA, Kilo Code, a local server...). Fixed numbered slots,
+    not free-form names, because standalone/sync_env.py and the dashboard
+    Settings editor are driven by the keys in .env.example."""
+
+    name: str = ""
+    base_url: str = ""
+    api_key: str = ""
+    model: str = ""
+    vision_model: str = ""
+
+
+def _custom_endpoint(slot: int) -> CustomEndpoint:
+    prefix = f"CUSTOM{slot}_"
+    return CustomEndpoint(
+        name=_env_str(prefix + "NAME", "").strip() or f"custom{slot}",
+        base_url=_env_str(prefix + "BASE_URL", "").strip(),
+        api_key=_env_str(prefix + "API_KEY", "").strip(),
+        model=_env_str(prefix + "MODEL", "").strip(),
+        vision_model=_env_str(prefix + "VISION_MODEL", "").strip(),
+    )
+
+
 @dataclass
 class Settings:
     # --- Secrets ---
@@ -53,7 +81,8 @@ class Settings:
     # independently configurable, so e.g. STT_PROVIDER=groq + TTS_PROVIDER=openai
     # is valid. "groq" (default), "openai", "local" (fully offline, no API
     # key — see the Local STT/TTS section below), or "witai" (STT only, see
-    # above) for STT/TTS; "ollama" (default), "groq", or "openai" for chat.
+    # above) for STT/TTS; "ollama" (default), "groq", "openai", or
+    # "custom1"/"custom2"/"custom3" (see the CUSTOMn_* slots below) for chat.
     # See cozmo_brain/llm/__init__.py's create_speech_client() / create_chat_client().
     stt_provider: str = field(default_factory=lambda: _env_str("STT_PROVIDER", "groq"))
     tts_provider: str = field(default_factory=lambda: _env_str("TTS_PROVIDER", "groq"))
@@ -97,6 +126,13 @@ class Settings:
     ollama_vision_model: str = field(default_factory=lambda: _env_str("OLLAMA_VISION_MODEL", ""))
     groq_vision_model: str = field(default_factory=lambda: _env_str("GROQ_VISION_MODEL", "qwen/qwen3.8-27b"))
     openai_vision_model: str = field(default_factory=lambda: _env_str("OPENAI_VISION_MODEL", ""))
+
+    # --- Custom OpenAI-compatible chat endpoints (CHAT_PROVIDER / VISION_PROVIDER = custom1..3) ---
+    # Each slot is read from CUSTOMn_NAME / _BASE_URL / _API_KEY / _MODEL /
+    # _VISION_MODEL. Use custom_endpoint() to get one validated for use.
+    custom1: CustomEndpoint = field(default_factory=lambda: _custom_endpoint(1))
+    custom2: CustomEndpoint = field(default_factory=lambda: _custom_endpoint(2))
+    custom3: CustomEndpoint = field(default_factory=lambda: _custom_endpoint(3))
 
     # --- Ollama (tool-calling LLM) ---
     ollama_base_url: str = field(default_factory=lambda: _env_str("OLLAMA_BASE_URL", "http://localhost:11434"))
@@ -629,6 +665,25 @@ class Settings:
                 "GROQ_API_KEY is not set. Copy .env.example to .env and fill it in."
             )
         return self.groq_api_key
+
+    def custom_endpoint(self, provider: str) -> CustomEndpoint:
+        """The slot for a provider name like "custom2", checked to be filled in.
+        Raises RuntimeError naming exactly which CUSTOMn_* settings are empty."""
+        slot = provider.lower().removeprefix("custom")
+        if not slot.isdigit() or not 1 <= int(slot) <= CUSTOM_SLOTS:
+            raise ValueError(f"Unknown custom endpoint '{provider}'. Use custom1 to custom{CUSTOM_SLOTS}.")
+        endpoint = getattr(self, f"custom{int(slot)}")
+        missing = [
+            f"CUSTOM{slot}_{key}"
+            for key, value in (("BASE_URL", endpoint.base_url), ("API_KEY", endpoint.api_key), ("MODEL", endpoint.model))
+            if not value
+        ]
+        if missing:
+            raise RuntimeError(
+                f"{', '.join(missing)} not set (needed because CHAT_PROVIDER or VISION_PROVIDER "
+                f"is '{provider}'). Add them to .env."
+            )
+        return endpoint
 
     def require_openai_key(self) -> str:
         if not self.openai_api_key:

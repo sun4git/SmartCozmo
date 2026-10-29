@@ -229,6 +229,48 @@ provider stays selected until that message ages out of
 handles plain text/tool-calling turns fine, just not the cheapest choice
 for those turns.
 
+### Your own OpenAI-compatible endpoint (`custom1`–`custom3`)
+
+Any service that speaks the OpenAI chat-completions API (OpenRouter,
+NVIDIA's API, Kilo Code, a local server) can be the brain without new code.
+There are three fixed slots in `.env`; fill one in and select it:
+
+```env
+CUSTOM1_NAME=OpenRouter
+CUSTOM1_BASE_URL=https://openrouter.ai/api/v1
+CUSTOM1_API_KEY=<API_KEY>
+CUSTOM1_MODEL=<model name as the service lists it>
+CUSTOM1_VISION_MODEL=
+CHAT_PROVIDER=custom1
+```
+
+- `CUSTOMn_BASE_URL` is the part before `/chat/completions` (pasting the full
+  `.../chat/completions` URL works too). Use `https://`: with plain `http://`
+  to a non-local host the key travels unencrypted, and a warning is logged.
+  `http://` to `localhost` or a LAN address is fine.
+- `CUSTOMn_BASE_URL`, `_API_KEY` and `_MODEL` are required for a slot you
+  select; a missing one stops startup with an error naming exactly which.
+  `_VISION_MODEL` empty means image turns use `_MODEL` too. `_NAME` is only a
+  label in the logs.
+- Chat and vision can use different services: `CHAT_PROVIDER=custom1` with
+  `VISION_PROVIDER=custom2` (or `groq`, `openai`, `ollama`) works through the
+  same router as the built-in providers.
+- **Check per service and per model** that it supports tool-calling (the app
+  needs it) and, for `look`/`who_is_this`, image input. Nothing here can know
+  that for you; a model without tool-calling will answer in plain text and
+  Cozmo will never act.
+- Why three fixed slots and not free-form names: `standalone/sync_env.py` and
+  the dashboard's Settings editor work from the keys in `.env.example`, so
+  dynamic names would show up as unknown settings. A fourth slot is one more
+  block in `.env.example` plus `CUSTOM_SLOTS` in `config.py` and a field in
+  `Settings`.
+
+`tests/test_custom_endpoint.py` checks all of this against a local fake
+service (URL, key header, chat-vs-vision model, tool calls, routing between
+two slots, the config errors). **Not yet run against a real OpenRouter/NVIDIA/
+Kilo Code account** - the fake can't tell you a given model's tool-calling or
+vision quality.
+
 **Not yet verified against a real Groq/OpenAI account** — both the
 tool-calling and vision message translation were unit-checked directly
 (round-tripped sample exchanges through `_to_wire_messages()`, confirmed
